@@ -46,6 +46,11 @@ def height_check_pure_python(request: HeightCheckPurePythonRequest) -> Dict[str,
         logger.info(f"Has setback_volumes: {'setback_volumes' in result}")
         if 'setback_volumes' in result:
             logger.info(f"setback_volumes count: {len(result['setback_volumes'])}")
+        if "setback_volumes" not in result:
+            if "setbackVolumes" in result:
+                result["setback_volumes"] = result["setbackVolumes"]
+            else:
+                result["setback_volumes"] = []
         return result
     except ValueError as exc:
         logger.warning(

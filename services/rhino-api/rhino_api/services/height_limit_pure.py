@@ -326,6 +326,8 @@ def check_height_limit_pure_python(
         raise ValueError(f"No setbacks found in layer: {setback_layer}")
 
     logger.info(f"Loaded {len(building_objects)} buildings and {len(setback_objects)} setbacks")
+    logger.info(f"[DEBUG] 退线图层名称: '{setback_layer}'")
+    logger.info(f"[DEBUG] 退线对象数量: {len(setback_objects)}")
 
     # 解析每个退线的限高信息
     setback_info = []
@@ -333,6 +335,7 @@ def check_height_limit_pure_python(
     invalid_geometry_count = 0
 
     for idx, (obj, geometry) in enumerate(setback_objects):
+        logger.info(f"[DEBUG] 处理退线对象 {idx}, 类型: {type(geometry).__name__}")
         # 检查几何体类型
         if not isinstance(geometry, rhino3dm.Curve):
             logger.warning(f"Setback object {idx} is not a curve (type: {type(geometry).__name__}), skipping")
@@ -342,6 +345,7 @@ def check_height_limit_pure_python(
         # 读取UserText中的限高和地块名称
         height_limit_str = _get_user_text(obj, "限高")
         plot_name = _get_user_text(obj, "地块名称") or f"地块{len(setback_info) + 1}"
+        logger.info(f"[DEBUG] 退线对象 {idx}: 限高='{height_limit_str}', 地块名称='{plot_name}'")
         curve_points = _curve_to_points(geometry)
 
         # 必须设置UserText，不使用默认值
@@ -363,6 +367,9 @@ def check_height_limit_pure_python(
             "points": curve_points,
             "has_usertext": True,
         })
+        logger.info(f"[DEBUG] 成功添加退线信息: {plot_name}, 限高: {height_limit}, 点数: {len(curve_points)}")
+
+    logger.info(f"[DEBUG] 有效退线数量: {len(setback_info)}, 缺少UserText: {missing_usertext_count}, 无效几何: {invalid_geometry_count}")
 
     if not setback_info:
         error_details = []
@@ -455,21 +462,26 @@ def check_height_limit_pure_python(
             plot_exceeded[result["plot_name"]] = True
 
     setback_volumes = []
+    logger.info(f"[DEBUG] 开始构建setback_volumes，setback_info数量: {len(setback_info)}")
     for plot in setback_info:
         points = plot.get("points") or []
-        setback_volumes.append({
+        volume = {
             "plot_name": plot["name"],
             "height_limit": plot["height_limit"],
             "is_exceeded": plot_exceeded.get(plot["name"], False),
             "points": _points_to_serializable(points),
-        })
+        }
+        setback_volumes.append(volume)
+        logger.info(f"[DEBUG] 添加setback_volume: {plot['name']}, 超限: {volume['is_exceeded']}, 点数: {len(points)}")
+
+    logger.info(f"[DEBUG] setback_volumes构建完成，总数: {len(setback_volumes)}")
 
     # 构建返回结果
     warnings = []
     if unmatched_buildings:
         warnings.append(f"{len(unmatched_buildings)} buildings are not within any setback boundary")
 
-    return {
+    result_dict = {
         "status": "ok",
         "method": "pure_python",
         "summary": {
@@ -484,3 +496,9 @@ def check_height_limit_pure_python(
         "unmatched_buildings": unmatched_buildings,
         "warnings": warnings,
     }
+
+    logger.info(f"[DEBUG] 返回结果的keys: {list(result_dict.keys())}")
+    logger.info(f"[DEBUG] setback_volumes在结果中: {'setback_volumes' in result_dict}")
+    logger.info(f"[DEBUG] setback_volumes长度: {len(result_dict['setback_volumes'])}")
+
+    return result_dict

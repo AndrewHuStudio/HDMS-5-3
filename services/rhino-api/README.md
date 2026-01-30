@@ -35,3 +35,8 @@
   - `building_layer`: 建筑体块图层名（默认 `模型_建筑体块`）
   - `setback_layer`: 建筑退线图层名（默认 `限制_建筑退线`）
   - `default_height_limit`: 默认限高（可选）
+
+## 开发规范：接口隔离
+- 视线通廊只改 `/sight-corridor/*`，限高只改 `/height-check/*`。
+- 不要共用返回结构或复用同一个结果对象。
+- 公共工具函数可以复用，但不要把视线通廊逻辑写进 `height_limit_pure.py`。
