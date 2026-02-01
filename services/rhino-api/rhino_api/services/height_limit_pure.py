@@ -96,6 +96,47 @@ def _get_user_text(obj: rhino3dm.File3dmObject, key: str) -> Optional[str]:
         return None
 
 
+def _get_object_name(obj: rhino3dm.File3dmObject) -> Optional[str]:
+    attributes = getattr(obj, "Attributes", None)
+    if not attributes:
+        return None
+
+    for attr_name in ("Name", "name", "ObjectName", "objectName"):
+        value = getattr(attributes, attr_name, None)
+        if callable(value):
+            try:
+                value = value()
+            except Exception:
+                value = None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return None
+
+
+def _build_layer_index_map(file3dm: rhino3dm.File3dm) -> Dict[int, str]:
+    layer_by_index: Dict[int, str] = {}
+    for i, layer in enumerate(file3dm.Layers):
+        layer_index = getattr(layer, "Index", None) or getattr(layer, "index", None) or i
+
+        layer_full_path = None
+        for attr in ("FullPath", "fullPath", "Name", "name"):
+            value = getattr(layer, attr, None)
+            if callable(value):
+                try:
+                    value = value()
+                except TypeError:
+                    value = None
+            if isinstance(value, str) and value.strip():
+                layer_full_path = value
+                break
+
+        if layer_full_path:
+            layer_by_index[layer_index] = layer_full_path
+
+    return layer_by_index
+
+
 def _get_bounding_box(geometry: rhino3dm.CommonObject) -> Optional[rhino3dm.BoundingBox]:
     """
     获取几何体的BoundingBox
@@ -296,6 +337,7 @@ def check_height_limit_pure_python(
     model_path: Path,
     building_layer: str = "模型_建筑体块",
     setback_layer: str = "限制_建筑退线",
+    plot_layer: str = "场景_地块",
     default_height_limit: float = 100.0,
 ) -> Dict:
     """
@@ -305,6 +347,7 @@ def check_height_limit_pure_python(
         model_path: 3dm模型文件路径
         building_layer: 建筑体块图层名称
         setback_layer: 建筑退线图层名称
+        plot_layer: 地块图层名称（限高信息来源）
         default_height_limit: 默认限高值（米），当对象没有UserText时使用
 
     Returns:
@@ -314,6 +357,8 @@ def check_height_limit_pure_python(
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
         raise ValueError(f"Failed to read 3dm file: {model_path}")
+
+    layer_index_map = _build_layer_index_map(file3dm)
 
     # 加载建筑体块
     building_objects = _load_objects_from_layer(file3dm, building_layer)
@@ -325,14 +370,58 @@ def check_height_limit_pure_python(
     if not setback_objects:
         raise ValueError(f"No setbacks found in layer: {setback_layer}")
 
-    logger.info(f"Loaded {len(building_objects)} buildings and {len(setback_objects)} setbacks")
+    # 加载地块（限高信息来源）
+    plot_objects = _load_objects_from_layer(file3dm, plot_layer)
+    if not plot_objects:
+        raise ValueError(f"No plots found in layer: {plot_layer}")
+
+    logger.info(
+        "Loaded %s buildings, %s setbacks, %s plots",
+        len(building_objects),
+        len(setback_objects),
+        len(plot_objects),
+    )
     logger.info(f"[DEBUG] 退线图层名称: '{setback_layer}'")
     logger.info(f"[DEBUG] 退线对象数量: {len(setback_objects)}")
+    logger.info(f"[DEBUG] 地块图层名称: '{plot_layer}'")
+    logger.info(f"[DEBUG] 地块对象数量: {len(plot_objects)}")
 
-    # 解析每个退线的限高信息
+    # 解析地块限高信息
+    plot_candidates = []
+    missing_height_plots = set()
+    invalid_plot_count = 0
+
+    for idx, (obj, geometry) in enumerate(plot_objects):
+        bbox = _get_bounding_box(geometry)
+        if bbox is None:
+            invalid_plot_count += 1
+            continue
+
+        plot_name = _get_user_text(obj, "地块名称") or f"地块{idx + 1}"
+        height_limit_str = _get_user_text(obj, "限高值") or _get_user_text(obj, "限高")
+        height_limit = None
+        if height_limit_str:
+            try:
+                height_limit = float(height_limit_str)
+            except ValueError:
+                height_limit = None
+
+        if height_limit is None:
+            missing_height_plots.add(plot_name)
+
+        plot_candidates.append({
+            "name": plot_name,
+            "height_limit": height_limit,
+            "center": bbox.Center,
+        })
+
+    if not plot_candidates:
+        raise ValueError(f"No valid plot objects found in layer: {plot_layer}")
+
+    # 解析每个退线的限高信息（来自地块）
     setback_info = []
-    missing_usertext_count = 0
     invalid_geometry_count = 0
+    unmatched_setbacks = []
 
     for idx, (obj, geometry) in enumerate(setback_objects):
         logger.info(f"[DEBUG] 处理退线对象 {idx}, 类型: {type(geometry).__name__}")
@@ -342,59 +431,73 @@ def check_height_limit_pure_python(
             invalid_geometry_count += 1
             continue
 
-        # 读取UserText中的限高和地块名称
-        height_limit_str = _get_user_text(obj, "限高")
-        plot_name = _get_user_text(obj, "地块名称") or f"地块{len(setback_info) + 1}"
-        logger.info(f"[DEBUG] 退线对象 {idx}: 限高='{height_limit_str}', 地块名称='{plot_name}'")
+        # 使用地块中心点匹配退线，获取限高信息
+        matched_plot = None
+        for candidate in plot_candidates:
+            if _point_in_curve_2d(candidate["center"], geometry):
+                matched_plot = candidate
+                break
+
+        plot_name = matched_plot["name"] if matched_plot else f"退线{idx + 1}"
+        height_limit = matched_plot["height_limit"] if matched_plot else None
+        if matched_plot is None:
+            unmatched_setbacks.append(plot_name)
+        elif height_limit is None:
+            missing_height_plots.add(plot_name)
+
+        logger.info(f"[DEBUG] 退线对象 {idx}: 地块名称='{plot_name}', 限高值='{height_limit}'")
         curve_points = _curve_to_points(geometry)
-
-        # 必须设置UserText，不使用默认值
-        if not height_limit_str:
-            logger.warning(f"Setback object {idx} missing '限高' UserText, skipping")
-            missing_usertext_count += 1
-            continue
-
-        try:
-            height_limit = float(height_limit_str)
-        except ValueError:
-            logger.warning(f"Invalid height limit value: {height_limit_str}, skipping")
-            continue
 
         setback_info.append({
             "name": plot_name,
             "height_limit": height_limit,
             "curve": geometry,
             "points": curve_points,
-            "has_usertext": True,
+            "has_usertext": height_limit is not None,
         })
         logger.info(f"[DEBUG] 成功添加退线信息: {plot_name}, 限高: {height_limit}, 点数: {len(curve_points)}")
 
-    logger.info(f"[DEBUG] 有效退线数量: {len(setback_info)}, 缺少UserText: {missing_usertext_count}, 无效几何: {invalid_geometry_count}")
+    logger.info(
+        "[DEBUG] 有效退线数量: %s, 缺少限高: %s, 无效几何: %s",
+        len(setback_info),
+        len(missing_height_plots),
+        invalid_geometry_count,
+    )
 
     if not setback_info:
         error_details = []
         error_details.append(f"在图层 '{setback_layer}' 中找到 {len(setback_objects)} 个对象")
-        if missing_usertext_count > 0:
-            error_details.append(f"其中 {missing_usertext_count} 个对象缺少 '限高' UserText")
+        if missing_height_plots:
+            error_details.append(f"其中 {len(missing_height_plots)} 个对象缺少限高信息")
         if invalid_geometry_count > 0:
             error_details.append(f"其中 {invalid_geometry_count} 个对象不是曲线类型")
-        error_details.append("\n请在Rhino中为退线对象设置UserText:")
-        error_details.append("1. 选中退线对象（不是图层）")
+        error_details.append("\n请在Rhino中为地块对象设置UserText:")
+        error_details.append("1. 选中场景_地块对象（不是图层）")
         error_details.append("2. 按F3打开属性面板")
         error_details.append("3. 在'属性用户文本'区域添加:")
-        error_details.append("   键: 限高, 值: 100 (数值)")
+        error_details.append("   键: 限高值 (或 限高), 值: 100 (数值)")
         error_details.append("   键: 地块名称, 值: 地块1 (可选)")
         error_details.append("4. 保存模型 (Ctrl+S)")
         error_details.append("5. 重新上传模型到系统")
         raise ValueError("\n".join(error_details))
 
-    logger.info(f"Found {len(setback_info)} valid setbacks with height limits")
+    logger.info(f"Found {len(setback_info)} valid setbacks with plot height limits")
 
     # 检测每栋建筑
     results = []
     unmatched_buildings = []
 
     for building_idx, (obj, geometry) in enumerate(building_objects):
+        attributes = getattr(obj, "Attributes", None)
+        layer_index = getattr(attributes, "LayerIndex", None) if attributes else None
+        layer_name = layer_index_map.get(layer_index)
+        object_name = _get_object_name(obj)
+        building_name = (
+            _get_user_text(obj, "建筑名称")
+            or object_name
+            or layer_name
+            or f"建筑{building_idx + 1}"
+        )
         # 获取建筑的BoundingBox
         bbox = _get_bounding_box(geometry)
         if bbox is None:
@@ -420,12 +523,19 @@ def check_height_limit_pure_python(
             })
             continue
 
+        if matched_plot["height_limit"] is None:
+            missing_height_plots.add(matched_plot["name"])
+            continue
+
         # 判断是否超限
         is_exceeded = max_height > matched_plot["height_limit"]
         exceed_amount = max_height - matched_plot["height_limit"] if is_exceeded else 0
 
         results.append({
             "building_index": building_idx,
+            "building_name": building_name,
+            "layer_index": layer_index,
+            "layer_name": layer_name,
             "plot_name": matched_plot["name"],
             "height_limit": matched_plot["height_limit"],
             "actual_height": max_height,
@@ -464,6 +574,8 @@ def check_height_limit_pure_python(
     setback_volumes = []
     logger.info(f"[DEBUG] 开始构建setback_volumes，setback_info数量: {len(setback_info)}")
     for plot in setback_info:
+        if plot["height_limit"] is None:
+            continue
         points = plot.get("points") or []
         volume = {
             "plot_name": plot["name"],
@@ -480,6 +592,14 @@ def check_height_limit_pure_python(
     warnings = []
     if unmatched_buildings:
         warnings.append(f"{len(unmatched_buildings)} buildings are not within any setback boundary")
+    if missing_height_plots:
+        missing_list = ", ".join(sorted(missing_height_plots))
+        warnings.append(f"以下地块缺少限高信息: {missing_list}")
+    if unmatched_setbacks:
+        missing_setbacks = ", ".join(unmatched_setbacks)
+        warnings.append(f"{len(unmatched_setbacks)} setback objects are not matched to any plot: {missing_setbacks}")
+    if invalid_plot_count > 0:
+        warnings.append(f"{invalid_plot_count} plot objects have invalid geometry")
 
     result_dict = {
         "status": "ok",

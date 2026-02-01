@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from rhino_api.api.models import router as models_router
 from rhino_api.api.height_check import router as height_check_router
 from rhino_api.api.sight_corridor import router as sight_corridor_router
+from rhino_api.api.setback_check import router as setback_check_router
 from rhino_api.core import config
 
 app = FastAPI(title="HDMS Rhino Model API")
@@ -20,6 +21,7 @@ app.add_middleware(
 app.include_router(models_router)
 app.include_router(height_check_router)
 app.include_router(sight_corridor_router)
+app.include_router(setback_check_router)
 
 
 @app.get("/health")

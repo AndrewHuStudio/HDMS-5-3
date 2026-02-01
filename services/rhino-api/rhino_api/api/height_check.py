@@ -18,7 +18,8 @@ class HeightCheckPurePythonRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
     model_path: str
     building_layer: str = "模型_建筑体块"
-    setback_layer: str = "限制_建筑退线"
+    plot_layer: str | None = None
+    setback_layer: str | None = None
     default_height_limit: float = 100.0
 
 
@@ -35,11 +36,14 @@ def _resolve_model_path(model_path: str) -> Path:
 def height_check_pure_python(request: HeightCheckPurePythonRequest) -> Dict[str, Any]:
     """限高检测接口 - 纯Python实现，基于固定图层名称和UserText"""
     resolved_path = _resolve_model_path(request.model_path)
+    plot_layer = request.plot_layer or "场景_地块"
+    setback_layer = request.setback_layer or "限制_建筑退线"
     try:
         result = check_height_limit_pure_python(
             model_path=resolved_path,
             building_layer=request.building_layer,
-            setback_layer=request.setback_layer,
+            setback_layer=setback_layer,
+            plot_layer=plot_layer,
             default_height_limit=request.default_height_limit,
         )
         logger.info(f"Height check result keys: {list(result.keys())}")
@@ -54,10 +58,11 @@ def height_check_pure_python(request: HeightCheckPurePythonRequest) -> Dict[str,
         return result
     except ValueError as exc:
         logger.warning(
-            "Height check (pure Python) failed: %s (building_layer=%s, setback_layer=%s, default_height_limit=%s)",
+            "Height check (pure Python) failed: %s (building_layer=%s, setback_layer=%s, plot_layer=%s, default_height_limit=%s)",
             exc,
             request.building_layer,
-            request.setback_layer,
+            setback_layer,
+            plot_layer,
             request.default_height_limit,
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
