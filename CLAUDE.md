@@ -18,7 +18,7 @@ Computation Engine (Rhino.Compute)           →  port 6500
 ```
 
 Key directories:
-- `apps/frontend/` - Main frontend (Next.js + Three.js 3D visualization)
+- `frontend/` - Main frontend (Next.js + Three.js 3D visualization)
 - `services/rhino-api/` - Backend API for .3dm parsing and Grasshopper execution
 - `services/rhino-api/gh/` - Grasshopper definition files (.ghx)
 - `third_party/compute.rhino3d/` - Rhino.Compute source (C#/.NET)
@@ -30,10 +30,11 @@ Key directories:
 
 ### Frontend
 ```bash
-npm install --prefix apps/frontend
-npm run dev --prefix apps/frontend
-npm run build --prefix apps/frontend
-npm run lint --prefix apps/frontend
+cd frontend
+npm install
+npm run dev
+npm run build
+npm run lint
 ```
 
 ### Backend
@@ -82,7 +83,7 @@ Backend uses these (see `.env.example` at repo root):
 - `RHINO_COMPUTE_URL` - Default: http://localhost:6500
 - `MODEL_STORAGE_PATH` - Default: ./data/uploads
 - `GH_DEFINITIONS_PATH` - Default: ./gh
-- `MAX_UPLOAD_MB` - Default: 500
+- `MAX_UPLOAD_MB` - Default: 50
 - `CORS_ORIGINS` - Default: http://localhost:3000
 
 ## Key Implementation Notes
