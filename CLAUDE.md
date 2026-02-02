@@ -78,9 +78,9 @@ After modifying .ghx files, restart Rhino.Compute to clear cache.
 
 ## Environment Variables
 
-Backend uses these (see `services/rhino-api/.env.example`):
+Backend uses these (see `.env.example` at repo root):
 - `RHINO_COMPUTE_URL` - Default: http://localhost:6500
-- `MODEL_STORAGE_PATH` - Default: ../../data/uploads
+- `MODEL_STORAGE_PATH` - Default: ./data/uploads
 - `GH_DEFINITIONS_PATH` - Default: ./gh
 - `MAX_UPLOAD_MB` - Default: 500
 - `CORS_ORIGINS` - Default: http://localhost:3000

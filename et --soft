@@ -1,0 +1,20 @@
+[33mb1b150b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mcollaboration_V1.0[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/collaboration_V1.0[m[33m, [m[1;31morigin/backup_V1.0[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m, [m[1;32mbackup_V1.0[m[33m)[m HEAD@{0}: reset: moving to HEAD^
+[33m82ee760[m HEAD@{1}: checkout: moving from collaboration_V1.0 to collaboration_V1.0
+[33m82ee760[m HEAD@{2}: pull --tags origin collaboration_V1.0: Fast-forward
+[33mb1b150b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mcollaboration_V1.0[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/collaboration_V1.0[m[33m, [m[1;31morigin/backup_V1.0[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m, [m[1;32mbackup_V1.0[m[33m)[m HEAD@{3}: reset: moving to HEAD^
+[33m82ee760[m HEAD@{4}: checkout: moving from collaboration_V1.0 to collaboration_V1.0
+[33m82ee760[m HEAD@{5}: pull --tags origin collaboration_V1.0: Fast-forward
+[33mb1b150b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mcollaboration_V1.0[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/collaboration_V1.0[m[33m, [m[1;31morigin/backup_V1.0[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m, [m[1;32mbackup_V1.0[m[33m)[m HEAD@{6}: reset: moving to HEAD^
+[33m82ee760[m HEAD@{7}: checkout: moving from collaboration_V1.0 to collaboration_V1.0
+[33m82ee760[m HEAD@{8}: checkout: moving from backup_V1.0 to collaboration_V1.0
+[33mb1b150b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mcollaboration_V1.0[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/collaboration_V1.0[m[33m, [m[1;31morigin/backup_V1.0[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m, [m[1;32mbackup_V1.0[m[33m)[m HEAD@{9}: checkout: moving from collaboration_V1.0 to backup_V1.0
+[33m82ee760[m HEAD@{10}: checkout: moving from collaboration_V1.0 to collaboration_V1.0
+[33m82ee760[m HEAD@{11}: commit: [palner]分支重构第一步
+[33mb1b150b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mcollaboration_V1.0[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/collaboration_V1.0[m[33m, [m[1;31morigin/backup_V1.0[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m, [m[1;32mbackup_V1.0[m[33m)[m HEAD@{12}: checkout: moving from main to collaboration_V1.0
+[33mb1b150b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mcollaboration_V1.0[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/collaboration_V1.0[m[33m, [m[1;31morigin/backup_V1.0[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m, [m[1;32mbackup_V1.0[m[33m)[m HEAD@{13}: checkout: moving from main to main
+[33mb1b150b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mcollaboration_V1.0[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/collaboration_V1.0[m[33m, [m[1;31morigin/backup_V1.0[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m, [m[1;32mbackup_V1.0[m[33m)[m HEAD@{14}: commit: 管控要素前3个功能开发完毕，模块待整合以为后续分工协作做准备
+[33m9031150[m HEAD@{15}: commit: 更新了readme文档，让每一个参与项目的都知道本次修改了什么
+[33m058ca7b[m HEAD@{16}: Branch: renamed refs/heads/master to refs/heads/main
+[33m058ca7b[m HEAD@{18}: commit: first commit
+[33m45b9f55[m HEAD@{19}: commit: Initial commit
+[33m8645e79[m HEAD@{20}: commit (initial): Initial commit: HDMS urban design control platform

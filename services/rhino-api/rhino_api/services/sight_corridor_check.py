@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
 import rhino3dm
+from rhino_api.core.utils import (
+    get_bounding_box as _get_bounding_box,
+    get_user_text as _get_user_text,
+    get_user_text_from_source as _get_user_text_from_source,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,82 +25,6 @@ ANGLE_EPS = 1e-9
 
 def _normalize_layer_token(value: str) -> str:
     return "".join(value.strip().lower().split())
-
-
-def _get_user_text_from_source(source: object, key: str) -> Optional[str]:
-    """从对象中读取UserText"""
-    if source is None:
-        return None
-
-    if hasattr(source, "GetUserString"):
-        try:
-            value = source.GetUserString(key)
-        except Exception:
-            value = None
-        if isinstance(value, str) and value.strip():
-            return value
-
-    normalized_key = key.strip()
-    if not normalized_key:
-        return None
-
-    normalized_lower = normalized_key.casefold()
-
-    if hasattr(source, "GetUserStrings"):
-        try:
-            entries = source.GetUserStrings()
-        except Exception:
-            return None
-
-        if isinstance(entries, dict):
-            for k, v in entries.items():
-                candidate = str(k).strip()
-                if candidate == normalized_key or candidate.casefold() == normalized_lower:
-                    if isinstance(v, str) and v.strip():
-                        return v
-
-    return None
-
-
-def _get_user_text(obj: rhino3dm.File3dmObject, key: str) -> Optional[str]:
-    """从Rhino对象中读取UserText"""
-    try:
-        normalized_key = key.strip()
-        if not normalized_key:
-            return None
-
-        attributes = getattr(obj, "Attributes", None)
-        value = _get_user_text_from_source(attributes, normalized_key)
-        if value:
-            return value
-
-        geometry = getattr(obj, "Geometry", None)
-        return _get_user_text_from_source(geometry, normalized_key)
-    except Exception as e:
-        logger.warning(f"Failed to read UserText '{key}': {e}")
-        return None
-
-
-def _get_bounding_box(geometry: rhino3dm.CommonObject) -> Optional[rhino3dm.BoundingBox]:
-    """获取几何体的BoundingBox"""
-    if not hasattr(geometry, "GetBoundingBox"):
-        return None
-
-    try:
-        bbox = geometry.GetBoundingBox(True)
-    except TypeError:
-        try:
-            bbox = geometry.GetBoundingBox()
-        except Exception:
-            return None
-
-    if isinstance(bbox, tuple):
-        bbox = bbox[0]
-
-    if bbox is None or not bbox.IsValid:
-        return None
-
-    return bbox
 
 
 def _bbox_intersects_strict(

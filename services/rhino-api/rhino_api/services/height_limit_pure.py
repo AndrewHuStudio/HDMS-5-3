@@ -7,95 +7,15 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Iterable
+from typing import List, Dict, Tuple, Optional
 
 import rhino3dm
+from rhino_api.core.utils import (
+    get_bounding_box as _get_bounding_box,
+    get_user_text as _get_user_text,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _iter_user_strings(source: object) -> Iterable[tuple[str, Optional[str]]]:
-    if source is None or not hasattr(source, "GetUserStrings"):
-        return []
-    try:
-        entries = source.GetUserStrings()
-    except Exception:
-        return []
-
-    if isinstance(entries, dict):
-        return [(str(k), v if v is None else str(v)) for k, v in entries.items()]
-
-    if isinstance(entries, (list, tuple)):
-        pairs: list[tuple[str, Optional[str]]] = []
-        for entry in entries:
-            if isinstance(entry, (list, tuple)) and len(entry) == 2:
-                pairs.append((str(entry[0]), entry[1] if entry[1] is None else str(entry[1])))
-                continue
-            key = getattr(entry, "Key", None)
-            value = getattr(entry, "Value", None)
-            if key is not None:
-                pairs.append((str(key), value if value is None else str(value)))
-        return pairs
-
-    return []
-
-
-def _get_user_text_from_source(source: object, key: str) -> Optional[str]:
-    if source is None:
-        return None
-
-    if hasattr(source, "GetUserString"):
-        try:
-            value = source.GetUserString(key)
-        except Exception:
-            value = None
-        if isinstance(value, str) and value.strip():
-            return value
-
-    normalized_key = key.strip()
-    if not normalized_key:
-        return None
-
-    normalized_lower = normalized_key.casefold()
-    for entry_key, entry_value in _iter_user_strings(source):
-        candidate = entry_key.strip()
-        if not candidate:
-            continue
-        if candidate == normalized_key or candidate.casefold() == normalized_lower:
-            if isinstance(entry_value, str) and entry_value.strip():
-                return entry_value
-
-    return None
-
-
-def _get_user_text(obj: rhino3dm.File3dmObject, key: str) -> Optional[str]:
-    """
-    从Rhino对象中读取UserText
-
-    Args:
-        obj: Rhino对象
-        key: UserText的键名
-
-    Returns:
-        UserText的值，如果不存在则返回None
-    """
-    try:
-        normalized_key = key.strip()
-        if not normalized_key:
-            return None
-
-        attributes = getattr(obj, "Attributes", None)
-        value = _get_user_text_from_source(attributes, normalized_key)
-        if value:
-            return value
-
-        geometry = getattr(obj, "Geometry", None)
-        return _get_user_text_from_source(geometry, normalized_key)
-    except Exception as e:
-        logger.warning(f"Failed to read UserText '{key}': {e}")
-        return None
-
-
 def _get_object_name(obj: rhino3dm.File3dmObject) -> Optional[str]:
     attributes = getattr(obj, "Attributes", None)
     if not attributes:
@@ -135,36 +55,6 @@ def _build_layer_index_map(file3dm: rhino3dm.File3dm) -> Dict[int, str]:
             layer_by_index[layer_index] = layer_full_path
 
     return layer_by_index
-
-
-def _get_bounding_box(geometry: rhino3dm.CommonObject) -> Optional[rhino3dm.BoundingBox]:
-    """
-    获取几何体的BoundingBox
-
-    Args:
-        geometry: Rhino几何体
-
-    Returns:
-        BoundingBox对象，如果失败则返回None
-    """
-    if not hasattr(geometry, "GetBoundingBox"):
-        return None
-
-    try:
-        bbox = geometry.GetBoundingBox(True)
-    except TypeError:
-        try:
-            bbox = geometry.GetBoundingBox()
-        except Exception:
-            return None
-
-    if isinstance(bbox, tuple):
-        bbox = bbox[0]
-
-    if bbox is None or not bbox.IsValid:
-        return None
-
-    return bbox
 
 
 def _point_in_curve_2d(point: rhino3dm.Point3d, curve: rhino3dm.Curve) -> bool:
