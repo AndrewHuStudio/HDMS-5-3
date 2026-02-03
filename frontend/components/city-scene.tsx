@@ -23,6 +23,8 @@ import { InfiniteGrid } from "./infinite-grid";
 import { PersonModel } from "./person-model";
 import { HemisphereModel } from "./hemisphere-model";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SceneContext } from "@/components/scene/scene-context";
+import { SceneExtensions, SceneOverlays } from "@/components/scene/scene-extensions";
 
 // 视角类型
 export type ViewMode = "perspective" | "isometric-ne" | "isometric-nw" | "isometric-se" | "isometric-sw" | "plan";
@@ -458,6 +460,7 @@ interface ExternalModelProps {
   onError: (error: string) => void;
   onMeshSelect?: (mesh: ImportedMeshInfo | null) => void;
   selectedMesh?: ImportedMeshInfo | null;
+  onMeshListChange?: (meshList: ImportedMeshInfo[]) => void;
   onBoundsComputed?: (bounds: THREE.Box3) => void;
   onScaleComputed?: (scale: number) => void;
   onTransformComputed?: (transform: ModelTransformSnapshot) => void;
@@ -485,6 +488,7 @@ function ExternalModel({
   onError,
   onMeshSelect,
   selectedMesh,
+  onMeshListChange,
   onBoundsComputed,
   onScaleComputed,
   onTransformComputed,
@@ -514,6 +518,10 @@ function ExternalModel({
     quaternion: THREE.Quaternion;
     scale: THREE.Vector3;
   } | null>(null);
+
+  useEffect(() => {
+    onMeshListChange?.(meshList);
+  }, [meshList, onMeshListChange]);
 
   useEffect(() => {
     const targetUpAxis: Axis = sceneUpAxis;
@@ -2263,6 +2271,7 @@ export function CityScene({
   onBuildingsExtracted,
 }: CitySceneProps) {
   const [hoveredElement, setHoveredElement] = useState<CityElement | null>(null);
+  const [sceneMeshList, setSceneMeshList] = useState<ImportedMeshInfo[]>([]);
   const controlsRef = useRef<any>(null);
   const isOrthographic = viewMode !== "perspective";
   const sceneUpAxis = SCENE_UP_AXIS;
@@ -2306,6 +2315,7 @@ export function CityScene({
 
   useEffect(() => {
     setModelBounds(null);
+    setSceneMeshList([]);
     onModelBoundsComputed?.(null);
     onModelTransformComputed?.(null);
   }, [externalModelUrl, externalModelType]);
@@ -2314,77 +2324,101 @@ export function CityScene({
     updateCameraClipping();
   }, [modelBounds, updateCameraClipping]);
 
+  const sceneSnapshot = useMemo(
+    () => ({
+      selectedElement,
+      selectedImportedMesh: selectedImportedMesh ?? null,
+      externalModelUrl,
+      externalModelType,
+      showDemoModel,
+      viewMode,
+      modelBounds,
+      meshList: sceneMeshList,
+    }),
+    [
+      selectedElement,
+      selectedImportedMesh,
+      externalModelUrl,
+      externalModelType,
+      showDemoModel,
+      viewMode,
+      modelBounds,
+      sceneMeshList,
+    ]
+  );
+
   return (
-    <div
-      className="w-full h-full relative"
-      onContextMenu={(e) => e.preventDefault()}
-      style={{ touchAction: 'none' }}
-    >
-      <Canvas
-        shadows
-        style={{ background: '#ffffff' }}
-        onPointerMissed={() => {
-          onSelectElement(null);
-          onImportedMeshSelect?.(null);
-        }}
-        gl={{ antialias: true, preserveDrawingBuffer: true }}
+    <SceneContext.Provider value={sceneSnapshot}>
+      <div
+        className="w-full h-full relative"
+        onContextMenu={(e) => e.preventDefault()}
+        style={{ touchAction: 'none' }}
       >
-        {/* 正交相机 - 用于轴测图和平面图，不设置固定 position/zoom 以支持动画 */}
-        {isOrthographic && (
-          <OrthographicCamera
-            makeDefault
-            position={orthoCameraPosition}
-            zoom={25}
-            near={0.01}
-            far={100000}
-          />
-        )}
+        <Canvas
+          shadows
+          style={{ background: '#ffffff' }}
+          onPointerMissed={() => {
+            onSelectElement(null);
+            onImportedMeshSelect?.(null);
+          }}
+          gl={{ antialias: true, preserveDrawingBuffer: true }}
+        >
+          {/* 正交相机 - 用于轴测图和平面图，不设置固定 position/zoom 以支持动画 */}
+          {isOrthographic && (
+            <OrthographicCamera
+              makeDefault
+              position={orthoCameraPosition}
+              zoom={25}
+              near={0.01}
+              far={100000}
+            />
+          )}
 
-        {/* 透视相机 - 用于透视图 */}
-        {!isOrthographic && (
-          <PerspectiveCamera
-            makeDefault
-            position={perspectiveCameraPosition}
-            fov={45}
-            near={0.01}
-            far={100000}
-          />
-        )}
-        
-        <Suspense fallback={null}>
-          <CameraController
-            viewMode={viewMode}
-            controlsRef={controlsRef}
-            isOrthographic={isOrthographic}
-            fitBounds={modelBounds}
-            upAxis={sceneUpAxis}
-          />
-          <ambientLight intensity={0.8} />
-          <directionalLight
-            position={mainLightPosition}
-            intensity={1.5}
-            castShadow
-            shadow-mapSize={[2048, 2048]}
-            shadow-camera-far={50}
-            shadow-camera-left={-20}
-            shadow-camera-right={20}
-            shadow-camera-top={20}
-            shadow-camera-bottom={-20}
-          />
-          <directionalLight position={fillLightPosition} intensity={0.4} />
-          <hemisphereLight position={hemiLightPosition} color="#ffffff" groundColor="#e2e8f0" intensity={0.6} />
+          {/* 透视相机 - 用于透视图 */}
+          {!isOrthographic && (
+            <PerspectiveCamera
+              makeDefault
+              position={perspectiveCameraPosition}
+              fov={45}
+              near={0.01}
+              far={100000}
+            />
+          )}
+          
+          <Suspense fallback={null}>
+            <CameraController
+              viewMode={viewMode}
+              controlsRef={controlsRef}
+              isOrthographic={isOrthographic}
+              fitBounds={modelBounds}
+              upAxis={sceneUpAxis}
+            />
+            <ambientLight intensity={0.8} />
+            <directionalLight
+              position={mainLightPosition}
+              intensity={1.5}
+              castShadow
+              shadow-mapSize={[2048, 2048]}
+              shadow-camera-far={50}
+              shadow-camera-left={-20}
+              shadow-camera-right={20}
+              shadow-camera-top={20}
+              shadow-camera-bottom={-20}
+            />
+            <directionalLight position={fillLightPosition} intensity={0.4} />
+            <hemisphereLight position={hemiLightPosition} color="#ffffff" groundColor="#e2e8f0" intensity={0.6} />
 
-          {/* 无限网格 - 50m间距，淡灰色，真正无限延伸 */}
-          <InfiniteGrid
-            planeSize={GRID_PLANE_SIZE}
-            cellSize={50}
-            sectionSize={200}
-            cellColor="#e0e0e0"
-            sectionColor="#c0c0c0"
-            cellThickness={0.5}
-            sectionThickness={1}
-            upAxis={sceneUpAxis}
-          />
+            {/* 无限网格 - 50m间距，淡灰色，真正无限延伸 */}
+            <InfiniteGrid
+              planeSize={GRID_PLANE_SIZE}
+              cellSize={50}
+              sectionSize={200}
+              cellColor="#e0e0e0"
+              sectionColor="#c0c0c0"
+              cellThickness={0.5}
+              sectionThickness={1}
+              upAxis={sceneUpAxis}
+            />
 
           <group rotation={demoRotation}>
             <RoadMarkings />
@@ -2413,6 +2447,7 @@ export function CityScene({
                 }
               }}
               selectedMesh={selectedImportedMesh}
+              onMeshListChange={setSceneMeshList}
               onBoundsComputed={(bounds) => {
                 const clonedBounds = bounds.clone();
                 setModelBounds(clonedBounds);
@@ -2459,6 +2494,8 @@ export function CityScene({
             </>
           )}
 
+          <SceneExtensions />
+
           <OrbitControls
             ref={controlsRef}
             makeDefault
@@ -2489,6 +2526,8 @@ export function CityScene({
           />
         </Suspense>
       </Canvas>
+      <SceneOverlays />
     </div>
+    </SceneContext.Provider>
   );
 }

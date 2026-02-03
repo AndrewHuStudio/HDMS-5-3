@@ -14,6 +14,8 @@ export interface ToolRegistration {
   ghDefinition?: string;
   icon: LucideIcon;
   Panel?: ComponentType;
+  SceneLayer?: ComponentType;
+  Overlay?: ComponentType;
   useSceneState?: () => Partial<CitySceneProps>;
   reset?: () => void;
 }
