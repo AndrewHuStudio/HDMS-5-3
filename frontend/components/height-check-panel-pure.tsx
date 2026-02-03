@@ -32,6 +32,7 @@ export interface BuildingResult {
   building_name?: string;
   layer_index?: number;
   layer_name?: string;
+  object_id?: string | null;
   height_limit: number;
   actual_height: number;
   is_exceeded: boolean;

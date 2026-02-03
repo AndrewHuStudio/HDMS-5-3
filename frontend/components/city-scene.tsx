@@ -83,11 +83,25 @@ const isSightCorridorLayerName = (name?: string | null) => {
 
 const normalizeUserTextKey = (value: string) => value.trim().toLowerCase();
 const normalizeNameKey = (value?: string | null) => (value ?? "").trim().toLowerCase();
+const normalizeObjectId = (value?: string | null) => (value ?? "").trim().toLowerCase();
 
 const readUserTextValue = (value: unknown) => {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+};
+
+const readUserTextKeyValueArrays = (source: Record<string, unknown>, key: string) => {
+  const keys = source.keys ?? source.Keys ?? source.KEYS;
+  const values = source.values ?? source.Values ?? source.VALUES;
+  if (!Array.isArray(keys) || !Array.isArray(values)) return null;
+  const normalizedKey = normalizeUserTextKey(key);
+  for (let i = 0; i < Math.min(keys.length, values.length); i += 1) {
+    if (normalizeUserTextKey(String(keys[i])) === normalizedKey) {
+      return readUserTextValue(values[i]);
+    }
+  }
+  return null;
 };
 
 const readUserTextEntry = (entry: unknown, key: string) => {
@@ -140,6 +154,9 @@ const readUserText = (source: unknown, key: string): string | null => {
   const directValue = readUserTextValue(direct);
   if (directValue) return directValue;
 
+  const arrayValue = readUserTextKeyValueArrays(record, key);
+  if (arrayValue) return arrayValue;
+
   for (const [entryKey, entryValue] of Object.entries(record)) {
     if (normalizeUserTextKey(entryKey) === normalizedKey) {
       const value = readUserTextValue(entryValue);
@@ -169,8 +186,46 @@ const readUserText = (source: unknown, key: string): string | null => {
   return null;
 };
 
-const getMeshUserText = (mesh: THREE.Object3D, key: string) =>
-  readUserText(mesh.userData?.attributes, key) ?? readUserText(mesh.userData, key);
+const getMeshUserText = (mesh: THREE.Object3D, key: string) => {
+  const attributes = mesh.userData?.attributes as Record<string, unknown> | undefined;
+  return (
+    readUserText(attributes, key) ??
+    readUserText(attributes?.geometry as Record<string, unknown> | undefined, key) ??
+    readUserText(mesh.userData, key)
+  );
+};
+
+const readObjectIdValue = (value: unknown) => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (value && typeof value === "object") {
+    const record = value as { value?: unknown };
+    if (typeof record.value === "string") {
+      const trimmed = record.value.trim();
+      return trimmed ? trimmed : null;
+    }
+  }
+  return null;
+};
+
+const getMeshObjectId = (mesh: THREE.Object3D) => {
+  const attributes = mesh.userData?.attributes as Record<string, unknown> | undefined;
+  const candidates = [
+    attributes?.id,
+    attributes?.Id,
+    attributes?.objectId,
+    attributes?.ObjectId,
+    mesh.userData?.objectId,
+    mesh.userData?.id,
+  ];
+  for (const candidate of candidates) {
+    const value = readObjectIdValue(candidate);
+    if (value) return value;
+  }
+  return null;
+};
 
 if (SCENE_UP_AXIS === "z") {
   THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -784,10 +839,14 @@ function ExternalModel({
 
             const meshId = `imported-mesh-${meshIndex}`;
             const userTextName = getMeshUserText(child, "建筑名称");
+            const objectId = getMeshObjectId(child);
             const meshName = userTextName || child.name || `对象 ${meshIndex + 1}`;
             child.userData.meshId = meshId;
             if (userTextName) {
               child.userData.buildingName = userTextName;
+            }
+            if (objectId) {
+              child.userData.objectId = objectId;
             }
             originalMaterials.current.set(meshId, child.material);
 
@@ -824,14 +883,15 @@ function ExternalModel({
             child.userData.isSightCorridorLayer = true;
           }
 
-          meshes.push({
-            id: meshId,
-            name: meshName,
-            mesh: child,
-            boundingBox: meshBox,
-            layerIndex,
-            layerName,
-          });
+            meshes.push({
+              id: meshId,
+              name: meshName,
+              mesh: child,
+              boundingBox: meshBox,
+              layerIndex,
+              layerName,
+              objectId,
+            });
 
           const buildingEntry = {
             min: [
@@ -1453,11 +1513,21 @@ function ExternalModel({
 
   const heightCheckLabels = useMemo(() => {
     if (!showHeightCheckLabels || heightCheckResults.length === 0) return [];
+    const byObjectId = new Map<string, ImportedMeshInfo[]>();
     const byName = new Map<string, ImportedMeshInfo[]>();
     const byLayerIndex = new Map<number, ImportedMeshInfo[]>();
     const byLayerName = new Map<string, ImportedMeshInfo[]>();
 
     buildingMeshes.forEach((meshInfo) => {
+      const objectIdKey = normalizeObjectId(
+        meshInfo.objectId ?? (meshInfo.mesh.userData?.objectId as string | undefined)
+      );
+      if (objectIdKey) {
+        const list = byObjectId.get(objectIdKey) ?? [];
+        list.push(meshInfo);
+        byObjectId.set(objectIdKey, list);
+      }
+
       const meshName =
         normalizeNameKey(meshInfo.mesh.userData?.buildingName) ||
         normalizeNameKey(meshInfo.name);
@@ -1489,8 +1559,13 @@ function ExternalModel({
       .map((result) => {
         let targetMesh: ImportedMeshInfo | null = null;
 
+        const objectIdKey = normalizeObjectId(result.object_id);
+        if (objectIdKey) {
+          targetMesh = takeUnused(byObjectId.get(objectIdKey));
+        }
+
         const nameKey = normalizeNameKey(result.building_name);
-        if (nameKey) {
+        if (!targetMesh && nameKey) {
           targetMesh = takeUnused(byName.get(nameKey));
         }
 
@@ -1778,6 +1853,7 @@ export interface ImportedMeshInfo {
   boundingBox: THREE.Box3;
   layerIndex?: number;
   layerName?: string;
+  objectId?: string | null;
 }
 
 export interface ModelTransformSnapshot {

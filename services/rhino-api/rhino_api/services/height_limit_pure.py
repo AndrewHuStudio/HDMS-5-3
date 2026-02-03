@@ -16,6 +16,10 @@ from rhino_api.core.utils import (
 )
 
 logger = logging.getLogger(__name__)
+def _normalize_plot_name(value: Optional[str]) -> str:
+    return value.strip().casefold() if isinstance(value, str) else ""
+
+
 def _get_object_name(obj: rhino3dm.File3dmObject) -> Optional[str]:
     attributes = getattr(obj, "Attributes", None)
     if not attributes:
@@ -161,6 +165,180 @@ def _points_to_serializable(points: List[rhino3dm.Point3d]) -> List[List[float]]
     return [[float(p.X), float(p.Y), float(p.Z)] for p in points]
 
 
+def _polygon_area_2d(points: List[rhino3dm.Point3d]) -> float:
+    if len(points) < 3:
+        return 0.0
+    area = 0.0
+    for i in range(len(points)):
+        p1 = points[i]
+        p2 = points[(i + 1) % len(points)]
+        area += p1.X * p2.Y - p2.X * p1.Y
+    return abs(area) / 2.0
+
+
+def _point_in_polygon_2d(point: rhino3dm.Point3d, polygon: List[rhino3dm.Point3d]) -> bool:
+    if len(polygon) < 3:
+        return False
+
+    px, py = point.X, point.Y
+    intersections = 0
+    for i in range(len(polygon)):
+        p1 = polygon[i]
+        p2 = polygon[(i + 1) % len(polygon)]
+        if (p1.Y > py) != (p2.Y > py):
+            x_intersect = (p2.X - p1.X) * (py - p1.Y) / (p2.Y - p1.Y) + p1.X
+            if px < x_intersect:
+                intersections += 1
+
+    return intersections % 2 == 1
+
+
+def _bbox_to_points(bbox: rhino3dm.BoundingBox) -> List[rhino3dm.Point3d]:
+    z = bbox.Min.Z
+    return [
+        rhino3dm.Point3d(bbox.Min.X, bbox.Min.Y, z),
+        rhino3dm.Point3d(bbox.Max.X, bbox.Min.Y, z),
+        rhino3dm.Point3d(bbox.Max.X, bbox.Max.Y, z),
+        rhino3dm.Point3d(bbox.Min.X, bbox.Max.Y, z),
+    ]
+
+
+def _extract_boundary_curves(geometry: rhino3dm.CommonObject) -> List[rhino3dm.Curve]:
+    if isinstance(geometry, rhino3dm.Curve):
+        return [geometry]
+
+    for method_name in ("DuplicateNakedEdgeCurves", "DuplicateEdgeCurves"):
+        method = getattr(geometry, method_name, None)
+        if callable(method):
+            try:
+                curves = list(method())
+            except Exception:
+                curves = []
+            if curves:
+                return curves
+
+    to_brep = getattr(geometry, "ToBrep", None)
+    if callable(to_brep):
+        try:
+            brep = to_brep()
+        except Exception:
+            brep = None
+        if brep is not None and brep is not geometry:
+            return _extract_boundary_curves(brep)
+
+    return []
+
+
+def _plot_outline_from_geometry(
+    geometry: rhino3dm.CommonObject, bbox: rhino3dm.BoundingBox
+) -> Tuple[Optional[rhino3dm.Curve], List[rhino3dm.Point3d], float]:
+    curves = _extract_boundary_curves(geometry)
+    best_curve: Optional[rhino3dm.Curve] = None
+    best_points: List[rhino3dm.Point3d] = []
+    best_area = 0.0
+
+    for curve in curves:
+        if not isinstance(curve, rhino3dm.Curve):
+            continue
+        if not curve.IsClosed:
+            continue
+        points = _curve_to_points(curve, sample_count=128)
+        if len(points) < 3:
+            continue
+        area = _polygon_area_2d(points)
+        if area > best_area:
+            best_area = area
+            best_curve = curve
+            best_points = points
+
+    if best_points:
+        return best_curve, best_points, best_area
+
+    bbox_points = _bbox_to_points(bbox)
+    return None, bbox_points, _polygon_area_2d(bbox_points)
+
+
+def _match_plot_for_point(
+    point: rhino3dm.Point3d, plots: List[Dict[str, object]]
+) -> Optional[Dict[str, object]]:
+    matches: List[Dict[str, object]] = []
+    for plot in plots:
+        points = plot.get("points") or []
+        in_plot = False
+        if isinstance(points, list) and points:
+            in_plot = _point_in_polygon_2d(point, points)
+        if not in_plot:
+            curve = plot.get("curve")
+            if isinstance(curve, rhino3dm.Curve):
+                in_plot = _point_in_curve_2d(point, curve)
+        if in_plot:
+            matches.append(plot)
+
+    if not matches:
+        return None
+
+    def _match_sort_key(item: Dict[str, object]) -> float:
+        area = item.get("area")
+        if isinstance(area, (int, float)) and area > 0:
+            return float(area)
+        return float("inf")
+
+    matches.sort(key=_match_sort_key)
+    return matches[0]
+
+
+def _building_sample_points(bbox: rhino3dm.BoundingBox) -> List[rhino3dm.Point3d]:
+    z = bbox.Min.Z
+    return [
+        bbox.Center,
+        rhino3dm.Point3d(bbox.Min.X, bbox.Min.Y, z),
+        rhino3dm.Point3d(bbox.Min.X, bbox.Max.Y, z),
+        rhino3dm.Point3d(bbox.Max.X, bbox.Min.Y, z),
+        rhino3dm.Point3d(bbox.Max.X, bbox.Max.Y, z),
+    ]
+
+
+def _match_plot_for_building(
+    bbox: rhino3dm.BoundingBox, plots: List[Dict[str, object]]
+) -> Optional[Dict[str, object]]:
+    sample_points = _building_sample_points(bbox)
+    best_plot: Optional[Dict[str, object]] = None
+    best_score = 0
+    best_area: Optional[float] = None
+
+    for plot in plots:
+        points = plot.get("points") or []
+        curve = plot.get("curve")
+        score = 0
+
+        for pt in sample_points:
+            in_plot = False
+            if isinstance(points, list) and points:
+                in_plot = _point_in_polygon_2d(pt, points)
+            if not in_plot and isinstance(curve, rhino3dm.Curve):
+                in_plot = _point_in_curve_2d(pt, curve)
+            if in_plot:
+                score += 1
+
+        if score <= 0:
+            continue
+
+        area_value = plot.get("area")
+        area = float(area_value) if isinstance(area_value, (int, float)) else None
+
+        if score > best_score:
+            best_plot = plot
+            best_score = score
+            best_area = area
+            continue
+
+        if score == best_score and area is not None:
+            if best_area is None or area < best_area:
+                best_plot = plot
+                best_area = area
+
+    return best_plot
+
 def _load_objects_from_layer(
     file3dm: rhino3dm.File3dm, layer_name: str
 ) -> List[Tuple[rhino3dm.File3dmObject, rhino3dm.CommonObject]]:
@@ -255,10 +433,10 @@ def check_height_limit_pure_python(
     if not building_objects:
         raise ValueError(f"No buildings found in layer: {building_layer}")
 
-    # 加载建筑退线
+    # 加载建筑退线（用于超限体块的边界）
     setback_objects = _load_objects_from_layer(file3dm, setback_layer)
     if not setback_objects:
-        raise ValueError(f"No setbacks found in layer: {setback_layer}")
+        logger.warning("No setbacks found in layer: %s; will fallback to plot boundaries for volumes.", setback_layer)
 
     # 加载地块（限高信息来源）
     plot_objects = _load_objects_from_layer(file3dm, plot_layer)
@@ -299,68 +477,48 @@ def check_height_limit_pure_python(
         if height_limit is None:
             missing_height_plots.add(plot_name)
 
+        curve, outline_points, outline_area = _plot_outline_from_geometry(geometry, bbox)
+
         plot_candidates.append({
             "name": plot_name,
             "height_limit": height_limit,
             "center": bbox.Center,
+            "curve": curve,
+            "points": outline_points,
+            "area": outline_area,
         })
 
     if not plot_candidates:
         raise ValueError(f"No valid plot objects found in layer: {plot_layer}")
 
-    # 解析每个退线的限高信息（来自地块）
-    setback_info = []
-    invalid_geometry_count = 0
-    unmatched_setbacks = []
-
-    for idx, (obj, geometry) in enumerate(setback_objects):
-        logger.info(f"[DEBUG] 处理退线对象 {idx}, 类型: {type(geometry).__name__}")
-        # 检查几何体类型
-        if not isinstance(geometry, rhino3dm.Curve):
-            logger.warning(f"Setback object {idx} is not a curve (type: {type(geometry).__name__}), skipping")
-            invalid_geometry_count += 1
-            continue
-
-        # 使用地块中心点匹配退线，获取限高信息
-        matched_plot = None
-        for candidate in plot_candidates:
-            if _point_in_curve_2d(candidate["center"], geometry):
-                matched_plot = candidate
-                break
-
-        plot_name = matched_plot["name"] if matched_plot else f"退线{idx + 1}"
-        height_limit = matched_plot["height_limit"] if matched_plot else None
-        if matched_plot is None:
-            unmatched_setbacks.append(plot_name)
-        elif height_limit is None:
-            missing_height_plots.add(plot_name)
-
-        logger.info(f"[DEBUG] 退线对象 {idx}: 地块名称='{plot_name}', 限高值='{height_limit}'")
-        curve_points = _curve_to_points(geometry)
-
-        setback_info.append({
-            "name": plot_name,
-            "height_limit": height_limit,
-            "curve": geometry,
-            "points": curve_points,
-            "has_usertext": height_limit is not None,
-        })
-        logger.info(f"[DEBUG] 成功添加退线信息: {plot_name}, 限高: {height_limit}, 点数: {len(curve_points)}")
+    plot_info = []
+    plot_by_name: Dict[str, Dict[str, object]] = {}
+    for plot in plot_candidates:
+        plot_entry = {
+            "name": plot["name"],
+            "height_limit": plot["height_limit"],
+            "center": plot["center"],
+            "curve": plot.get("curve"),
+            "points": plot.get("points") or [],
+            "area": plot.get("area") or 0.0,
+            "has_usertext": plot["height_limit"] is not None,
+        }
+        plot_info.append(plot_entry)
+        normalized_name = _normalize_plot_name(plot_entry["name"])
+        if normalized_name:
+            plot_by_name[normalized_name] = plot_entry
 
     logger.info(
-        "[DEBUG] 有效退线数量: %s, 缺少限高: %s, 无效几何: %s",
-        len(setback_info),
+        "[DEBUG] 有效地块数量: %s, 缺少限高: %s",
+        len(plot_info),
         len(missing_height_plots),
-        invalid_geometry_count,
     )
 
-    if not setback_info:
+    if not plot_info:
         error_details = []
-        error_details.append(f"在图层 '{setback_layer}' 中找到 {len(setback_objects)} 个对象")
+        error_details.append(f"在图层 '{plot_layer}' 中找到 {len(plot_objects)} 个对象")
         if missing_height_plots:
             error_details.append(f"其中 {len(missing_height_plots)} 个对象缺少限高信息")
-        if invalid_geometry_count > 0:
-            error_details.append(f"其中 {invalid_geometry_count} 个对象不是曲线类型")
         error_details.append("\n请在Rhino中为地块对象设置UserText:")
         error_details.append("1. 选中场景_地块对象（不是图层）")
         error_details.append("2. 按F3打开属性面板")
@@ -371,23 +529,57 @@ def check_height_limit_pure_python(
         error_details.append("5. 重新上传模型到系统")
         raise ValueError("\n".join(error_details))
 
-    logger.info(f"Found {len(setback_info)} valid setbacks with plot height limits")
+    # 解析退线（用于体块外形）
+    setback_info = []
+    invalid_setbacks = 0
+    unmatched_setbacks = []
+
+    if setback_objects:
+        for idx, (obj, geometry) in enumerate(setback_objects):
+            if not isinstance(geometry, rhino3dm.Curve):
+                invalid_setbacks += 1
+                continue
+            plot_name = _get_user_text(obj, "地块名称")
+            matched_plot = None
+            if plot_name:
+                matched_plot = plot_by_name.get(_normalize_plot_name(plot_name))
+            if matched_plot is None:
+                for candidate in plot_info:
+                    if _point_in_curve_2d(candidate["center"], geometry):
+                        matched_plot = candidate
+                        break
+            if matched_plot is None:
+                unmatched_setbacks.append(plot_name or f"退线{idx + 1}")
+                continue
+            curve_points = _curve_to_points(geometry)
+            setback_info.append({
+                "name": matched_plot["name"],
+                "height_limit": matched_plot["height_limit"],
+                "curve": geometry,
+                "points": curve_points,
+                "has_usertext": matched_plot["height_limit"] is not None,
+            })
+
+    if not setback_info:
+        logger.warning("No valid setback curves matched to plots; setback volumes will be empty.")
 
     # 检测每栋建筑
     results = []
     unmatched_buildings = []
+    plot_name_mismatch: List[str] = []
+    missing_building_names: List[str] = []
 
     for building_idx, (obj, geometry) in enumerate(building_objects):
         attributes = getattr(obj, "Attributes", None)
         layer_index = getattr(attributes, "LayerIndex", None) if attributes else None
         layer_name = layer_index_map.get(layer_index)
+        object_id = getattr(attributes, "Id", None) if attributes else None
         object_name = _get_object_name(obj)
-        building_name = (
-            _get_user_text(obj, "建筑名称")
-            or object_name
-            or layer_name
-            or f"建筑{building_idx + 1}"
-        )
+        building_plot_name = _get_user_text(obj, "地块名称")
+        building_name = _get_user_text(obj, "建筑名称")
+        if not building_name:
+            missing_building_names.append(object_name or f"建筑{building_idx + 1}")
+            building_name = object_name or layer_name or f"建筑{building_idx + 1}"
         # 获取建筑的BoundingBox
         bbox = _get_bounding_box(geometry)
         if bbox is None:
@@ -395,15 +587,19 @@ def check_height_limit_pure_python(
             continue
 
         # 获取建筑中心点和最高点
-        center = bbox.Center
         max_height = bbox.Max.Z
 
-        # 判断建筑属于哪个地块
         matched_plot = None
-        for setback in setback_info:
-            if _point_in_curve_2d(center, setback["curve"]):
-                matched_plot = setback
-                break
+        if building_plot_name:
+            matched_plot = plot_by_name.get(_normalize_plot_name(building_plot_name))
+            if matched_plot is None:
+                plot_name_mismatch.append(building_name)
+                continue
+            if _match_plot_for_building(bbox, [matched_plot]) is None:
+                plot_name_mismatch.append(building_name)
+                continue
+        else:
+            matched_plot = _match_plot_for_building(bbox, plot_info)
 
         if matched_plot is None:
             # 建筑不在任何地块内
@@ -426,6 +622,7 @@ def check_height_limit_pure_python(
             "building_name": building_name,
             "layer_index": layer_index,
             "layer_name": layer_name,
+            "object_id": str(object_id) if object_id else None,
             "plot_name": matched_plot["name"],
             "height_limit": matched_plot["height_limit"],
             "actual_height": max_height,
@@ -456,7 +653,7 @@ def check_height_limit_pure_python(
         else:
             plot_stats[plot_name]["compliant"] += 1
 
-    plot_exceeded: Dict[str, bool] = {plot["name"]: False for plot in setback_info}
+    plot_exceeded: Dict[str, bool] = {plot["name"]: False for plot in plot_info}
     for result in results:
         if result["is_exceeded"]:
             plot_exceeded[result["plot_name"]] = True
@@ -481,13 +678,19 @@ def check_height_limit_pure_python(
     # 构建返回结果
     warnings = []
     if unmatched_buildings:
-        warnings.append(f"{len(unmatched_buildings)} buildings are not within any setback boundary")
+        warnings.append(f"{len(unmatched_buildings)} buildings are not within any plot boundary")
     if missing_height_plots:
         missing_list = ", ".join(sorted(missing_height_plots))
         warnings.append(f"以下地块缺少限高信息: {missing_list}")
     if unmatched_setbacks:
         missing_setbacks = ", ".join(unmatched_setbacks)
         warnings.append(f"{len(unmatched_setbacks)} setback objects are not matched to any plot: {missing_setbacks}")
+    if invalid_setbacks > 0:
+        warnings.append(f"{invalid_setbacks} setback objects are not valid curves")
+    if plot_name_mismatch:
+        warnings.append(f"{len(plot_name_mismatch)} buildings have mismatched plot name: {', '.join(plot_name_mismatch[:5])}")
+    if missing_building_names:
+        warnings.append(f"{len(missing_building_names)} buildings missing 建筑名称 usertext")
     if invalid_plot_count > 0:
         warnings.append(f"{invalid_plot_count} plot objects have invalid geometry")
 
