@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -8,6 +9,8 @@ import { KnowledgeGraph } from "@/components/knowledge-graph";
 import type { CityElement } from "@/lib/city-data";
 import { elementTypeNames } from "@/lib/city-data";
 import { Send, Network, MessageSquare } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface Message {
   id: string;
@@ -20,118 +23,64 @@ interface QAPanelProps {
   selectedElement: CityElement | null;
 }
 
-// 模拟AI回答
-function generateAIResponse(
-  question: string,
-  element: CityElement | null
-): string {
-  const controlElements = [
-    { name: "建筑限高", description: "控制天际线与城市风貌，避免超高超密建设。" },
-    { name: "建筑退线", description: "保障街道空间尺度与公共安全通行。" },
-    { name: "容积率", description: "反映开发强度与用地效率，是核心控制指标。" },
-    { name: "建筑密度", description: "平衡建设量与开放空间，提高场地舒适度。" },
-    { name: "绿地率", description: "提升生态与景观品质，优化微气候。" },
-    { name: "停车配建", description: "匹配出行需求，缓解交通压力。" },
-    { name: "日照要求", description: "保障居住舒适度与公共空间品质。" },
-    { name: "消防通道", description: "满足应急与安全疏散要求。" },
-    { name: "视廊保护", description: "保障城市景观视线与特色风貌。" },
-    { name: "交通影响", description: "评估路网承载与出行效率。" },
-  ];
-
-  const valuePoints = [
-    "快速定位合规风险与关键指标",
-    "联动管控要素之间的影响关系",
-    "结合资料生成图文并茂的解释与建议",
-    "为方案调整提供可执行的决策支持",
-  ];
-
-  const lowerQuestion = question.toLowerCase();
-
-  if (!element) {
-    if (lowerQuestion.includes("要素") || lowerQuestion.includes("指标") || lowerQuestion.includes("管控")) {
-      return `城市管控核心要素包括：\n${controlElements
-        .map((item) => `• ${item.name}：${item.description}`)
-        .join("\n")}`;
-    }
-
-    if (lowerQuestion.includes("价值") || lowerQuestion.includes("作用") || lowerQuestion.includes("能做什么")) {
-      return `系统可为你提供的价值：\n${valuePoints.map((item) => `• ${item}`).join("\n")}`;
-    }
-
-    if (lowerQuestion.includes("图谱") || lowerQuestion.includes("关系") || lowerQuestion.includes("关联")) {
-      return "知识图谱用于展示管控要素之间的关联关系，例如“限高/视廊/日照”共同影响城市风貌与居住品质，“容积率/密度/绿地率”共同影响开发强度与开放空间。";
-    }
-
-    return `你可以直接提问城市管控相关问题，例如限高、退线、容积率、日照、停车等。我会结合你上传的资料生成图文并茂的答案。`;
-  }
-
-  if (
-    lowerQuestion.includes("介绍") ||
-    lowerQuestion.includes("概况") ||
-    lowerQuestion.includes("是什么")
-  ) {
-    return `【${element.name}】\n\n${element.knowledgeBase.join("\n\n")}`;
-  }
-
-  if (
-    lowerQuestion.includes("面积") ||
-    lowerQuestion.includes("大小") ||
-    lowerQuestion.includes("规模")
-  ) {
-    return `${element.name}的总建筑/占地面积为 ${element.info.area.toLocaleString()} 平方米。${
-      element.info.floors ? `共 ${element.info.floors} 层，` : ""
-    }${element.info.height ? `建筑高度 ${element.info.height} 米。` : ""}`;
-  }
-
-  if (
-    lowerQuestion.includes("用途") ||
-    lowerQuestion.includes("功能") ||
-    lowerQuestion.includes("用地")
-  ) {
-    return `${element.name}的主要用途为：${element.info.usage}。\n\n${element.knowledgeBase[0] || ""}`;
-  }
-
-  if (
-    lowerQuestion.includes("管控") ||
-    lowerQuestion.includes("指标") ||
-    lowerQuestion.includes("规划")
-  ) {
-    const controlsInfo = element.controls
-      .map(
-        (c) =>
-          `• ${c.name}：当前值 ${c.currentValue}${c.unit}，限制值 ${c.limitValue}${c.unit}`
-      )
-      .join("\n");
-    return `${element.name}的主要管控指标如下：\n\n${controlsInfo}`;
-  }
-
-  if (
-    lowerQuestion.includes("问题") ||
-    lowerQuestion.includes("超标") ||
-    lowerQuestion.includes("不符合")
-  ) {
-    const issues = element.controls.filter((c) => c.status !== "safe");
-    if (issues.length === 0) {
-      return `${element.name}目前所有管控指标均符合要求，没有发现问题。`;
-    }
-    const issuesInfo = issues
-      .map(
-        (c) =>
-          `• ${c.name}：当前 ${c.currentValue}${c.unit}，要求 ${c.limitValue}${c.unit}\n  建议：${c.suggestion || "待评估"}`
-      )
-      .join("\n\n");
-    return `${element.name}存在以下需要关注的问题：\n\n${issuesInfo}`;
-  }
-
-  return `关于${element.name}，这是一个${elementTypeNames[element.type]}类型的城市要素。\n\n${element.knowledgeBase[0] || "暂无更多信息。"}\n\n您可以询问关于面积、用途、管控指标等方面的问题。`;
-}
-
 const quickQuestions = [
   "城市管控要素有哪些",
   "限高控制有什么要求",
   "容积率如何影响开发强度",
   "系统能提供哪些价值",
 ];
+
+const CHAT_ENDPOINT = "/qa/chat";
+
+const buildHistory = (messages: Message[]) =>
+  messages
+    .filter((message) => message.id !== "welcome")
+    .slice(-8)
+    .map((message) => ({ role: message.role, content: message.content }));
+
+const buildFallbackAnswer = (question: string, element: CityElement | null) => {
+  if (element) {
+    const intro = `【${element.name}】这是一个${elementTypeNames[element.type]}。`;
+    const knowledge = element.knowledgeBase[0] ? `\n\n${element.knowledgeBase[0]}` : "";
+    return `${intro}${knowledge}`;
+  }
+
+  if (question.includes("图谱") || question.includes("关系")) {
+    return "当前接口不可用，已启用本地简答。你可以继续提问管控要素、指标与关系。";
+  }
+  return "当前接口不可用，已启用本地简答。你可以提问限高、退线、容积率、日照等管控问题。";
+};
+
+const normalizeMarkdownLists = (content: string) => {
+  const lines = content.split(/\r?\n/);
+  let lastNonEmptyLine = "";
+  let lastIndent = "";
+
+  return lines
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return line;
+      }
+
+      const orderedMatch = line.match(/^(\s*)\d+\.\s+/);
+      if (orderedMatch) {
+        lastNonEmptyLine = "ordered";
+        lastIndent = orderedMatch[1] ?? "";
+        return line;
+      }
+
+      const bulletMatch = line.match(/^(\s*)[-*+]\s+/);
+      if (bulletMatch && lastNonEmptyLine === "ordered") {
+        const normalized = line.trimStart();
+        return `${lastIndent}  ${normalized}`;
+      }
+
+      lastNonEmptyLine = "other";
+      return line;
+    })
+    .join("\n");
+};
 
 export function QAPanel({ selectedElement }: QAPanelProps) {
   const [messages, setMessages] = useState<Message[]>([
@@ -172,12 +121,13 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
   }, [selectedElement]);
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isTyping) return;
+    const question = input.trim();
 
     const userMessage: Message = {
       id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       role: "user",
-      content: input,
+      content: question,
       timestamp: new Date(),
     };
 
@@ -185,18 +135,44 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
     setInput("");
     setIsTyping(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      const response = await fetch(CHAT_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          question,
+          history: buildHistory(messages),
+        }),
+      });
 
-    const aiResponse = generateAIResponse(input, selectedElement);
-    const assistantMessage: Message = {
-      id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      role: "assistant",
-      content: aiResponse,
-      timestamp: new Date(),
-    };
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `请求失败: ${response.status}`);
+      }
 
-    setMessages((prev) => [...prev, assistantMessage]);
-    setIsTyping(false);
+      const data = (await response.json()) as { answer?: string };
+      const aiResponse = data.answer?.trim() || "未返回答案。";
+      const assistantMessage: Message = {
+        id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        role: "assistant",
+        content: aiResponse,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+    } catch (error) {
+      const fallback = buildFallbackAnswer(question, selectedElement);
+      const assistantMessage: Message = {
+        id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        role: "assistant",
+        content: fallback,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const handleQuickQuestion = (question: string) => {
@@ -241,14 +217,69 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
           >
             {messages.map((message) => (
               <div key={message.id} className="flex">
-                <div
-                  className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                    message.role === "user"
-                      ? "ml-auto bg-blue-500 text-white"
-                      : "mr-auto bg-slate-100 text-slate-800"
-                  }`}
-                >
-                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+              <div
+                className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                  message.role === "user"
+                    ? "ml-auto bg-blue-500 text-white"
+                    : "mr-auto bg-slate-100 text-slate-800"
+                }`}
+              >
+                  {message.role === "assistant" ? (
+                    <div className="text-sm leading-relaxed">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                          ul: ({ children }) => <ul className="mb-2 list-disc pl-5 last:mb-0">{children}</ul>,
+                          ol: ({ children }) => <ol className="mb-2 list-decimal pl-5 last:mb-0">{children}</ol>,
+                          li: ({ children }) => <li className="mb-1 last:mb-0">{children}</li>,
+                          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                          em: ({ children }) => <em className="italic">{children}</em>,
+                          code: ({
+                            inline,
+                            children,
+                          }: {
+                            inline?: boolean;
+                            children?: ReactNode;
+                          }) =>
+                            inline ? (
+                              <code className="rounded bg-slate-200/60 px-1 py-0.5 text-[0.85em]">
+                                {children}
+                              </code>
+                            ) : (
+                              <code className="block rounded bg-slate-900 text-slate-100 p-3 text-xs overflow-x-auto">
+                                {children}
+                              </code>
+                            ),
+                          pre: ({ children }) => <pre className="mb-2 overflow-x-auto">{children}</pre>,
+                          blockquote: ({ children }) => (
+                            <blockquote className="border-l-2 border-slate-300 pl-3 text-slate-600">
+                              {children}
+                            </blockquote>
+                          ),
+                          table: ({ children }) => (
+                            <div className="mb-2 overflow-x-auto">
+                              <table className="min-w-full border-collapse text-xs">{children}</table>
+                            </div>
+                          ),
+                          thead: ({ children }) => <thead className="bg-slate-200/60">{children}</thead>,
+                          th: ({ children }) => (
+                            <th className="border border-slate-300 px-2 py-1 text-left font-semibold">
+                              {children}
+                            </th>
+                          ),
+                          td: ({ children }) => (
+                            <td className="border border-slate-300 px-2 py-1 align-top">{children}</td>
+                          ),
+                          hr: () => <hr className="my-2 border-slate-300" />,
+                        }}
+                      >
+                        {normalizeMarkdownLists(message.content)}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                  )}
                   <p className={`text-xs mt-1 ${message.role === "user" ? "text-blue-100" : "text-slate-400"}`}>
                     {message.timestamp.toLocaleTimeString("zh-CN", {
                       hour: "2-digit",

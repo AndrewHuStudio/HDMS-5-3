@@ -10,7 +10,7 @@ services:
     ports:
       - "5434:5432"  
     volumes:
-      - E:/HDMS-Data/postgres:/var/lib/postgresql/data
+      - F:/HDMS_data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -30,8 +30,8 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: hdms2024
       MONGO_INITDB_DATABASE: hdms
     volumes:
-      - E:/HDMS-Data/mongodb:/data/db
-      - E:/HDMS-Data/mongodb_config:/data/configdb
+      - F:/HDMS_data/mongodb:/data/db
+      - F:/HDMS_data/mongodb_config:/data/configdb
     networks:
       - hdms-network
 
@@ -45,7 +45,7 @@ services:
       ETCD_QUOTA_BACKEND_BYTES: "8589934592"
       ETCD_SNAPSHOT_COUNT: "50000"
     volumes:
-      - E:/HDMS-Data/etcd:/etcd
+      - F:/HDMS_data/etcd:/etcd
     command: >
       etcd -advertise-client-urls=http://127.0.0.1:2381
            -listen-client-urls http://0.0.0.0:2381
@@ -64,7 +64,7 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
       MINIO_BROWSER: "off"
     volumes:
-      - E:/HDMS-Data/minio:/minio_data
+      - F:/HDMS_data/minio:/minio_data
     command: minio server /minio_data --console-address ":9001"
     ports:
       - "9004:9000"
@@ -93,7 +93,7 @@ services:
       DATA_COORD_SEGMENT_MAX_SIZE: "512"
       LOG_LEVEL: info
     volumes:
-      - E:/HDMS-Data/milvus:/var/lib/milvus
+      - F:/HDMS_data/milvus:/var/lib/milvus
     ports:
       - "19532:19530"
       - "9093:9091"    
@@ -115,8 +115,8 @@ services:
       NEO4J_dbms_security_procedures_allowlist: "apoc.*"
       NEO4J_server_memory_heap_max__size: 2G
     volumes:
-      - E:/HDMS-Data/neo4j:/data
-      - E:/HDMS-Data/neo4j_logs:/logs
+      - F:/HDMS_data/neo4j:/data
+      - F:/HDMS_data/neo4j_logs:/logs
     networks:
       - hdms-network
 

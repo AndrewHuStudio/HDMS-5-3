@@ -1,0 +1,1 @@
+﻿export { QAView } from "./qa-view";

@@ -1,30 +1,26 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with this repository.
 
 ## Project Overview
 
-HDMS (High-Density Mixed-use District Management System) is an urban design control and validation platform. It enables web-based one-click detection of 3D models (.3dm) against urban design requirements using Grasshopper logic via Rhino.Compute.
+HDMS（高强度片区数字化管控平台）用于城市设计管控、三维模型解析与指标校核，并逐步扩展为**资料驱动的问答系统 + 知识图谱**平台。
 
 ## Architecture
 
-Three-tier stack:
 ```
-Frontend (Next.js 16 + React 19 + Three.js)  →  port 3000
-    ↓
-Backend API (FastAPI + Python)               →  port 8000
-    ↓
-Computation Engine (Rhino.Compute)           →  port 6500
+Frontend (Next.js 16 + React 19 + Three.js) → port 3000
+Backend API (FastAPI + Python)              → port 8000
+Data Services (Docker)                      → Milvus / Neo4j / MinIO / Postgres / MongoDB / etcd
 ```
 
-Key directories:
-- `frontend/` - Main frontend (Next.js + Three.js 3D visualization)
-- `services/rhino-api/` - Backend API for .3dm parsing and Grasshopper execution
-- `services/rhino-api/gh/` - Grasshopper definition files (.ghx)
-- `third_party/compute.rhino3d/` - Rhino.Compute source (C#/.NET)
-- `my-app/` - Legacy frontend reference (do not modify)
-- `data/uploads/` - Uploaded .3dm files
-- `data/cache/` - Processed model cache
+## Key Directories
+- `frontend/` - 主前端（Next.js + Three.js + UI）
+- `services/rhino-api/` - 后端 API（FastAPI）
+- `data/uploads/` - 上传模型
+- `data/cache/` - 缓存
+- `docs/` - 文档
+- `docker-compose.yml` - 向量库/图数据库等基础服务
 
 ## Common Commands
 
@@ -42,61 +38,46 @@ npm run lint
 # Setup (PowerShell)
 python -m venv services\rhino-api\.venv
 .\services\rhino-api\.venv\Scripts\activate
-pip install -r services\rhino-api\requirements.txt
+pip install -r requirements.txt
 
 # Run
 python -m uvicorn rhino_api.main:app --reload --port 8000 --app-dir services/rhino-api
 ```
 
-### Rhino.Compute
-```bash
-dotnet run --project third_party/compute.rhino3d/src/rhino.compute/rhino.compute.csproj
-```
+## Backend API Endpoints (current)
+- `POST /models/import` - 上传并解析 .3dm
+- `POST /height-check/pure-python` - 限高检测（纯 Python）
+- `POST /setback-check` - 退线检测
+- `POST /sight-corridor/check` - 视线通廊检测
+- `POST /sight-corridor/collision` - 视线通廊碰撞检测
+- `POST /qa/chat` - 问答接口（OpenAI 兼容）
+- `GET /health` - 健康检查
 
-## Backend API Endpoints
+## Frontend QA & Graph
+- 问答主面板：`frontend/components/qa-panel.tsx`
+  - 通过 `/qa/chat` 请求后端；失败时使用本地简答 fallback。
+  - 使用 `react-markdown` + `remark-gfm` 渲染 Markdown（表格/列表/代码块）。
+- 知识图谱：`frontend/components/knowledge-graph.tsx`
+  - `react-force-graph-2d` 渲染；
+  - 支持列表/图谱视图（当前为静态数据 + 选中要素）。
+- 同源代理：`frontend/app/qa/chat/route.ts`
+  - Next.js 代理转发到后端 `/qa/chat`，避免跨域。
 
-- `POST /models/import` - Upload and parse .3dm file
-- `POST /height-check` - Validate building height (mesh ID selection)
-- `POST /validate/height` - Validate with limit layers
-- `POST /validate/height/by-building` - Validate with max_height parameter
-- `GET /health` - Health check
+## Environment Variables (root `.env`)
+- `APP_ENV`
+- `MODEL_STORAGE_PATH`
+- `CACHE_STORAGE_PATH`
+- `MAX_UPLOAD_MB`
+- `CORS_ORIGINS`
+- `HDMS_BASE_URL` - OpenAI 兼容 API Base
+- `HDMS_API_KEY`
+- `HDMS_MODEL`
+- `HDMS_VISION_MODEL`
 
-## Grasshopper Integration
+Frontend 可选：
+- `HDMS_BACKEND_BASE_URL`（用于 Next 代理到后端）
+- `NEXT_PUBLIC_HDMS_API_BASE`（如需直连后端）
 
-GH definitions must follow strict naming conventions for Rhino.Compute:
-
-**Inputs (RH_IN):**
-- Group name: `RH_IN <param_name>` (e.g., `RH_IN building_brep`)
-- Parameter NickName must match `<param_name>` exactly
-- Clear all PersistentData before saving
-- Use Brep type (not generic Geometry)
-
-**Outputs (RH_OUT):**
-- Group name: `RH_OUT <param_name>` (e.g., `RH_OUT building_over_limit`)
-- Boolean output: True = violation, False = compliant
-
-After modifying .ghx files, restart Rhino.Compute to clear cache.
-
-## Environment Variables
-
-Backend uses these (see `.env.example` at repo root):
-- `RHINO_COMPUTE_URL` - Default: http://localhost:6500
-- `MODEL_STORAGE_PATH` - Default: ./data/uploads
-- `GH_DEFINITIONS_PATH` - Default: ./gh
-- `MAX_UPLOAD_MB` - Default: 50
-- `CORS_ORIGINS` - Default: http://localhost:3000
-
-## Key Implementation Notes
-
-- Frontend renders 3D models as white with edge lines using Three.js
-- Backend converts Mesh/Extrusion to Brep before sending to Grasshopper
-- Height validation uses building Brep bounding box min Z as baseline
-- File uploads limited to 500MB
-- Geometry selection in frontend uses mesh IDs to identify objects
-
-## Code Conventions
-
-- Frontend uses Shadcn UI components with Radix primitives
-- Backend uses Pydantic models for request/response validation
-- GH runner encodes geometry using `rhino3dm.CommonObject.Encode()`
-- API responses include `highlight_boxes` (min/max coordinates) for frontend visualization
+## Notes
+- 优先通过**新增模块**扩展功能，减少合并冲突；如需替换旧模块请明确说明。
+- 目前问答与知识图谱为基础版本，后续接入 OCR、向量检索与图数据库。
