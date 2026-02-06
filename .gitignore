@@ -39,6 +39,14 @@ data/cache/*
 !data/uploads/.gitkeep
 !data/cache/.gitkeep
 
+# OCR 辅助模块数据（保留目录结构，但忽略内容）
+data/ocr_output/*
+data/ocr_tmp/*
+data/ocr_progress/*
+!data/ocr_output/.gitkeep
+!data/ocr_tmp/.gitkeep
+!data/ocr_progress/.gitkeep
+
 # IDE
 .vscode/
 .idea/

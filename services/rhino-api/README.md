@@ -20,8 +20,9 @@
 - 地块对象需设置 UserText：`限高值`（必填，兼容 `限高`）、`地块名称`（可选）。
 
 环境变量:
-- `MODEL_STORAGE_PATH` (默认 `../../data/uploads`)
-- `CACHE_STORAGE_PATH` (默认 `../../data/cache`)
+- 位于仓库根目录的 `.env`（参照根目录 `.env.example`）
+- `MODEL_STORAGE_PATH` (默认 `./data/uploads`)
+- `CACHE_STORAGE_PATH` (默认 `./data/cache`)
 - `MAX_UPLOAD_MB` (默认 `500`)
 - `CORS_ORIGINS` (默认 `http://localhost:3000,http://127.0.0.1:3000`)
 
