@@ -1,8 +1,8 @@
 import { Flame } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
-import { FireLadderPanel } from "./panel";
-import { FireLadderSceneLayer } from "./scene";
-import { useFireLadderStore } from "./store";
+import { FireLadderPanel } from "@/features/fire-ladder/panel";
+import { FireLadderSceneLayer } from "@/features/fire-ladder/scene";
+import { useFireLadderStore } from "@/features/fire-ladder/store";
 
 toolRegistry.register({
   id: "fire-ladder-check",
