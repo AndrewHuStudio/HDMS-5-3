@@ -1,11 +1,8 @@
 ﻿import type { ChatHistoryMessage, ChatResponse } from "./types";
+import { QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { streamChat, type SSECallbacks } from "@/lib/sse-client";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_HDMS_API_BASE ||
-  process.env.NEXT_PUBLIC_API_BASE ||
-  "http://localhost:8000";
-
-const CHAT_ENDPOINT = `${API_BASE.replace(/\/$/, "")}/qa/chat`;
+const CHAT_ENDPOINT = `${normalizeApiBase(QA_API_BASE)}/qa/chat`;
 
 export async function sendQuestion(
   question: string,
@@ -25,4 +22,13 @@ export async function sendQuestion(
   }
 
   return (await response.json()) as ChatResponse;
+}
+
+export async function sendQuestionStream(
+  question: string,
+  history: ChatHistoryMessage[],
+  callbacks: SSECallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamChat(question, history, callbacks, signal);
 }

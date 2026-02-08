@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const BACKEND_BASE = process.env.HDMS_BACKEND_BASE_URL || "http://localhost:8000";
+const BACKEND_BASE =
+  process.env.HDMS_QA_BASE_URL ||
+  process.env.NEXT_PUBLIC_HDMS_QA_BASE ||
+  process.env.NEXT_PUBLIC_HDMS_QA_API_BASE ||
+  "http://localhost:8000";
 
 const normalizeBase = (value: string) => value.replace(/\/$/, "");
 

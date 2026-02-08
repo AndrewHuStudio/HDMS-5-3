@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { AlertCircle, CheckCircle2, Loader2, X, Eye } from "lucide-react";
 import { useModelStore } from "@/lib/stores/model-store";
+import { API_BASE, normalizeApiBase } from "@/lib/api-base";
 import { checkFireLadder } from "./api";
 import { useFireLadderStore } from "./store";
 
@@ -28,7 +29,7 @@ const reasonLabels: Record<string, string> = {
 };
 
 export function FireLadderPanel() {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+  const apiBase = normalizeApiBase(API_BASE);
   const modelFilePath = useModelStore((state) => state.modelFilePath);
   const modelFile = useModelStore((state) => state.externalModelFile);
   const setModelFilePath = useModelStore((state) => state.setModelFilePath);
@@ -68,12 +69,16 @@ export function FireLadderPanel() {
         const formData = new FormData();
         formData.append("file", modelFile);
 
-        const uploadResponse = await fetch(`${apiBase}/models/import?skip_layers=true`, {
+        const uploadUrl = `${apiBase}/models/import?skip_layers=true`;
+        const uploadResponse = await fetch(uploadUrl, {
           method: "POST",
           body: formData,
         });
 
         if (!uploadResponse.ok) {
+          if (uploadResponse.status === 404) {
+            throw new Error(`模型上传接口未找到: ${uploadUrl}`);
+          }
           const errorData = await uploadResponse.json().catch(() => ({}));
           throw new Error(errorData.detail || "模型上传失败");
         }
@@ -203,32 +208,57 @@ export function FireLadderPanel() {
 
       {hasResults && (
         <Card>
-          <CardHeader className="pb-1">
-            <CardTitle className="text-sm">检测结果</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              通过 {passedCount}，未通过 {failedCount}
-            </p>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm">检测结果</CardTitle>
+              <div className="flex items-center gap-2">
+                <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                  {passedCount}/{results.length} 通过
+                </div>
+                {failedCount > 0 && (
+                  <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">
+                    {failedCount} 未通过
+                  </div>
+                )}
+              </div>
+            </div>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="space-y-2.5 max-h-[320px] overflow-y-auto pt-2">
             {results.map((item) => (
               <div
                 key={item.redline_index}
-                className={`rounded border p-3 text-sm ${
+                className={`border rounded-lg p-3 transition-all hover:shadow-sm ${
                   item.status === "pass"
-                    ? "border-green-200 bg-green-50/80"
-                    : "border-red-200 bg-red-50/80"
+                    ? "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
+                    : "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">{item.redline_name}</div>
-                  <div className="text-xs">
-                    {item.status === "pass" ? "通过" : "未通过"}
-                  </div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-sm">{item.redline_name}</span>
+                  {item.status === "pass" ? (
+                    <div className="flex items-center gap-1.5 text-green-700 dark:text-green-400">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span className="text-xs font-medium">通过</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-red-700 dark:text-red-400">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                      <span className="text-xs font-medium">未通过</span>
+                    </div>
+                  )}
                 </div>
-                <div className="text-xs text-muted-foreground mt-1 space-y-1">
-                  {item.reasons.length === 0 && <div>符合要求</div>}
+                <div className="space-y-1 text-xs">
+                  {item.reasons.length === 0 && (
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="text-muted-foreground">结论:</span>
+                      <span className="font-medium">符合要求</span>
+                    </div>
+                  )}
                   {item.reasons.map((reason) => (
-                    <div key={reason}>{reasonLabels[reason] || reason}</div>
+                    <div key={reason} className="flex justify-between items-center py-0.5">
+                      <span className="text-muted-foreground">原因:</span>
+                      <span className="font-medium">{reasonLabels[reason] || reason}</span>
+                    </div>
                   ))}
                 </div>
               </div>

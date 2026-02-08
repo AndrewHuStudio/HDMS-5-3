@@ -3,6 +3,7 @@
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid, Html, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import { useState, useRef, Suspense, useEffect, useCallback, useMemo } from "react";
+import { useTheme } from "next-themes";
 import type { CityElement } from "@/lib/city-data";
 import { mockCityElements, elementTypeNames } from "@/lib/city-data";
 import type { HeightCheckSetbackVolume } from "@/lib/height-check-types";
@@ -1965,6 +1966,12 @@ export function PlanViewport({
   const controlsRef = useRef<any | null>(null);
   const [planModelBounds, setPlanModelBounds] = useState<THREE.Box3 | null>(null);
   const fitBounds = planModelBounds ?? modelBounds;
+  const { resolvedTheme } = useTheme();
+  const isDarkTheme = resolvedTheme === "dark";
+  const planBackground = isDarkTheme ? "#0b0f1a" : "#f8fafc";
+  const planGridColors = isDarkTheme
+    ? { cellColor: "#ffffff", sectionColor: "#ffffff", opacity: 0.2 }
+    : { cellColor: "#e0e0e0", sectionColor: "#c0c0c0", opacity: 0.1 };
 
   useEffect(() => {
     setPlanModelBounds(null);
@@ -2003,7 +2010,7 @@ export function PlanViewport({
       <div className="w-full aspect-square" onClick={handleCanvasClick}>
         <Canvas
           shadows
-          style={{ background: "#f8fafc", width: "100%", height: "100%" }}
+          style={{ background: planBackground, width: "100%", height: "100%" }}
           gl={{ antialias: true }}
         >
           <OrthographicCamera
@@ -2027,10 +2034,11 @@ export function PlanViewport({
               planeSize={GRID_PLANE_SIZE}
               cellSize={50}
               sectionSize={200}
-              cellColor="#e0e0e0"
-              sectionColor="#c0c0c0"
+              cellColor={planGridColors.cellColor}
+              sectionColor={planGridColors.sectionColor}
               cellThickness={0.5}
               sectionThickness={1}
+              opacity={planGridColors.opacity}
               upAxis={sceneUpAxis}
             />
 
@@ -2284,6 +2292,12 @@ export function CityScene({
   const personScale = 2 * sightCorridorScale * PERSON_SCALE_MULTIPLIER;
   const hemisphereRadius = Math.max(0, sightCorridorRadius) * sightCorridorScale;
   const [modelBounds, setModelBounds] = useState<THREE.Box3 | null>(null);
+  const { resolvedTheme } = useTheme();
+  const isDarkTheme = resolvedTheme === "dark";
+  const sceneBackground = isDarkTheme ? "#0b0f1a" : "#ffffff";
+  const gridColors = isDarkTheme
+    ? { cellColor: "#ffffff", sectionColor: "#ffffff", opacity: 0.2 }
+    : { cellColor: "#e0e0e0", sectionColor: "#c0c0c0", opacity: 0.1 };
 
   const updateCameraClipping = useCallback(() => {
     const controls = controlsRef.current;
@@ -2356,7 +2370,7 @@ export function CityScene({
       >
         <Canvas
           shadows
-          style={{ background: '#ffffff' }}
+          style={{ background: sceneBackground }}
           onPointerMissed={() => {
             onSelectElement(null);
             onImportedMeshSelect?.(null);
@@ -2413,10 +2427,11 @@ export function CityScene({
               planeSize={GRID_PLANE_SIZE}
               cellSize={50}
               sectionSize={200}
-              cellColor="#e0e0e0"
-              sectionColor="#c0c0c0"
+              cellColor={gridColors.cellColor}
+              sectionColor={gridColors.sectionColor}
               cellThickness={0.5}
               sectionThickness={1}
+              opacity={gridColors.opacity}
               upAxis={sceneUpAxis}
             />
 

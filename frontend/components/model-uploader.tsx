@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
@@ -109,21 +110,21 @@ export function ModelUploader({ onModelLoad, currentModel, currentModelName, onC
   return (
     <div className="flex items-center gap-2">
       {currentModel ? (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded">
-          <Check className="h-4 w-4 text-emerald-600" />
-          <span className="text-xs text-emerald-700 max-w-[120px] truncate">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 rounded">
+          <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+          <span className="text-xs text-emerald-700 dark:text-emerald-200 max-w-[120px] truncate">
             {currentModelName || fileName || "已加载模型"}
           </span>
           <Button
             variant="ghost"
             size="sm"
-            className="h-5 w-5 p-0 hover:bg-emerald-100"
+            className="h-5 w-5 p-0 hover:bg-emerald-100 dark:hover:bg-emerald-900/60"
             onClick={() => {
               onClearModel();
               setFileName(null);
             }}
           >
-            <X className="h-3 w-3 text-emerald-600" />
+            <X className="h-3 w-3 text-emerald-600 dark:text-emerald-300" />
           </Button>
         </div>
       ) : (
@@ -136,6 +137,9 @@ export function ModelUploader({ onModelLoad, currentModel, currentModelName, onC
           </DialogTrigger>
           <DialogContent className="sm:max-w-md gap-0 pt-4">
             <DialogTitle className="sr-only">导入模型</DialogTitle>
+            <DialogDescription className="sr-only">
+              上传 Rhino 3dm 模型用于管控检测与三维展示。
+            </DialogDescription>
             <div
               className={`
                 border-2 border-dashed rounded-lg p-8 text-center transition-colors mt-2

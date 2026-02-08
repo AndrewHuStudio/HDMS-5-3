@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTheme } from "next-themes";
 import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { Network, List } from "lucide-react";
@@ -51,6 +52,12 @@ const defaultKnowledgePoints = [
 
 export function KnowledgeGraph({ selectedElement }: KnowledgeGraphProps) {
   const [viewMode, setViewMode] = useState<"graph" | "list">("list");
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  const graphBackground = isDark ? "#0f172a" : "#ffffff";
+  const graphLabelBackground = isDark ? "rgba(15, 23, 42, 0.85)" : "rgba(255, 255, 255, 0.8)";
+  const graphLabelColor = isDark ? "#e2e8f0" : "#1f2937";
+  const graphLinkColor = isDark ? "#334155" : "#cbd5e1";
 
   // 将选中元素的数据转换为图谱数据
   const graphData = useMemo(() => {
@@ -189,10 +196,10 @@ export function KnowledgeGraph({ selectedElement }: KnowledgeGraphProps) {
                   {selectedElement.controls.map((control) => (
                     <div
                       key={control.id}
-                      className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm"
+                      className="p-3 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 rounded-lg text-sm"
                     >
-                      <p className="font-medium text-emerald-900">{control.name}</p>
-                      <p className="text-xs text-emerald-700 mt-1">
+                      <p className="font-medium text-emerald-900 dark:text-emerald-100">{control.name}</p>
+                      <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
                         当前: {control.currentValue}
                         {control.unit} / 限制: {control.limitValue}
                         {control.unit}
@@ -210,9 +217,9 @@ export function KnowledgeGraph({ selectedElement }: KnowledgeGraphProps) {
                   {selectedElement.knowledgeBase.map((kb, index) => (
                     <div
                       key={index}
-                      className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm"
+                      className="p-3 bg-amber-50 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 rounded-lg text-sm"
                     >
-                      <p className="text-amber-900">{kb}</p>
+                      <p className="text-amber-900 dark:text-amber-100">{kb}</p>
                     </div>
                   ))}
                 </div>
@@ -228,10 +235,10 @@ export function KnowledgeGraph({ selectedElement }: KnowledgeGraphProps) {
                   {defaultControls.map((control) => (
                     <div
                       key={control.id}
-                      className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm"
+                      className="p-3 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 rounded-lg text-sm"
                     >
-                      <p className="font-medium text-emerald-900">{control.name}</p>
-                      <p className="text-xs text-emerald-700 mt-1">{control.description}</p>
+                      <p className="font-medium text-emerald-900 dark:text-emerald-100">{control.name}</p>
+                      <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">{control.description}</p>
                     </div>
                   ))}
                 </div>
@@ -245,10 +252,10 @@ export function KnowledgeGraph({ selectedElement }: KnowledgeGraphProps) {
                   {defaultKnowledgePoints.map((point) => (
                     <div
                       key={point.id}
-                      className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm"
+                      className="p-3 bg-amber-50 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 rounded-lg text-sm"
                     >
-                      <p className="font-medium text-amber-900">{point.name}</p>
-                      <p className="text-xs text-amber-700 mt-1">{point.description}</p>
+                      <p className="font-medium text-amber-900 dark:text-amber-100">{point.name}</p>
+                      <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">{point.description}</p>
                     </div>
                   ))}
                 </div>
@@ -261,17 +268,17 @@ export function KnowledgeGraph({ selectedElement }: KnowledgeGraphProps) {
       {/* 图谱视图 */}
       {viewMode === "graph" && (
         <div className="space-y-2">
-          <div className="h-[500px] border border-border rounded-lg bg-white overflow-hidden">
+          <div className="h-[500px] border border-border rounded-lg bg-card overflow-hidden">
             <ForceGraph2D
               graphData={graphData}
               nodeLabel="name"
               nodeColor={getNodeColor}
               nodeRelSize={6}
-              linkColor={() => "#cbd5e1"}
+              linkColor={() => graphLinkColor}
               linkWidth={2}
               width={320}
               height={500}
-              backgroundColor="#ffffff"
+              backgroundColor={graphBackground}
               nodeCanvasObject={(node: any, ctx, globalScale) => {
                 const label = node.name;
                 const fontSize = 12 / globalScale;
@@ -288,7 +295,7 @@ export function KnowledgeGraph({ selectedElement }: KnowledgeGraphProps) {
                 ctx.fill();
 
                 // 绘制文字背景
-                ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+                ctx.fillStyle = graphLabelBackground;
                 ctx.fillRect(
                   node.x - bckgDimensions[0] / 2,
                   node.y - bckgDimensions[1] / 2 + (node.val || 5) + 5,
@@ -299,7 +306,7 @@ export function KnowledgeGraph({ selectedElement }: KnowledgeGraphProps) {
                 // 绘制文字
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                ctx.fillStyle = "#1f2937";
+                ctx.fillStyle = graphLabelColor;
                 ctx.fillText(
                   label,
                   node.x,

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { QAShell } from "@/components/qa-new";
-import { sendQuestion } from "./api";
+import { useQAViewStore } from "@/lib/stores/qa-store";
+import { sendQuestion, sendQuestionStream } from "./api";
 import type { ChatHistoryMessage, ChatMessage } from "./types";
 
 const quickQuestions = [
@@ -12,18 +13,11 @@ const quickQuestions = [
   "如何展示管控要素关系",
 ];
 
-const welcomeMessage: ChatMessage = {
-  id: "welcome",
-  role: "assistant",
-  content:
-    "你好，我是 HDMS 问答助手。你可以提问管控要素、指标解释或上传资料中的具体问题。",
-  createdAt: new Date().toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-};
-
-const createMessage = (role: ChatMessage["role"], content: string): ChatMessage => ({
+const createMessage = (
+  role: ChatMessage["role"],
+  content: string,
+  extra?: Partial<ChatMessage>,
+): ChatMessage => ({
   id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   role,
   content,
@@ -31,6 +25,7 @@ const createMessage = (role: ChatMessage["role"], content: string): ChatMessage 
     hour: "2-digit",
     minute: "2-digit",
   }),
+  ...extra,
 });
 
 const buildHistory = (messages: ChatMessage[]): ChatHistoryMessage[] => {
@@ -41,7 +36,9 @@ const buildHistory = (messages: ChatMessage[]): ChatHistoryMessage[] => {
 };
 
 export function QAView() {
-  const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage]);
+  const messages = useQAViewStore((state) => state.messages);
+  const appendMessage = useQAViewStore((state) => state.appendMessage);
+  const updateMessage = useQAViewStore((state) => state.updateMessage);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
 
@@ -51,19 +48,69 @@ export function QAView() {
 
     const history = buildHistory(messages);
     const userMessage = createMessage("user", question);
-    setMessages((prev) => [...prev, userMessage]);
+    appendMessage(userMessage);
     setInput("");
     setIsSending(true);
 
+    // Create placeholder assistant message for streaming
+    const assistantMsg = createMessage("assistant", "", {
+      thinking: "",
+      sources: [],
+      isStreaming: true,
+    });
+    const assistantId = assistantMsg.id;
+    appendMessage(assistantMsg);
+
     try {
-      const response = await sendQuestion(question, history);
-      const answer = response.answer || "未返回答案。";
-      const assistantMessage = createMessage("assistant", answer);
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "请求失败";
-      const assistantMessage = createMessage("assistant", `请求失败：${detail}`);
-      setMessages((prev) => [...prev, assistantMessage]);
+      await sendQuestionStream(question, history, {
+        onSources: (sources) => {
+          updateMessage(assistantId, (msg) => ({ ...msg, sources }));
+        },
+        onThinking: (token) => {
+          updateMessage(assistantId, (msg) => ({
+            ...msg,
+            thinking: (msg.thinking || "") + token,
+          }));
+        },
+        onAnswer: (token) => {
+          updateMessage(assistantId, (msg) => ({
+            ...msg,
+            content: msg.content + token,
+          }));
+        },
+        onDone: () => {
+          updateMessage(assistantId, (msg) => ({
+            ...msg,
+            isStreaming: false,
+          }));
+        },
+        onError: (detail) => {
+          updateMessage(assistantId, (msg) => ({
+            ...msg,
+            content: msg.content || `Error: ${detail}`,
+            isStreaming: false,
+          }));
+        },
+      });
+    } catch {
+      // Fallback to non-streaming if SSE fails
+      try {
+        const response = await sendQuestion(question, history);
+        updateMessage(assistantId, (msg) => ({
+          ...msg,
+          content: response.answer || "未返回答案。",
+          sources: response.sources,
+          isStreaming: false,
+        }));
+      } catch (fallbackError) {
+        const detail =
+          fallbackError instanceof Error ? fallbackError.message : "请求失败";
+        updateMessage(assistantId, (msg) => ({
+          ...msg,
+          content: msg.content || `请求失败：${detail}`,
+          isStreaming: false,
+        }));
+      }
     } finally {
       setIsSending(false);
     }

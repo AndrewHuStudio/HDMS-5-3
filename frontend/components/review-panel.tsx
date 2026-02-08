@@ -206,21 +206,21 @@ export function ReviewPanel() {
 
         {/* 统计概览 */}
         <div className="grid grid-cols-4 gap-2 mt-4">
-          <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-center">
-            <p className="text-xl font-bold text-slate-700">{totalItems}</p>
-            <p className="text-xs text-slate-500">总计</p>
+          <div className="p-2 bg-muted/40 border border-border rounded-lg text-center">
+            <p className="text-xl font-bold text-foreground">{totalItems}</p>
+            <p className="text-xs text-muted-foreground">总计</p>
           </div>
-          <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-center">
-            <p className="text-xl font-bold text-emerald-600">{safeItems}</p>
-            <p className="text-xs text-slate-500">符合</p>
+          <div className="p-2 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 rounded-lg text-center">
+            <p className="text-xl font-bold text-emerald-600 dark:text-emerald-300">{safeItems}</p>
+            <p className="text-xs text-muted-foreground">符合</p>
           </div>
-          <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-center">
-            <p className="text-xl font-bold text-amber-600">{warningItems}</p>
-            <p className="text-xs text-slate-500">进展中</p>
+          <div className="p-2 bg-amber-50 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 rounded-lg text-center">
+            <p className="text-xl font-bold text-amber-600 dark:text-amber-300">{warningItems}</p>
+            <p className="text-xs text-muted-foreground">进展中</p>
           </div>
-          <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-center">
-            <p className="text-xl font-bold text-red-600">{exceededItems}</p>
-            <p className="text-xs text-slate-500">超标</p>
+          <div className="p-2 bg-red-50 border border-red-200 dark:bg-red-950/40 dark:border-red-800 rounded-lg text-center">
+            <p className="text-xl font-bold text-red-600 dark:text-red-300">{exceededItems}</p>
+            <p className="text-xs text-muted-foreground">超标</p>
           </div>
         </div>
       </CardHeader>
@@ -229,8 +229,8 @@ export function ReviewPanel() {
         <ScrollArea className="h-full">
           <div className="p-4 space-y-4">
             {/* 片区信息 */}
-            <div className="p-4 bg-slate-50 border border-slate-100 rounded-lg">
-              <h3 className="font-semibold text-slate-800 mb-2">{mockLandPlot.name}</h3>
+            <div className="p-4 bg-muted/40 border border-border rounded-lg">
+              <h3 className="font-semibold text-foreground mb-2">{mockLandPlot.name}</h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="text-muted-foreground">总面积: </span>
@@ -260,8 +260,8 @@ export function ReviewPanel() {
             </div>
 
             {/* 审核进度 */}
-            <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-100 rounded-lg">
-              <span className="text-sm text-slate-700">
+            <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-100 dark:bg-blue-950/40 dark:border-blue-900 rounded-lg">
+              <span className="text-sm text-foreground">
                 已核查: {checkedItems}/{totalItems} 项
               </span>
               <Button variant="outline" size="sm" onClick={checkAll}>
@@ -312,7 +312,7 @@ export function ReviewPanel() {
                             </span>
                           </div>
                           {item.suggestion && (
-                            <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded">
+                            <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 dark:text-amber-200 dark:bg-amber-950/40 dark:border-amber-800 p-2 rounded">
                               {item.suggestion}
                             </p>
                           )}
@@ -351,7 +351,7 @@ export function ReviewPanel() {
             onMouseDown={handleMouseDown}
           >
             {/* 可拖动标题栏 */}
-            <div className="drag-handle flex items-center justify-between px-4 py-3 border-b border-border bg-slate-50 rounded-t-lg cursor-grab active:cursor-grabbing">
+            <div className="drag-handle flex items-center justify-between px-4 py-3 border-b border-border bg-muted/40 rounded-t-lg cursor-grab active:cursor-grabbing">
               <div className="flex items-center gap-2">
                 <GripHorizontal className="h-4 w-4 text-muted-foreground" />
                 <h2 className="font-semibold">城市规划管控审查表</h2>
@@ -411,25 +411,25 @@ function ReviewDocument({
 }) {
   return (
     <ScrollArea className="flex-1">
-      <div className="p-6 space-y-6 bg-white text-black rounded-lg">
+      <div className="p-6 space-y-6 bg-card text-foreground rounded-lg">
         {/* 文档标题 */}
-        <div className="text-center border-b-2 border-black pb-4">
+        <div className="text-center border-b-2 border-border pb-4">
           <h1 className="text-2xl font-bold">城市规划管控要素审查表</h1>
-          <p className="text-sm text-gray-600 mt-2">
+          <p className="text-sm text-muted-foreground mt-2">
             编号: REV-{plot.id}-{Date.now().toString().slice(-6)}
           </p>
         </div>
 
         {/* 基本信息 */}
-        <div className="grid grid-cols-2 gap-4 p-4 border border-gray-300 rounded">
+        <div className="grid grid-cols-2 gap-4 p-4 border border-border rounded">
           <div className="flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-gray-500" />
+            <Building2 className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm">
               <strong>片区名称:</strong> {plot.name}
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-gray-500" />
+            <Calendar className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm">
               <strong>审查日期:</strong> {reviewDate}
             </span>
@@ -448,55 +448,55 @@ function ReviewDocument({
 
         {/* 审查内容 */}
         <div>
-          <h2 className="text-lg font-bold mb-4 border-b border-gray-300 pb-2">
+          <h2 className="text-lg font-bold mb-4 border-b border-border pb-2">
             管控要素审查明细
           </h2>
 
           {Object.entries(groupedItems).map(([elementId, group]) => (
             <div key={elementId} className="mb-6">
-              <h3 className="font-semibold bg-gray-100 p-2 rounded mb-2">
+              <h3 className="font-semibold bg-muted/60 p-2 rounded mb-2">
                 {group.elementName} ({group.elementType})
               </h3>
               <table className="w-full border-collapse text-sm">
                 <thead>
-                  <tr className="bg-gray-50">
-                    <th className="border border-gray-300 p-2 text-left">指标名称</th>
-                    <th className="border border-gray-300 p-2 text-center">当前值</th>
-                    <th className="border border-gray-300 p-2 text-center">限制值</th>
-                    <th className="border border-gray-300 p-2 text-center">状态</th>
-                    <th className="border border-gray-300 p-2 text-center w-16">核查</th>
+                  <tr className="bg-muted/40">
+                    <th className="border border-border p-2 text-left">指标名称</th>
+                    <th className="border border-border p-2 text-center">当前值</th>
+                    <th className="border border-border p-2 text-center">限制值</th>
+                    <th className="border border-border p-2 text-center">状态</th>
+                    <th className="border border-border p-2 text-center w-16">核查</th>
                   </tr>
                 </thead>
                 <tbody>
                   {group.items.map((item) => (
                     <tr key={item.controlId}>
-                      <td className="border border-gray-300 p-2">{item.controlName}</td>
-                      <td className="border border-gray-300 p-2 text-center font-mono">
+                      <td className="border border-border p-2">{item.controlName}</td>
+                      <td className="border border-border p-2 text-center font-mono">
                         {item.currentValue}
                         {item.unit}
                       </td>
-                      <td className="border border-gray-300 p-2 text-center font-mono">
+                      <td className="border border-border p-2 text-center font-mono">
                         {item.limitValue}
                         {item.unit}
                       </td>
-                      <td className="border border-gray-300 p-2 text-center">
+                      <td className="border border-border p-2 text-center">
                         <span
                           className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs ${
                             item.status === "safe"
-                              ? "bg-green-100 text-green-700"
+                              ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
                               : item.status === "in-progress"
-                                ? "bg-yellow-100 text-yellow-700"
-                                : "bg-red-100 text-red-700"
+                                ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300"
+                                : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
                           }`}
                         >
                           {statusConfig[item.status].label}
                         </span>
                       </td>
-                      <td className="border border-gray-300 p-2 text-center">
+                      <td className="border border-border p-2 text-center">
                         {item.checked ? (
                           <CheckCircle2 className="h-5 w-5 text-green-600 mx-auto" />
                         ) : (
-                          <div className="w-5 h-5 border-2 border-gray-300 rounded mx-auto" />
+                          <div className="w-5 h-5 border-2 border-border rounded mx-auto" />
                         )}
                       </td>
                     </tr>
@@ -504,7 +504,7 @@ function ReviewDocument({
                 </tbody>
               </table>
               {group.items.some((item) => item.suggestion) && (
-                <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 dark:bg-yellow-950/40 dark:border-yellow-800 rounded text-sm">
                   <strong>优化建议:</strong>
                   <ul className="list-disc list-inside mt-1">
                     {group.items
@@ -523,17 +523,17 @@ function ReviewDocument({
 
         {/* 审查意见 */}
         <div className="space-y-4">
-          <h2 className="text-lg font-bold border-b border-gray-300 pb-2">审查意见</h2>
+          <h2 className="text-lg font-bold border-b border-border pb-2">审查意见</h2>
           <Textarea
             placeholder="请输入审查意见..."
             value={comments}
             onChange={(e) => setComments(e.target.value)}
-            className="min-h-[100px] bg-white text-black border-gray-300"
+            className="min-h-[100px] bg-background text-foreground border-border"
           />
         </div>
 
         {/* 审查结论 */}
-        <div className="p-4 border-2 border-gray-400 rounded">
+        <div className="p-4 border-2 border-border rounded">
           <h2 className="text-lg font-bold mb-4">审查结论</h2>
           <div className="flex items-center gap-8">
             <label className="flex items-center gap-2">
@@ -570,7 +570,7 @@ function ReviewDocument({
               <PenLine className="h-4 w-4" />
               审核人签字
             </h3>
-            <div className="border-b-2 border-gray-400 pb-2">
+            <div className="border-b-2 border-border pb-2">
               <input
                 type="text"
                 placeholder="签字:"
@@ -579,21 +579,21 @@ function ReviewDocument({
                 className="w-full bg-transparent outline-none text-lg"
               />
             </div>
-            <p className="text-sm text-gray-500">日期: {reviewDate}</p>
+            <p className="text-sm text-muted-foreground">日期: {reviewDate}</p>
           </div>
           <div className="space-y-4">
             <h3 className="font-bold flex items-center gap-2">
               <Stamp className="h-4 w-4" />
               部门盖章
             </h3>
-            <div className="h-24 border-2 border-dashed border-gray-300 rounded flex items-center justify-center">
-              <span className="text-gray-400">盖章处</span>
+            <div className="h-24 border-2 border-dashed border-border rounded flex items-center justify-center">
+              <span className="text-muted-foreground">盖章处</span>
             </div>
           </div>
         </div>
 
         {/* 操作按钮 */}
-        <div className="flex justify-end gap-4 pt-4 border-t border-gray-300">
+        <div className="flex justify-end gap-4 pt-4 border-t border-border">
           <Button variant="outline" className="gap-2 bg-transparent">
             <Printer className="h-4 w-4" />
             打印

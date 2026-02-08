@@ -57,17 +57,17 @@ function ControlIndicatorCard({ indicator }: { indicator: ControlIndicator }) {
   };
 
   return (
-    <div className="p-4 bg-slate-50 border border-slate-100 rounded-lg space-y-3">
+    <div className="p-4 bg-muted/40 border border-border rounded-lg space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-sm text-slate-800">{indicator.name}</span>
+          <span className="font-medium text-sm text-foreground">{indicator.name}</span>
           {indicator.visualType && (
-            <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">
+            <span className="text-xs px-1.5 py-0.5 bg-blue-100/70 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 rounded">
               {visualTypeNames[indicator.visualType]}
             </span>
           )}
           {indicator.isRigid && (
-            <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">
+            <span className="text-xs px-1.5 py-0.5 bg-red-100/70 text-red-700 dark:bg-red-900/40 dark:text-red-300 rounded">
               刚性
             </span>
           )}
@@ -113,15 +113,15 @@ function ControlIndicatorCard({ indicator }: { indicator: ControlIndicator }) {
       )}
 
       {indicator.source && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted-foreground">
           依据: {indicator.source}
         </p>
       )}
 
       {indicator.suggestion && (
-        <div className="flex gap-2 p-2 bg-amber-50 rounded border border-amber-200">
-          <Info className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-slate-600">{indicator.suggestion}</p>
+        <div className="flex gap-2 p-2 bg-amber-50 rounded border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800">
+          <Info className="h-4 w-4 text-amber-600 dark:text-amber-300 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-700 dark:text-amber-200">{indicator.suggestion}</p>
         </div>
       )}
     </div>
@@ -260,17 +260,17 @@ export function ControlPanel({ selectedElement }: ControlPanelProps) {
 
               {/* 状态概览 */}
               <div className="grid grid-cols-3 gap-2 mb-4">
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-center">
-                  <p className="text-2xl font-bold text-emerald-600">{safeCount}</p>
-                  <p className="text-xs text-slate-500">符合</p>
+                <div className="p-3 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-300">{safeCount}</p>
+                  <p className="text-xs text-muted-foreground">符合</p>
                 </div>
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-center">
-                  <p className="text-2xl font-bold text-amber-600">{inProgressCount}</p>
-                  <p className="text-xs text-slate-500">进展中</p>
+                <div className="p-3 bg-amber-50 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-amber-600 dark:text-amber-300">{inProgressCount}</p>
+                  <p className="text-xs text-muted-foreground">进展中</p>
                 </div>
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-center">
-                  <p className="text-2xl font-bold text-red-600">{exceededCount}</p>
-                  <p className="text-xs text-slate-500">超标</p>
+                <div className="p-3 bg-red-50 border border-red-200 dark:bg-red-950/40 dark:border-red-800 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-red-600 dark:text-red-300">{exceededCount}</p>
+                  <p className="text-xs text-muted-foreground">超标</p>
                 </div>
               </div>
 

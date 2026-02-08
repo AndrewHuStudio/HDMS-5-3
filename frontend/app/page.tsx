@@ -10,6 +10,7 @@ import { QAPanel } from "@/components/qa-panel";
 import { ModelUploader, type LayerInfo } from "@/components/model-uploader";
 import { SidebarNav } from "@/components/navigation/sidebar-nav";
 import { ToolPanelWrapper } from "@/components/tools/tool-panel-wrapper";
+import { ThemeToggle } from "@/components/theme-toggle";
 import type { CityElement } from "@/lib/city-data";
 import { mainNavigation } from "@/lib/navigation-config";
 import type { ActiveView } from "@/lib/navigation-types";
@@ -126,7 +127,7 @@ export default function CityControlSystem() {
 
   useEffect(() => {
     const prevView = previousViewRef.current;
-    if (prevView !== activeView && toolIdSet.has(prevView) && toolIdSet.has(activeView)) {
+    if (prevView !== activeView && toolIdSet.has(prevView)) {
       toolRegistry.resetAll();
     }
     previousViewRef.current = activeView;
@@ -197,6 +198,7 @@ export default function CityControlSystem() {
               <Label htmlFor="demo-toggle" className="text-xs">演示数据</Label>
             </div>
 
+            <ThemeToggle />
           </div>
         </header>
 

@@ -8,6 +8,7 @@ import { AlertCircle, Loader2, CheckCircle2, X, Eye } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import type { SetbackCheckResult } from "@/lib/setback-check-types";
+import { API_BASE, normalizeApiBase } from "@/lib/api-base";
 
 interface SetbackCheckPanelProps {
   modelFilePath: string | null;
@@ -30,7 +31,7 @@ export function SetbackCheckPanel({
   showSetbackLabels,
   onShowSetbackLabelsChange,
 }: SetbackCheckPanelProps) {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+  const apiBase = normalizeApiBase(API_BASE);
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SetbackCheckResult | null>(null);
@@ -75,12 +76,16 @@ export function SetbackCheckPanel({
         const formData = new FormData();
         formData.append("file", modelFile);
 
-        const uploadResponse = await fetch(`${apiBase}/models/import?skip_layers=true`, {
+        const uploadUrl = `${apiBase}/models/import?skip_layers=true`;
+        const uploadResponse = await fetch(uploadUrl, {
           method: "POST",
           body: formData,
         });
 
         if (!uploadResponse.ok) {
+          if (uploadResponse.status === 404) {
+            throw new Error(`模型上传接口未找到: ${uploadUrl}`);
+          }
           const errorData = await uploadResponse.json().catch(() => ({}));
           throw new Error(errorData.detail || "模型上传失败");
         }
@@ -106,7 +111,8 @@ export function SetbackCheckPanel({
           ? requiredRatePercent / 100
           : null;
 
-      const response = await fetch(`${apiBase}/setback-check`, {
+      const checkUrl = `${apiBase}/setback-check`;
+      const response = await fetch(checkUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json; charset=utf-8",
@@ -122,6 +128,9 @@ export function SetbackCheckPanel({
       });
 
       if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error(`检测接口未找到: ${checkUrl}`);
+        }
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail || "检测失败");
       }
@@ -220,7 +229,7 @@ export function SetbackCheckPanel({
                 min={0.1}
                 step={0.1}
                 onChange={(e) => setSampleStep(Number(e.target.value))}
-                className="w-full px-2 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full px-2 py-2 text-sm border border-border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
             </div>
             <div className="space-y-2">
@@ -231,7 +240,7 @@ export function SetbackCheckPanel({
                 min={0}
                 step={0.1}
                 onChange={(e) => setTolerance(Number(e.target.value))}
-                className="w-full px-2 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full px-2 py-2 text-sm border border-border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
             </div>
             <div className="space-y-2">
@@ -243,7 +252,7 @@ export function SetbackCheckPanel({
                 max={100}
                 step={1}
                 onChange={(e) => setRequiredRatePercent(Number(e.target.value))}
-                className="w-full px-2 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full px-2 py-2 text-sm border border-border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
             </div>
           </div>
@@ -306,12 +315,23 @@ export function SetbackCheckPanel({
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">综合贴线率</CardTitle>
-              <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
-                {overallRateText}
+              <div className="flex items-center gap-2">
+                <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                  {result.plots.filter(p => p.is_compliant === true).length}/{result.plots.length} 达标
+                </div>
+                {result.plots.some(p => p.is_compliant === false) && (
+                  <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">
+                    {result.plots.filter(p => p.is_compliant === false).length} 未达标
+                  </div>
+                )}
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-3 pt-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>综合贴线率</span>
+              <span className="font-medium">{overallRateText}</span>
+            </div>
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>总退线长度</span>
@@ -341,12 +361,12 @@ export function SetbackCheckPanel({
                 return (
                   <div
                     key={plot.plot_name}
-                    className={`border rounded-lg p-3 space-y-2 ${
+                    className={`border rounded-lg p-3 space-y-2 transition-all hover:shadow-sm ${
                       plot.is_compliant === true
-                        ? "border-green-500 bg-green-50/40 text-green-700"
+                        ? "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
                         : plot.is_compliant === false
-                          ? "border-orange-500 bg-orange-50/40 text-orange-700"
-                          : ""
+                          ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
+                          : "border-border bg-muted/30"
                     } ${selectedPlotName === plot.plot_name ? "ring-1 ring-blue-400" : ""}`}
                     ref={(node) => {
                       if (!node) return;
@@ -360,18 +380,24 @@ export function SetbackCheckPanel({
                     <div className="flex items-center justify-between">
                       <span className={`text-sm font-medium ${
                         plot.is_compliant === true
-                          ? "text-green-700"
+                          ? "text-green-700 dark:text-green-400"
                           : plot.is_compliant === false
-                            ? "text-orange-700"
+                            ? "text-red-700 dark:text-red-400"
                             : ""
                       }`}>{plot.plot_name}</span>
-                      <div className="flex items-center gap-1 text-xs">
-                        {plot.is_compliant ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                      <div className={`flex items-center gap-1 text-xs ${
+                        plot.is_compliant === true
+                          ? "text-green-700 dark:text-green-400"
+                          : plot.is_compliant === false
+                            ? "text-red-700 dark:text-red-400"
+                            : "text-muted-foreground"
+                      }`}>
+                        {plot.is_compliant === true ? (
+                          <CheckCircle2 className="h-3.5 w-3.5" />
                         ) : (
-                          <AlertCircle className="h-3.5 w-3.5 text-orange-600" />
+                          <AlertCircle className="h-3.5 w-3.5" />
                         )}
-                        <span>{statusText}</span>
+                        <span className="font-medium">{statusText}</span>
                       </div>
                     </div>
                     <div className="h-2 w-full rounded bg-secondary">
@@ -380,8 +406,8 @@ export function SetbackCheckPanel({
                           plot.is_compliant === true
                             ? "bg-green-500"
                             : plot.is_compliant === false
-                              ? "bg-orange-500"
-                              : "bg-blue-500"
+                              ? "bg-red-500"
+                              : "bg-muted-foreground/60"
                         }`}
                         style={{ width: `${Math.min(100, ratePercent)}%` }}
                       />
@@ -390,10 +416,10 @@ export function SetbackCheckPanel({
                       <span>贴线率</span>
                       <span className={
                         plot.is_compliant === true
-                          ? "text-green-700"
+                          ? "text-green-700 dark:text-green-400"
                           : plot.is_compliant === false
-                            ? "text-orange-700"
-                            : ""
+                            ? "text-red-700 dark:text-red-400"
+                            : "text-muted-foreground"
                       }>{ratePercent.toFixed(1)}%</span>
                     </div>
                     <div className="flex justify-between text-xs text-muted-foreground">
