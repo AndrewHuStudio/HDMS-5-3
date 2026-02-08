@@ -3,7 +3,9 @@ Embedding service for generating vector embeddings.
 """
 
 import json
+from json import JSONDecodeError
 import urllib.request
+import urllib.error
 from typing import List, Dict, Any
 import logging
 import os
@@ -29,6 +31,65 @@ class EmbeddingService:
         self.api_key = api_key
         self.model = model
 
+    def _embedding_endpoints(self) -> List[str]:
+        endpoints = [f"{self.base_url}/embeddings"]
+        if not self.base_url.endswith("/v1"):
+            endpoints.append(f"{self.base_url}/v1/embeddings")
+
+        unique: List[str] = []
+        seen: set[str] = set()
+        for endpoint in endpoints:
+            if endpoint in seen:
+                continue
+            seen.add(endpoint)
+            unique.append(endpoint)
+        return unique
+
+    def _request_embeddings(self, payload: Dict[str, Any], timeout: int) -> Dict[str, Any]:
+        errors: List[str] = []
+
+        for endpoint in self._embedding_endpoints():
+            data = json.dumps(payload).encode("utf-8")
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
+            }
+            req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
+
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as response:
+                    body_bytes = response.read()
+                    body = body_bytes.decode("utf-8", errors="replace")
+                    content_type = (response.headers.get("Content-Type") or "").lower()
+
+                try:
+                    result = json.loads(body)
+                except JSONDecodeError:
+                    preview = body.strip().replace("\n", " ")[:200]
+                    errors.append(
+                        f"{endpoint} returned non-JSON response (Content-Type={content_type or 'unknown'}): {preview}"
+                    )
+                    continue
+
+                if not isinstance(result, dict) or "data" not in result:
+                    preview = str(result)[:200]
+                    errors.append(f"{endpoint} returned unexpected payload: {preview}")
+                    continue
+
+                return result
+
+            except urllib.error.HTTPError as exc:
+                try:
+                    body = exc.read().decode("utf-8", errors="replace")
+                except Exception:
+                    body = ""
+                preview = body.strip().replace("\n", " ")[:200]
+                errors.append(f"{endpoint} HTTP {exc.code}: {preview}")
+            except Exception as exc:
+                errors.append(f"{endpoint} request error: {exc}")
+
+        raise RuntimeError("Embedding API request failed. " + " | ".join(errors))
+
     def embed_text(self, text: str) -> List[float]:
         """
         Generate embedding for a single text.
@@ -39,29 +100,16 @@ class EmbeddingService:
         Returns:
             Embedding vector as list of floats
         """
-        endpoint = f"{self.base_url}/embeddings"
         payload = {
             "model": self.model,
             "input": text
         }
 
-        data = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
-        }
-
-        req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
-
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
-                body = response.read().decode("utf-8")
-                result = json.loads(body)
-
+            result = self._request_embeddings(payload, timeout=30)
             embedding = result["data"][0]["embedding"]
             logger.debug(f"Generated embedding with dimension {len(embedding)}")
             return embedding
-
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
             raise
@@ -84,24 +132,13 @@ class EmbeddingService:
             batch = texts[i:i + batch_size]
             logger.info(f"Processing batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size}")
 
-            endpoint = f"{self.base_url}/embeddings"
             payload = {
                 "model": self.model,
                 "input": batch
             }
 
-            data = json.dumps(payload).encode("utf-8")
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
-
-            req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
-
             try:
-                with urllib.request.urlopen(req, timeout=60) as response:
-                    body = response.read().decode("utf-8")
-                    result = json.loads(body)
+                result = self._request_embeddings(payload, timeout=60)
 
                 data_items = result.get("data", [])
                 if not data_items:

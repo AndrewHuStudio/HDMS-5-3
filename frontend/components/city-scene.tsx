@@ -2211,7 +2211,7 @@ function CameraController({
   return null;
 }
 
-interface CitySceneProps {
+export interface CitySceneProps {
   onSelectElement: (element: CityElement | null) => void;
   selectedElement: CityElement | null;
   externalModelUrl?: string | null;

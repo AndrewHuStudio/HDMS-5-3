@@ -2,15 +2,24 @@
 Multi-source retriever for RAG system.
 """
 
-from typing import List, Dict, Any
+from __future__ import annotations
+
+import re
+from typing import List, Dict, Any, Optional
 import logging
 
+from core import config as app_config
 from core.database.milvus_client import MilvusClient
 from core.database.mongodb_client import MongoDBClient
 from rag.graph_query import GraphQueryService
 from rag.embedder import EmbeddingService
+from rag.reranker import Reranker
 
 logger = logging.getLogger(__name__)
+
+# Shared patterns for query analysis
+PLOT_PATTERN = re.compile(r'DU\d{2}-\d{2}(?:-\d+)?')
+INDICATOR_KEYWORDS = ["容积率", "建筑限高", "建筑密度", "绿地率", "退线", "停车"]
 
 
 class MultiSourceRetriever:
@@ -22,23 +31,22 @@ class MultiSourceRetriever:
         mongodb_client: MongoDBClient,
         graph_store: GraphQueryService,
         embedder: EmbeddingService,
-        collection_name: str = "hdms_text_chunks"
+        collection_name: str = "hdms_text_chunks",
+        reranker: Optional[Reranker] = None,
     ):
-        """
-        Initialize multi-source retriever.
-
-        Args:
-            milvus_client: Milvus vector database client
-            mongodb_client: MongoDB document database client
-            graph_store: Graph query service
-            embedder: Embedding service
-            collection_name: Milvus collection name
-        """
         self.milvus = milvus_client
         self.mongodb = mongodb_client
         self.graph_store = graph_store
         self.embedder = embedder
         self.collection_name = collection_name
+
+        # Reranker: use the provided instance, or auto-create when enabled
+        if reranker is not None:
+            self.reranker = reranker
+        elif app_config.RERANK_ENABLED and app_config.RERANK_API_KEY:
+            self.reranker = Reranker()
+        else:
+            self.reranker = None
 
     def retrieve(
         self,
@@ -94,8 +102,24 @@ class MultiSourceRetriever:
             results["vector_results"],
             results["graph_results"],
             results["keyword_results"],
-            top_k
+            top_k,
+            query=query
         )
+
+        # Rerank fused results if reranker is available
+        results["reranked"] = False
+        if self.reranker and results["fused_results"]:
+            try:
+                reranked = self.reranker.rerank(
+                    query=query,
+                    documents=results["fused_results"],
+                    top_n=top_k,
+                )
+                results["fused_results"] = reranked
+                results["reranked"] = True
+                logger.info("Rerank applied successfully (%d results)", len(reranked))
+            except Exception as exc:
+                logger.warning("Rerank failed, keeping original fusion order: %s", exc)
 
         return results
 
@@ -129,22 +153,11 @@ class MultiSourceRetriever:
         return results
 
     def _graph_search(self, query: str) -> List[Dict[str, Any]]:
-        """
-        Perform graph-based search.
-
-        Args:
-            query: Query text
-
-        Returns:
-            List of graph entities and relationships
-        """
-        import re
-
+        """Perform graph-based search."""
         results = []
 
         # Extract plot names from query
-        plot_pattern = r'DU\d{2}-\d{2}(?:-\d+)?'
-        plots = re.findall(plot_pattern, query)
+        plots = PLOT_PATTERN.findall(query)
 
         if plots:
             for plot_name in plots:
@@ -159,8 +172,7 @@ class MultiSourceRetriever:
                     })
 
         # Extract indicator keywords
-        indicators = ["容积率", "建筑限高", "建筑密度", "绿地率", "退线", "停车"]
-        for indicator in indicators:
+        for indicator in INDICATOR_KEYWORDS:
             if indicator in query:
                 # Find plots with this indicator
                 cypher = """
@@ -216,54 +228,79 @@ class MultiSourceRetriever:
             logger.warning(f"Keyword search not available: {e}")
             return []
 
+    @staticmethod
+    def _normalize_scores(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Normalize scores to [0, 1] range using min-max normalization."""
+        if not results:
+            return results
+        scores = [r.get("score", 0) for r in results]
+        min_s, max_s = min(scores), max(scores)
+        spread = max_s - min_s
+        normalized = []
+        for r in results:
+            r_copy = dict(r)
+            if spread > 0:
+                r_copy["score"] = (r_copy.get("score", 0) - min_s) / spread
+            else:
+                r_copy["score"] = 1.0
+            normalized.append(r_copy)
+        return normalized
+
+    def _compute_weights(self, query: str) -> Dict[str, float]:
+        """
+        Compute dynamic fusion weights based on query characteristics.
+
+        - Plot ID detected (DU01-01): boost graph weight
+        - Indicator keyword detected: moderate graph boost
+        - Default: vector dominates
+        """
+        has_plot_id = bool(PLOT_PATTERN.search(query))
+        has_indicator = any(kw in query for kw in INDICATOR_KEYWORDS)
+
+        if has_plot_id:
+            return {"vector": 0.25, "graph": 0.55, "keyword": 0.20}
+        elif has_indicator:
+            return {"vector": 0.35, "graph": 0.45, "keyword": 0.20}
+        else:
+            return {"vector": 0.55, "graph": 0.20, "keyword": 0.25}
+
     def _fuse_results(
         self,
         vector_results: List[Dict[str, Any]],
         graph_results: List[Dict[str, Any]],
         keyword_results: List[Dict[str, Any]],
-        top_k: int
+        top_k: int,
+        query: str = ""
     ) -> List[Dict[str, Any]]:
         """
-        Fuse results from multiple sources using weighted scoring.
-
-        Weights:
-        - Vector: 0.5
-        - Graph: 0.3
-        - Keyword: 0.2
-
-        Args:
-            vector_results: Results from vector search
-            graph_results: Results from graph search
-            keyword_results: Results from keyword search
-            top_k: Number of results to return
-
-        Returns:
-            Fused and ranked results
+        Fuse results from multiple sources using normalized scores
+        and dynamic weights based on query type.
         """
-        weights = {
-            "vector": 0.5,
-            "graph": 0.3,
-            "keyword": 0.2
+        weights = self._compute_weights(query) if query else {
+            "vector": 0.5, "graph": 0.3, "keyword": 0.2
         }
+        logger.info(f"Fusion weights: {weights}")
 
-        # Combine all results
+        # Normalize scores per source before weighting
+        vector_results = self._normalize_scores(list(vector_results))
+        graph_results = self._normalize_scores(list(graph_results))
+        keyword_results = self._normalize_scores(list(keyword_results))
+
+        # Combine all results with weighted scores
         all_results = []
 
-        # Add vector results
         for result in vector_results:
             all_results.append({
                 **result,
                 "weighted_score": result.get("score", 0) * weights["vector"]
             })
 
-        # Add graph results
         for result in graph_results:
             all_results.append({
                 **result,
                 "weighted_score": result.get("score", 0) * weights["graph"]
             })
 
-        # Add keyword results
         for result in keyword_results:
             all_results.append({
                 **result,
@@ -278,7 +315,6 @@ class MultiSourceRetriever:
         fused_results = []
 
         for result in all_results:
-            # Create unique key
             if "id" in result:
                 key = result["id"]
             elif "text" in result:

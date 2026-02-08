@@ -3,7 +3,7 @@ Ingestion API endpoints for document processing.
 """
 
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 import hashlib
 import re
@@ -17,7 +17,12 @@ from ..schemas.ingestion_schemas import (
     IngestionStatus,
     IngestionReportRequest,
     IngestionReportResponse,
-    DocumentIngestionState
+    DocumentIngestionState,
+    RollbackRequest,
+    DeleteDocumentRequest,
+    DocumentVersionsResponse,
+    ConsistencyRepairRequest,
+    ConsistencyRepairResponse
 )
 from .chunker import DocumentChunker
 from .embedder import create_embedding_service
@@ -68,7 +73,8 @@ def _create_pipeline() -> IngestionPipeline:
         mongodb_client=db_manager.mongodb,
         embedding_service=embedder,
         vision_service=vision,
-        chunker=chunker
+        chunker=chunker,
+        neo4j_client=db_manager.neo4j
     )
 
 
@@ -116,6 +122,65 @@ async def ingest_batch(request: BatchIngestionRequest) -> BatchIngestionResponse
         return BatchIngestionResponse(**result)
     except Exception as e:
         logger.error(f"Failed to ingest batch: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/document/{doc_id}/versions", response_model=DocumentVersionsResponse)
+async def get_document_versions(doc_id: str, limit: int = 20) -> DocumentVersionsResponse:
+    """Get historical versions for one document."""
+    try:
+        pipeline = _create_pipeline()
+        result = pipeline.get_document_versions(doc_id=doc_id, limit=limit)
+        return DocumentVersionsResponse(**result)
+    except Exception as e:
+        logger.error(f"Failed to get document versions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/document/rollback", response_model=IngestionResponse)
+async def rollback_document(request: RollbackRequest) -> IngestionResponse:
+    """Rollback one document to a historical version."""
+    try:
+        pipeline = _create_pipeline()
+        result = pipeline.rollback_document(
+            doc_id=request.doc_id,
+            target_version=request.target_version,
+            process_images=request.process_images,
+            images_dir=request.images_dir,
+        )
+        return IngestionResponse(**result)
+    except Exception as e:
+        logger.error(f"Failed to rollback document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/document", response_model=Dict[str, Any])
+async def delete_document(request: DeleteDocumentRequest) -> Dict[str, Any]:
+    """Delete one document from all stores."""
+    try:
+        pipeline = _create_pipeline()
+        return pipeline.delete_document(
+            doc_id=request.doc_id,
+            delete_versions=request.delete_versions,
+        )
+    except Exception as e:
+        logger.error(f"Failed to delete document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/repair", response_model=ConsistencyRepairResponse)
+async def repair_consistency(request: ConsistencyRepairRequest) -> ConsistencyRepairResponse:
+    """Check and optionally repair cross-store consistency."""
+    try:
+        pipeline = _create_pipeline()
+        result = pipeline.repair_consistency(
+            dry_run=request.dry_run,
+            cleanup_inconsistent_docs=request.cleanup_inconsistent_docs,
+            target_doc_ids=request.doc_ids,
+        )
+        return ConsistencyRepairResponse(**result)
+    except Exception as e:
+        logger.error(f"Failed to run consistency repair: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -200,7 +265,8 @@ async def report_ingestion(request: IngestionReportRequest) -> IngestionReportRe
             "chunks_count": 1,
             "images_processed": 1,
             "ingested_at": 1,
-            "ingest_error": 1
+            "ingest_error": 1,
+            "version": 1
         }
     )
     docs_by_path: dict[str, dict[str, Any]] = {}
@@ -280,7 +346,8 @@ async def report_ingestion(request: IngestionReportRequest) -> IngestionReportRe
             chunks_count=int(doc.get("chunks_count") or 0),
             images_processed=int(doc.get("images_processed") or 0),
             ingested_at=doc.get("ingested_at"),
-            ingest_error=doc.get("ingest_error") or None
+            ingest_error=doc.get("ingest_error") or None,
+            version=int(doc.get("version") or 0) or None
         ))
 
     total = len(documents)

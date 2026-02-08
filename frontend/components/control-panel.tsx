@@ -137,10 +137,11 @@ function InfoItem({
   label: string;
   value: string | number;
 }) {
+  const IconComp = Icon as React.ComponentType<{ className?: string }>;
   return (
     <div className="flex items-center gap-3 py-2">
       <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center">
-        <Icon className="h-4 w-4 text-muted-foreground" />
+        <IconComp className="h-4 w-4 text-muted-foreground" />
       </div>
       <div>
         <p className="text-xs text-muted-foreground">{label}</p>

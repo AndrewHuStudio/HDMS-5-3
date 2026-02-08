@@ -3,7 +3,7 @@ Milvus vector database client for HDMS.
 """
 
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Iterable
 import logging
 
 logger = logging.getLogger(__name__)
@@ -153,6 +153,9 @@ class MilvusClient:
             collection_name: Name of the collection
             data: List of dictionaries containing id, embedding, text, doc_id, chunk_index, metadata
         """
+        if not data:
+            return
+
         collection = Collection(collection_name)
 
         # Prepare data in columnar format
@@ -202,9 +205,56 @@ class MilvusClient:
         """
         if not doc_ids:
             return 0
-        quoted = ", ".join([f"\"{doc_id}\"" for doc_id in doc_ids])
-        expr = f"doc_id in [{quoted}]"
-        return self.delete_by_expr(collection_name, expr)
+        total_deleted = 0
+        for batch in self._iter_batches(doc_ids, 500):
+            expr = self._build_in_expr("doc_id", batch)
+            total_deleted += self.delete_by_expr(collection_name, expr)
+        return total_deleted
+
+    def delete_by_ids(self, collection_name: str, ids: List[str]) -> int:
+        """
+        Delete vectors by primary IDs.
+
+        Args:
+            collection_name: Name of the collection
+            ids: List of vector IDs
+
+        Returns:
+            Number of entities deleted (if available)
+        """
+        if not ids:
+            return 0
+        total_deleted = 0
+        for batch in self._iter_batches(ids, 500):
+            expr = self._build_in_expr("id", batch)
+            total_deleted += self.delete_by_expr(collection_name, expr)
+        return total_deleted
+
+    def query_by_expr(
+        self,
+        collection_name: str,
+        expr: str,
+        output_fields: List[str],
+        limit: int = 16384
+    ) -> List[Dict[str, Any]]:
+        """
+        Query entities by boolean expression.
+
+        Args:
+            collection_name: Name of the collection
+            expr: Milvus boolean expression
+            output_fields: Fields to return
+            limit: Maximum number of entities to return
+
+        Returns:
+            List of query result dictionaries
+        """
+        if not expr:
+            return []
+        collection = Collection(collection_name)
+        collection.load()
+        results = collection.query(expr=expr, output_fields=output_fields, limit=limit)
+        return list(results or [])
 
     def search(
         self,
@@ -292,3 +342,18 @@ class MilvusClient:
             "name": collection_name,
             "dimension": dimension
         }
+
+    @staticmethod
+    def _escape_literal(value: str) -> str:
+        escaped = str(value).replace("\\", "\\\\").replace('"', '\"')
+        return f'"{escaped}"'
+
+    @classmethod
+    def _build_in_expr(cls, field: str, values: List[str]) -> str:
+        quoted = ", ".join([cls._escape_literal(value) for value in values])
+        return f"{field} in [{quoted}]"
+
+    @staticmethod
+    def _iter_batches(values: List[str], batch_size: int) -> Iterable[List[str]]:
+        for idx in range(0, len(values), batch_size):
+            yield values[idx:idx + batch_size]

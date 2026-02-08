@@ -163,6 +163,7 @@ def _load_documents(ocr_output_dir: str, category: str) -> tuple[list[dict[str, 
                         "ingest_error": 1,
                         "file_name": 1,
                         "chunks_count": 1,
+                        "images_processed": 1,
                     },
                 )
                 db_docs_by_path = {
@@ -190,6 +191,19 @@ def _load_documents(ocr_output_dir: str, category: str) -> tuple[list[dict[str, 
             or (marker or {}).get("chunks_count")
             or 0
         )
+        source_images = 0
+        images_dir_path = doc_dir / "images"
+        if images_dir_path.exists() and images_dir_path.is_dir():
+            try:
+                source_images = len([p for p in images_dir_path.iterdir() if p.is_file()])
+            except Exception:
+                source_images = 0
+        images_count = int(
+            (db_doc or {}).get("images_processed")
+            or (marker or {}).get("images_processed")
+            or source_images
+            or 0
+        )
         ingest_error = (db_doc or {}).get("ingest_error") or ""
         items.append(
             {
@@ -206,6 +220,7 @@ def _load_documents(ocr_output_dir: str, category: str) -> tuple[list[dict[str, 
                 "ingest_status": db_status,
                 "doc_id": str(doc_id) if doc_id else "",
                 "chunks_count": chunks_count,
+                "images_count": images_count,
                 "error": (
                     ingest_error
                     if ingest_error
@@ -238,6 +253,7 @@ def _build_doc_table(items: list[dict[str, Any]]) -> list[list[Any]]:
                 item.get("name", ""),
                 item.get("category", ""),
                 int(item.get("chunks_count") or 0),
+                int(item.get("images_count") or 0),
                 item.get("ingested_at", ""),
                 item.get("error", ""),
             ]
@@ -563,6 +579,60 @@ def _db_status_text() -> str:
     return "\n".join(lines)
 
 
+def _run_ingest_acceptance_check() -> str:
+    """One-click acceptance check for Mongo/Milvus consistency."""
+    try:
+        db_manager = _ensure_db_initialized()
+        stats = db_manager.get_stats()
+
+        milvus = stats.get("milvus", {})
+        mongo = stats.get("mongodb", {})
+
+        if "error" in milvus:
+            return f"[FAIL] Milvus \u72b6\u6001\u83b7\u53d6\u5931\u8d25: {milvus['error']}"
+        if "error" in mongo:
+            return f"[FAIL] MongoDB \u72b6\u6001\u83b7\u53d6\u5931\u8d25: {mongo['error']}"
+
+        milvus_vectors = int(milvus.get("num_entities", 0) if milvus.get("exists") else 0)
+        mongo_docs = int(mongo.get("documents", 0) or 0)
+        mongo_chunks = int(mongo.get("chunks", 0) or 0)
+
+        complete_docs = db_manager.mongodb.find_by_query(
+            "documents",
+            {"ingest_status": "complete"},
+            limit=None,
+            projection={"_id": 1, "chunks_count": 1},
+        )
+        expected_chunks = sum(int(doc.get("chunks_count") or 0) for doc in complete_docs)
+
+        vectors_match_chunks = milvus_vectors == mongo_chunks
+        chunk_summary_match = mongo_chunks == expected_chunks
+        passed = vectors_match_chunks and chunk_summary_match
+
+        check_vectors = "\u901a\u8fc7" if vectors_match_chunks else "\u5931\u8d25"
+        check_summary = "\u901a\u8fc7" if chunk_summary_match else "\u5931\u8d25"
+
+        lines = [
+            "[OK] \u9a8c\u6536\u901a\u8fc7" if passed else "[WARN] \u9a8c\u6536\u672a\u901a\u8fc7",
+            f"Mongo \u6587\u6863\u6570: {mongo_docs}",
+            f"Mongo Chunk \u6570: {mongo_chunks}",
+            f"Milvus \u5411\u91cf\u6570: {milvus_vectors}",
+            f"documents.chunks_count \u6c47\u603b: {expected_chunks}",
+            "",
+            "\u4e00\u81f4\u6027\u68c0\u67e5:",
+            f"- {check_vectors}: Milvus \u5411\u91cf\u6570 == Mongo Chunk \u6570",
+            f"- {check_summary}: Mongo Chunk \u6570 == documents.chunks_count \u6c47\u603b",
+        ]
+
+        if not passed:
+            lines.append("\u5efa\u8bae: \u8bf7\u6267\u884c\u6e05\u7406/\u4fee\u590d\u540e\u91cd\u8bd5\u5165\u5e93\u3002")
+
+        return "\n".join(lines)
+
+    except Exception as exc:
+        return f"[FAIL] \u9a8c\u6536\u6267\u884c\u5931\u8d25: {exc}"
+
+
 def _db_category_choices() -> list[str]:
     try:
         modules = _get_rhino_modules()
@@ -835,6 +905,7 @@ def _create_ingestion_pipeline():
         embedding_service=embedder,
         vision_service=vision,
         chunker=chunker,
+        neo4j_client=db_manager.neo4j,
     )
 
 
@@ -872,21 +943,127 @@ def _refresh_ingest_list(
     )
 
 
-def _select_all_docs(items: list[dict[str, Any]] | None) -> tuple[Any]:
-    keys = _build_select_choices(items or [])
-    # Update both choices and value so the frontend stays in sync when state changed recently.
-    return (gr.update(choices=keys, value=keys),)
-
-
-def _clear_selection() -> tuple[Any]:
-    return (gr.update(value=[]),)
-
-
-def _ingest_progress_text(total: int, done: int, failed: int, skipped: int, current: int) -> str:
-    percent = int(round(current / total * 100)) if total else 0
+def _refresh_ingest_panel(
+    ocr_output_dir: str,
+    category: str,
+    status_filter: str,
+    selected_keys: list[str] | None,
+    db_category: str | None,
+) -> tuple[Any, Any, list[list[Any]], str, list[dict[str, Any]], Any]:
+    category_update, select_update, doc_rows, overview_text, status, items = _refresh_ingest_list(
+        ocr_output_dir,
+        category,
+        status_filter,
+        selected_keys,
+    )
     return (
-        f"[INFO] \u5165\u5e93\u8fdb\u5ea6: {current}/{total} ({percent}%) | "
+        category_update,
+        select_update,
+        doc_rows,
+        overview_text,
+        items,
+        _db_category_update(db_category),
+    )
+
+
+def _clear_vectors_all_ui(
+    ocr_output_dir: str,
+    category: str,
+    status_filter: str,
+    selected_keys: list[str] | None,
+    items: list[dict[str, Any]] | None,
+    db_category: str | None,
+) -> tuple[str, Any, Any, list[list[Any]], str, list[dict[str, Any]], Any]:
+    status, _, category_update, select_update, doc_rows, overview_text, new_items = _clear_vectors_all(
+        ocr_output_dir,
+        category,
+        status_filter,
+        selected_keys,
+        items,
+    )
+    return (
+        status,
+        category_update,
+        select_update,
+        doc_rows,
+        overview_text,
+        new_items,
+        _db_category_update(db_category),
+    )
+
+
+def _clear_vectors_by_category_ui(
+    ocr_output_dir: str,
+    db_category: str,
+    ingest_category: str,
+    status_filter: str,
+    selected_keys: list[str] | None,
+    items: list[dict[str, Any]] | None,
+) -> tuple[str, Any, Any, list[list[Any]], str, list[dict[str, Any]], Any]:
+    status, _, category_update, select_update, doc_rows, overview_text, new_items = _clear_vectors_by_category(
+        ocr_output_dir,
+        db_category,
+        ingest_category,
+        status_filter,
+        selected_keys,
+        items,
+    )
+    return (
+        status,
+        category_update,
+        select_update,
+        doc_rows,
+        overview_text,
+        new_items,
+        _db_category_update(db_category),
+    )
+
+
+def _select_all_docs(
+    ocr_output_dir: str,
+    category: str,
+    status_filter: str,
+) -> tuple[Any, list[dict[str, Any]], list[list[Any]], str]:
+    _, _, table_rows, overview_text, _, filtered_items = _refresh_ingest_list(
+        ocr_output_dir,
+        category,
+        status_filter,
+        [],
+    )
+    keys = _build_select_choices(filtered_items)
+    return (
+        gr.update(choices=keys, value=keys),
+        filtered_items,
+        table_rows,
+        overview_text,
+    )
+
+
+def _clear_selection() -> Any:
+    return gr.update(value=[])
+
+
+def _format_progress_bar(percent: int, width: int = 16) -> str:
+    _ = width
+    pct = max(0, min(100, int(percent)))
+    return f"{pct}%"
+
+
+def _ingest_progress_text(total: int, done: int, failed: int, skipped: int, current: float) -> str:
+    progress = max(0.0, min(float(current), float(total))) if total else 0.0
+    percent = int(round(progress / total * 100)) if total else 0
+    return (
+        f"[INFO] \u5165\u5e93\u8fdb\u5ea6: {int(progress)}/{total} ({percent}%) | "
         f"\u6210\u529f {done} | \u5931\u8d25 {failed} | \u8df3\u8fc7 {skipped}"
+    )
+
+
+def _ingest_result_text(total: int, done: int, failed: int, skipped: int) -> str:
+    return (
+        f"\u603b\u8ba1: {total}\n"
+        f"\u6210\u529f: {done}\n"
+        f"\u5931\u8d25: {failed}\n"
+        f"\u8df3\u8fc7: {skipped}"
     )
 
 
@@ -912,24 +1089,29 @@ def _ingest_batch_stream(
         overview_text = _ingest_overview_text(visible_items)
         return select_update, doc_rows, overview_text, selected, visible_items
 
+    def _overall_percent(total_count: int, current_value: float) -> int:
+        if total_count <= 0:
+            return 0
+        return max(0, min(100, int(round(max(0.0, min(current_value, float(total_count))) / total_count * 100))))
+
     if not items:
-        msg = "[WARN] \u672a\u52a0\u8f7d\u6587\u6863\u5217\u8868"
         select_update, doc_rows, overview_text, _, visible_items = _update_view(items, [])
-        yield msg, [], doc_rows, select_update, overview_text, msg, visible_items
+        result_text = _ingest_result_text(0, 0, 0, 0)
+        yield 0, result_text, [], doc_rows, select_update, overview_text, visible_items
         return
 
     if not selected_keys:
-        msg = "[WARN] \u672a\u9009\u62e9\u6587\u6863"
         select_update, doc_rows, overview_text, _, visible_items = _update_view(items, [])
-        yield msg, [], doc_rows, select_update, overview_text, msg, visible_items
+        result_text = _ingest_result_text(0, 0, 0, 0)
+        yield 0, result_text, [], doc_rows, select_update, overview_text, visible_items
         return
 
     try:
         pipeline = _create_ingestion_pipeline()
-    except Exception as exc:
-        msg = f"[FAIL] \u521d\u59cb\u5316\u5165\u5e93\u5931\u8d25: {exc}"
+    except Exception:
         select_update, doc_rows, overview_text, _, visible_items = _update_view(items, selected_keys)
-        yield msg, [], doc_rows, select_update, overview_text, msg, visible_items
+        result_text = _ingest_result_text(len(selected_keys), 0, len(selected_keys), 0)
+        yield 0, result_text, [], doc_rows, select_update, overview_text, visible_items
         return
 
     total = len(selected_keys)
@@ -937,36 +1119,71 @@ def _ingest_batch_stream(
     failed = 0
     skipped = 0
     progress_rows: list[list[Any]] = []
-    status_msg = f"[INFO] \u51c6\u5907\u5165\u5e93 {total} \u9879"
 
     for idx, key in enumerate(selected_keys, start=1):
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         item = _find_item(items, key)
+
         if not item:
             skipped += 1
-            progress_rows.append([key, "\u7f3a\u5931", "", "", "\u627e\u4e0d\u5230\u6587\u6863", now])
+            progress_rows.append([key, "\u7f3a\u5931\u6587\u4ef6", _format_progress_bar(100), "", "", "\u672a\u627e\u5230\u6587\u6863\u6761\u76ee", now])
             select_update, doc_rows, overview_text, selected_keys, visible_items = _update_view(items, selected_keys)
-            yield _ingest_progress_text(total, done, failed, skipped, idx), progress_rows, doc_rows, select_update, overview_text, status_msg, visible_items
+            current_value = float(idx)
+            yield (
+                _overall_percent(total, current_value),
+                _ingest_result_text(total, done, failed, skipped),
+                progress_rows,
+                doc_rows,
+                select_update,
+                overview_text,
+                visible_items,
+            )
             continue
 
         if item.get("ingested"):
             skipped += 1
-            progress_rows.append([item.get("name", key), "\u5df2\u5165\u5e93(\u8df3\u8fc7)", "", "", "", now])
+            progress_rows.append([item.get("name", key), "\u5df2\u5165\u5e93(\u8df3\u8fc7)", _format_progress_bar(100), "", "", "", now])
             select_update, doc_rows, overview_text, selected_keys, visible_items = _update_view(items, selected_keys)
-            yield _ingest_progress_text(total, done, failed, skipped, idx), progress_rows, doc_rows, select_update, overview_text, status_msg, visible_items
+            current_value = float(idx)
+            yield (
+                _overall_percent(total, current_value),
+                _ingest_result_text(total, done, failed, skipped),
+                progress_rows,
+                doc_rows,
+                select_update,
+                overview_text,
+                visible_items,
+            )
             continue
 
         if not item.get("ready"):
             failed += 1
-            progress_rows.append([item.get("name", key), "\u7f3a\u5931\u6587\u4ef6", "", "", item.get("error", ""), now])
-            status_msg = f"[FAIL] {item.get('name', key)}: {item.get('error', '')}"
+            progress_rows.append([item.get("name", key), "\u7f3a\u5931\u6587\u4ef6", _format_progress_bar(100), "", "", item.get("error", ""), now])
             select_update, doc_rows, overview_text, selected_keys, visible_items = _update_view(items, selected_keys)
-            yield _ingest_progress_text(total, done, failed, skipped, idx), progress_rows, doc_rows, select_update, overview_text, status_msg, visible_items
+            current_value = float(idx)
+            yield (
+                _overall_percent(total, current_value),
+                _ingest_result_text(total, done, failed, skipped),
+                progress_rows,
+                doc_rows,
+                select_update,
+                overview_text,
+                visible_items,
+            )
             continue
 
-        progress_rows.append([item.get("name", key), "\u5904\u7406\u4e2d", "", "", "", now])
+        progress_rows.append([item.get("name", key), "\u5904\u7406\u4e2d", _format_progress_bar(20), "", "", "", now])
         select_update, doc_rows, overview_text, selected_keys, visible_items = _update_view(items, selected_keys)
-        yield _ingest_progress_text(total, done, failed, skipped, idx), progress_rows, doc_rows, select_update, overview_text, status_msg, visible_items
+        current_value = (idx - 1) + 0.2
+        yield (
+            _overall_percent(total, current_value),
+            _ingest_result_text(total, done, failed, skipped),
+            progress_rows,
+            doc_rows,
+            select_update,
+            overview_text,
+            visible_items,
+        )
 
         try:
             result = pipeline.ingest_document(
@@ -985,11 +1202,14 @@ def _ingest_batch_stream(
             _write_marker(Path(item["doc_dir"]), marker_payload)
             item["ingested"] = True
             item["ingested_at"] = marker_payload["ingested_at"]
+            item["images_count"] = int(result.get("images_processed") or item.get("images_count") or 0)
+
             if result.get("status") == "skipped":
                 skipped += 1
                 progress_rows[-1] = [
                     item.get("name", key),
                     "\u5df2\u5165\u5e93(\u8df3\u8fc7)",
+                    _format_progress_bar(100),
                     result.get("chunks_count", 0),
                     result.get("images_processed", 0),
                     "",
@@ -997,9 +1217,20 @@ def _ingest_batch_stream(
                 ]
             else:
                 done += 1
+                op = str(result.get("operation") or "")
+                if op == "created":
+                    status_text = "\u5b8c\u6210(\u65b0\u589e)"
+                elif op == "updated":
+                    status_text = "\u5b8c\u6210(\u66f4\u65b0)"
+                elif op == "rollback":
+                    status_text = "\u5b8c\u6210(\u56de\u6eda)"
+                else:
+                    status_text = "\u5b8c\u6210"
+
                 progress_rows[-1] = [
                     item.get("name", key),
-                    "\u5b8c\u6210",
+                    status_text,
+                    _format_progress_bar(100),
                     result.get("chunks_count", 0),
                     result.get("images_processed", 0),
                     "",
@@ -1007,16 +1238,47 @@ def _ingest_batch_stream(
                 ]
         except Exception as exc:
             failed += 1
-            error_msg = str(exc)[:300]
-            status_msg = f"[FAIL] {item.get('name', key)}: {error_msg}"
-            progress_rows[-1] = [item.get("name", key), "\u5931\u8d25", "", "", error_msg, now]
+            error_msg = str(exc)[:500]
+            progress_rows[-1] = [item.get("name", key), "\u5931\u8d25", _format_progress_bar(100), "", "", error_msg, now]
 
         select_update, doc_rows, overview_text, selected_keys, visible_items = _update_view(items, selected_keys)
-        yield _ingest_progress_text(total, done, failed, skipped, idx), progress_rows, doc_rows, select_update, overview_text, status_msg, visible_items
+        current_value = float(idx)
+        yield (
+            _overall_percent(total, current_value),
+            _ingest_result_text(total, done, failed, skipped),
+            progress_rows,
+            doc_rows,
+            select_update,
+            overview_text,
+            visible_items,
+        )
 
-    status_msg = f"[OK] \u5165\u5e93\u5b8c\u6210: \u6210\u529f {done}, \u5931\u8d25 {failed}, \u8df3\u8fc7 {skipped}"
     select_update, doc_rows, overview_text, _, visible_items = _update_view(items, [])
-    yield _ingest_progress_text(total, done, failed, skipped, total), progress_rows, doc_rows, select_update, overview_text, status_msg, visible_items
+    yield (
+        100,
+        _ingest_result_text(total, done, failed, skipped),
+        progress_rows,
+        doc_rows,
+        select_update,
+        overview_text,
+        visible_items,
+    )
+
+
+def _ingest_batch_stream_ui(
+    selected_keys: list[str] | None,
+    items: list[dict[str, Any]] | None,
+    process_images: bool,
+    status_filter: str,
+) -> Iterable[tuple[Any, ...]]:
+    for overall_percent, result_text, progress_rows, doc_rows, select_update, overview_text, visible_items in _ingest_batch_stream(
+        selected_keys,
+        items,
+        process_images,
+        status_filter,
+    ):
+        yield overall_percent, result_text, progress_rows, doc_rows, select_update, overview_text, visible_items
+
 
 def _initial_destinations() -> tuple[list[str], str, str]:
     try:
@@ -1033,7 +1295,7 @@ def build_app() -> gr.Blocks:
     destinations, default_dest, dest_status = _initial_destinations()
 
     default_ocr_dir = _default_ocr_output_dir()
-    all_items, init_categories, init_status = _load_documents(default_ocr_dir, ALL_CATEGORIES_LABEL)
+    all_items, init_categories, _ = _load_documents(default_ocr_dir, ALL_CATEGORIES_LABEL)
     init_category_choices = [ALL_CATEGORIES_LABEL] + [c for c in init_categories if c != ALL_CATEGORIES_LABEL]
     default_category = init_categories[0] if init_categories else ALL_CATEGORIES_LABEL
     if default_category not in init_category_choices:
@@ -1158,58 +1420,59 @@ def build_app() -> gr.Blocks:
                             "\u6587\u6863",
                             "\u5206\u7c7b",
                             "Chunk\u6570",
+                            "\u56fe\u7247\u6570",
                             "\u5165\u5e93\u65f6\u95f4",
                             "\u5907\u6ce8",
                         ],
-                        datatype=["str", "str", "str", "number", "str", "str"],
+                        datatype=["str", "str", "str", "number", "number", "str", "str"],
                         value=init_doc_table,
                         wrap=True,
                         interactive=False,
                     )
 
                 with gr.Column(scale=1):
-                    ingest_status = gr.Textbox(
-                        label="\u5165\u5e93\u72b6\u6001",
-                        value=init_status,
-                        lines=4,
-                        interactive=False,
-                    )
-                    process_images = gr.Checkbox(
-                        label="\u5904\u7406\u56fe\u7247 (Qwen \u89c6\u89c9)",
-                        value=True,
-                    )
-                    init_db_btn = gr.Button("\u521d\u59cb\u5316 Milvus \u6570\u636e\u5e93")
-                    db_status_box = gr.Textbox(
-                        label="Milvus \u6570\u636e\u5e93\u72b6\u6001",
-                        value="[INFO] \u70b9\u51fb\u521d\u59cb\u5316\u6216\u5237\u65b0\u72b6\u6001",
-                        lines=6,
-                        interactive=False,
-                    )
-                    refresh_db_btn = gr.Button("\u5237\u65b0\u72b6\u6001")
+                    process_images = gr.State(True)
                     db_category = gr.Dropdown(
-                        label="Milvus \u6570\u636e\u5e93\u5206\u7c7b",
+                        label="\u5411\u91cf\u5220\u9664\u5206\u7c7b",
                         choices=init_db_category_choices,
                         value=init_db_category_value,
                     )
                     with gr.Row():
-                        clear_vectors_all_btn = gr.Button("\u6e05\u7a7a\u5411\u91cf\u5e93(\u5168\u90e8)")
-                        clear_vectors_category_btn = gr.Button("\u6e05\u7a7a\u5f53\u524d\u5206\u7c7b")
+                        clear_vectors_all_btn = gr.Button("\u5220\u9664\u5411\u91cf(\u5168\u90e8)")
+                        clear_vectors_category_btn = gr.Button("\u5220\u9664\u5f53\u524d\u5206\u7c7b")
                     ingest_btn = gr.Button("\u5f00\u59cb\u5165\u5e93")
-                    ingest_progress = gr.Textbox(
-                        label="\u5165\u5e93\u8fdb\u5ea6",
-                        lines=2,
+                    ingest_overall_progress = gr.Slider(
+                        label="\u6574\u4f53\u5165\u5e93\u8fdb\u5ea6(%)",
+                        minimum=0,
+                        maximum=100,
+                        step=1,
+                        value=0,
+                        interactive=False,
+                    )
+                    ingest_result_box = gr.Textbox(
+                        label="\u5165\u5e93\u7ed3\u679c",
+                        value="\u603b\u8ba1: 0\n\u6210\u529f: 0\n\u5931\u8d25: 0\n\u8df3\u8fc7: 0",
+                        lines=4,
+                        interactive=False,
+                    )
+                    acceptance_btn = gr.Button("\u4e00\u952e\u9a8c\u6536")
+                    acceptance_box = gr.Textbox(
+                        label="\u9a8c\u6536\u7ed3\u679c",
+                        value="[INFO] \u5c1a\u672a\u6267\u884c",
+                        lines=6,
                         interactive=False,
                     )
                     ingest_table = gr.Dataframe(
                         headers=[
                             "\u6587\u6863",
                             "\u72b6\u6001",
+                            "\u8fdb\u5ea6",
                             "\u5206\u7247\u6570",
                             "\u56fe\u7247\u6570",
                             "\u9519\u8bef",
                             "\u65f6\u95f4",
                         ],
-                        datatype=["str", "str", "number", "number", "str", "str"],
+                        datatype=["str", "str", "str", "number", "number", "str", "str"],
                         value=[],
                         wrap=True,
                         interactive=False,
@@ -1233,52 +1496,55 @@ def build_app() -> gr.Blocks:
         )
 
         refresh_ingest_btn.click(
-            _refresh_ingest_list,
-            inputs=[ingest_dir_state, ingest_category, status_filter, doc_select],
-            outputs=[ingest_category, doc_select, doc_table, ingest_overview, ingest_status, ingest_items_state],
+            _refresh_ingest_panel,
+            inputs=[ingest_dir_state, ingest_category, status_filter, doc_select, db_category],
+            outputs=[ingest_category, doc_select, doc_table, ingest_overview, ingest_items_state, db_category],
         )
         ingest_category.change(
-            _refresh_ingest_list,
-            inputs=[ingest_dir_state, ingest_category, status_filter, doc_select],
-            outputs=[ingest_category, doc_select, doc_table, ingest_overview, ingest_status, ingest_items_state],
+            _refresh_ingest_panel,
+            inputs=[ingest_dir_state, ingest_category, status_filter, doc_select, db_category],
+            outputs=[ingest_category, doc_select, doc_table, ingest_overview, ingest_items_state, db_category],
         )
         status_filter.change(
-            _refresh_ingest_list,
-            inputs=[ingest_dir_state, ingest_category, status_filter, doc_select],
-            outputs=[ingest_category, doc_select, doc_table, ingest_overview, ingest_status, ingest_items_state],
+            _refresh_ingest_panel,
+            inputs=[ingest_dir_state, ingest_category, status_filter, doc_select, db_category],
+            outputs=[ingest_category, doc_select, doc_table, ingest_overview, ingest_items_state, db_category],
         )
         select_all_btn.click(
             _select_all_docs,
-            inputs=[ingest_items_state],
-            outputs=[doc_select],
+            inputs=[ingest_dir_state, ingest_category, status_filter],
+            outputs=[doc_select, ingest_items_state, doc_table, ingest_overview],
         )
         clear_select_btn.click(
             _clear_selection,
             outputs=[doc_select],
         )
-        init_db_btn.click(_init_db_ui, inputs=[db_category], outputs=[ingest_status, db_status_box, db_category])
-        refresh_db_btn.click(_refresh_db_ui, inputs=[db_category], outputs=[ingest_status, db_status_box, db_category])
         clear_vectors_all_btn.click(
-            _clear_vectors_all,
-            inputs=[ingest_dir_state, ingest_category, status_filter, doc_select, ingest_items_state],
-            outputs=[ingest_status, db_status_box, ingest_category, doc_select, doc_table, ingest_overview, ingest_items_state],
+            _clear_vectors_all_ui,
+            inputs=[ingest_dir_state, ingest_category, status_filter, doc_select, ingest_items_state, db_category],
+            outputs=[acceptance_box, ingest_category, doc_select, doc_table, ingest_overview, ingest_items_state, db_category],
         )
         clear_vectors_category_btn.click(
-            _clear_vectors_by_category,
+            _clear_vectors_by_category_ui,
             inputs=[ingest_dir_state, db_category, ingest_category, status_filter, doc_select, ingest_items_state],
-            outputs=[ingest_status, db_status_box, ingest_category, doc_select, doc_table, ingest_overview, ingest_items_state],
+            outputs=[acceptance_box, ingest_category, doc_select, doc_table, ingest_overview, ingest_items_state, db_category],
+        )
+
+        acceptance_btn.click(
+            _run_ingest_acceptance_check,
+            outputs=[acceptance_box],
         )
 
         ingest_btn.click(
-            _ingest_batch_stream,
+            _ingest_batch_stream_ui,
             inputs=[doc_select, ingest_items_state, process_images, status_filter],
             outputs=[
-                ingest_progress,
+                ingest_overall_progress,
+                ingest_result_box,
                 ingest_table,
                 doc_table,
                 doc_select,
                 ingest_overview,
-                ingest_status,
                 ingest_items_state,
             ],
         )

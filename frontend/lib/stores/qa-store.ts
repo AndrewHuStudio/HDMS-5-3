@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ChatMessage, SourceInfo } from "@/features/qa/types";
+import type { ChatMessage, SourceInfo, RetrievalStats } from "@/features/qa/types";
 
 export interface QAPanelMessage {
   id: string;
@@ -8,6 +8,8 @@ export interface QAPanelMessage {
   timestamp: Date;
   thinking?: string;
   sources?: SourceInfo[];
+  retrievalStats?: RetrievalStats;
+  feedback?: "useful" | "not_useful";
   isStreaming?: boolean;
 }
 

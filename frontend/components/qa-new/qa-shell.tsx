@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
@@ -9,6 +9,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Send } from "lucide-react";
 import { ThinkingProcess } from "@/components/qa-thinking";
 import { QASources } from "@/components/qa-sources";
+import { QARetrievalStats } from "@/components/qa-retrieval-stats";
+import { QAFeedback } from "@/components/qa-feedback";
+import { QAExportButton } from "@/components/qa-export-button";
 import type { ChatMessage } from "@/features/qa/types";
 
 interface QAShellProps {
@@ -20,6 +23,7 @@ interface QAShellProps {
   quickQuestions?: string[];
   onInputChange: (value: string) => void;
   onSend: (question?: string) => void;
+  onFeedback?: (messageId: string, feedback: "useful" | "not_useful") => void;
 }
 
 export function QAShell({
@@ -31,6 +35,7 @@ export function QAShell({
   quickQuestions = [],
   onInputChange,
   onSend,
+  onFeedback,
 }: QAShellProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -52,40 +57,59 @@ export function QAShell({
 
   return (
     <div className="flex h-screen w-full flex-col bg-background text-foreground">
-      <header className="border-b border-border bg-card px-6 py-4">
-        <h1 className="text-lg font-semibold">{title}</h1>
-        <p className="text-xs text-muted-foreground">{subtitle}</p>
+      <header className="flex items-center justify-between border-b border-border bg-card px-6 py-4">
+        <div>
+          <h1 className="text-lg font-semibold">{title}</h1>
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
+        </div>
+        <QAExportButton messages={messages} disabled={isSending} />
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-4" ref={scrollRef}>
         <div className="space-y-4">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-            >
+          {messages.map((message, idx) => {
+            let precedingQuestion: string | undefined;
+            if (message.role === "assistant") {
+              for (let i = idx - 1; i >= 0; i--) {
+                if (messages[i].role === "user") {
+                  precedingQuestion = messages[i].content;
+                  break;
+                }
+              }
+            }
+
+            return (
               <div
-                className={`max-w-[80%] rounded-lg px-4 py-2 text-sm leading-relaxed ${
-                  message.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-foreground"
-                }`}
+                key={message.id}
+                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
               >
-                {message.role === "assistant" ? (
-                  <AssistantContent message={message} />
-                ) : (
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                )}
-                <p
-                  className={`mt-1 text-[11px] ${
-                    message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
+                <div
+                  className={`max-w-[80%] rounded-lg px-4 py-2 text-sm leading-relaxed ${
+                    message.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-foreground"
                   }`}
                 >
-                  {message.createdAt}
-                </p>
+                  {message.role === "assistant" ? (
+                    <AssistantContent
+                      message={message}
+                      precedingQuestion={precedingQuestion}
+                      onFeedback={onFeedback}
+                    />
+                  ) : (
+                    <p className="whitespace-pre-wrap">{message.content}</p>
+                  )}
+                  <p
+                    className={`mt-1 text-[11px] ${
+                      message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
+                    }`}
+                  >
+                    {message.createdAt}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -131,15 +155,28 @@ export function QAShell({
   );
 }
 
-/** Renders assistant message with thinking, markdown, citations, and sources. */
-function AssistantContent({ message }: { message: ChatMessage }) {
-  const { content, thinking, sources, isStreaming } = message;
+/** Renders assistant message with thinking, retrieval stats, markdown, citations, sources, and feedback. */
+function AssistantContent({
+  message,
+  precedingQuestion,
+  onFeedback,
+}: {
+  message: ChatMessage;
+  precedingQuestion?: string;
+  onFeedback?: (messageId: string, feedback: "useful" | "not_useful") => void;
+}) {
+  const { content, thinking, sources, retrievalStats, feedback, isStreaming } = message;
 
   return (
     <div>
       {/* Thinking process (collapsible) */}
       {thinking && (
         <ThinkingProcess thinking={thinking} isStreaming={!!isStreaming} />
+      )}
+
+      {/* Retrieval stats (collapsible) */}
+      {retrievalStats && (
+        <QARetrievalStats stats={retrievalStats} isStreaming={!!isStreaming} />
       )}
 
       {/* Main answer with markdown */}
@@ -218,7 +255,18 @@ function AssistantContent({ message }: { message: ChatMessage }) {
 
       {/* Source citations */}
       {sources && sources.length > 0 && !isStreaming && (
-        <QASources sources={sources} />
+        <QASources sources={sources} query={precedingQuestion} />
+      )}
+
+      {/* Feedback buttons */}
+      {content && !isStreaming && onFeedback && precedingQuestion && (
+        <QAFeedback
+          messageId={message.id}
+          question={precedingQuestion}
+          answer={content}
+          currentFeedback={feedback}
+          onFeedbackChange={(fb) => onFeedback(message.id, fb)}
+        />
       )}
     </div>
   );

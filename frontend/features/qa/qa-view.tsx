@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import { QAShell } from "@/components/qa-new";
@@ -42,6 +42,10 @@ export function QAView() {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
 
+  const handleFeedback = (messageId: string, feedback: "useful" | "not_useful") => {
+    updateMessage(messageId, (msg) => ({ ...msg, feedback }));
+  };
+
   const handleSend = async (presetQuestion?: string) => {
     const question = (presetQuestion ?? input).trim();
     if (!question || isSending) return;
@@ -65,6 +69,9 @@ export function QAView() {
       await sendQuestionStream(question, history, {
         onSources: (sources) => {
           updateMessage(assistantId, (msg) => ({ ...msg, sources }));
+        },
+        onRetrievalStats: (stats) => {
+          updateMessage(assistantId, (msg) => ({ ...msg, retrievalStats: stats }));
         },
         onThinking: (token) => {
           updateMessage(assistantId, (msg) => ({
@@ -124,6 +131,7 @@ export function QAView() {
       quickQuestions={quickQuestions}
       onInputChange={setInput}
       onSend={handleSend}
+      onFeedback={handleFeedback}
     />
   );
 }

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from typing import Optional, List
-from pydantic import BaseModel, ConfigDict, Field
+from typing import List
 
 from core.database.manager import db_manager
 from core import config
@@ -14,37 +15,17 @@ from rag.retriever import MultiSourceRetriever
 from rag.service import create_rag_service
 from rag.embedder import create_embedding_service
 from rag.graph_query import GraphQueryService
+from rag.cache import get_query_cache
+from schemas.rag_schemas import (
+    RAGChatRequest as ChatRequest,
+    RAGChatResponse as ChatResponse,
+    SourceInfo,
+    FeedbackRequest,
+    FeedbackResponse,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-class ChatMessage(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
-    role: str
-    content: str
-
-
-class ChatRequest(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
-    question: str = Field(..., min_length=1, max_length=2000)
-    history: list[ChatMessage] = Field(default_factory=list)
-
-
-class SourceInfo(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
-    type: str
-    name: str
-    section: Optional[str] = None
-    source: str
-    chunk_id: Optional[str] = None
-
-
-class ChatResponse(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
-    answer: str
-    model: str
-    sources: List[SourceInfo] = Field(default_factory=list)
 
 
 def _create_retriever() -> MultiSourceRetriever:
@@ -69,11 +50,7 @@ def _create_retriever() -> MultiSourceRetriever:
 
 @router.post("/qa/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    """
-    RAG-based question answering (non-streaming).
-
-    Retrieves context from Milvus/Neo4j/MongoDB, builds prompt, calls LLM.
-    """
+    """RAG-based question answering (non-streaming)."""
     try:
         retriever = _create_retriever()
         rag_service = create_rag_service(retriever)
@@ -86,8 +63,8 @@ def chat(request: ChatRequest) -> ChatResponse:
         result = rag_service.answer_question(
             question=request.question.strip(),
             history=history,
-            use_retrieval=True,
-            top_k=5
+            use_retrieval=request.use_retrieval,
+            top_k=request.top_k,
         )
 
         sources = [
@@ -98,6 +75,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             answer=result["answer"],
             model=result["model"],
             sources=sources,
+            context_used=result.get("context_used", True),
         )
 
     except HTTPException:
@@ -109,16 +87,7 @@ def chat(request: ChatRequest) -> ChatResponse:
 
 @router.post("/qa/chat/stream")
 def chat_stream(request: ChatRequest):
-    """
-    RAG-based question answering with SSE streaming.
-
-    Returns Server-Sent Events:
-    - sources: source metadata (sent first)
-    - thinking: reasoning process tokens (DeepSeek-R1)
-    - answer: answer tokens
-    - done: completion signal
-    - error: error information
-    """
+    """RAG-based question answering with SSE streaming."""
     try:
         retriever = _create_retriever()
         rag_service = create_rag_service(retriever)
@@ -133,8 +102,8 @@ def chat_stream(request: ChatRequest):
                 for event_type, data in rag_service.answer_question_stream(
                     question=request.question.strip(),
                     history=history,
-                    use_retrieval=True,
-                    top_k=5,
+                    use_retrieval=request.use_retrieval,
+                    top_k=request.top_k,
                 ):
                     yield f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
             except Exception as e:
@@ -158,17 +127,46 @@ def chat_stream(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/qa/feedback", response_model=FeedbackResponse)
+def submit_feedback(request: FeedbackRequest):
+    """Submit feedback on answer quality. Stores in MongoDB qa_feedback collection."""
+    try:
+        if not db_manager._initialized:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+
+        feedback_id = f"fb-{int(time.time())}-{request.message_id[:8]}"
+
+        feedback_doc = {
+            "_id": feedback_id,
+            "message_id": request.message_id,
+            "question": request.question,
+            "answer": request.answer[:2000],
+            "rating": request.rating,
+            "comment": request.comment,
+            "created_at": time.time(),
+        }
+
+        db_manager.mongodb.insert_document("qa_feedback", feedback_doc)
+        logger.info("Feedback stored: %s -> %s", feedback_id, request.rating)
+
+        return FeedbackResponse(success=True, feedback_id=feedback_id)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to store feedback: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/qa/cache/stats")
+def cache_stats():
+    """Get query cache statistics."""
+    return get_query_cache().get_stats()
+
+
 @router.get("/rag/sources/{chunk_id}")
-def get_source_details(chunk_id: str):
-    """
-    Get detailed information about a specific source chunk.
-
-    Args:
-        chunk_id: Chunk ID from search results
-
-    Returns:
-        Detailed chunk information including full text and metadata
-    """
+def get_source_details(chunk_id: str, q: str = Query("", description="Original query for keyword highlighting")):
+    """Get detailed information about a specific source chunk."""
     try:
         if not db_manager._initialized:
             raise HTTPException(
@@ -176,7 +174,6 @@ def get_source_details(chunk_id: str):
                 detail="Database connections not initialized"
             )
 
-        # Retrieve chunk from MongoDB
         chunk = db_manager.mongodb.find_by_id("chunks", chunk_id)
 
         if not chunk:
@@ -185,13 +182,25 @@ def get_source_details(chunk_id: str):
                 detail=f"Chunk {chunk_id} not found"
             )
 
-        # Get document info
         doc_id = chunk.get("doc_id")
         document = db_manager.mongodb.find_by_id("documents", doc_id)
 
+        text = chunk.get("text", "")
+        summary = text[:200] + ("..." if len(text) > 200 else "")
+
+        # Extract keywords from query that appear in the text
+        matched_keywords = []
+        if q:
+            tokens = [t for t in re.split(r'\s+', q.strip()) if len(t) >= 2]
+            for token in tokens:
+                if token in text:
+                    matched_keywords.append(token)
+
         return {
             "chunk_id": chunk_id,
-            "text": chunk.get("text", ""),
+            "text": text,
+            "summary": summary,
+            "matched_keywords": matched_keywords,
             "section_title": chunk.get("section_title", ""),
             "has_table": chunk.get("has_table", False),
             "has_image": chunk.get("has_image", False),

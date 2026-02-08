@@ -2,8 +2,10 @@
 Embedding service for generating vector embeddings (query-time only).
 """
 
+import hashlib
 import json
 import urllib.request
+from collections import OrderedDict
 from typing import List
 import logging
 import os
@@ -16,7 +18,8 @@ logger = logging.getLogger(__name__)
 class EmbeddingService:
     """Service for generating text embeddings using OpenAI-compatible API."""
 
-    def __init__(self, base_url: str, api_key: str, model: str):
+    def __init__(self, base_url: str, api_key: str, model: str,
+                 cache_max_size: int = 256):
         """
         Initialize embedding service.
 
@@ -24,14 +27,21 @@ class EmbeddingService:
             base_url: API base URL
             api_key: API key for authentication
             model: Embedding model name
+            cache_max_size: Maximum number of embeddings to cache in memory
         """
-        self.base_url = base_url.rstrip("/")
+        # Normalize base_url: ensure it ends with /v1
+        base = base_url.rstrip("/")
+        if not base.endswith("/v1"):
+            base = base + "/v1"
+        self.base_url = base
         self.api_key = api_key
         self.model = model
+        self._cache: OrderedDict[str, List[float]] = OrderedDict()
+        self._cache_max_size = cache_max_size
 
     def embed_text(self, text: str) -> List[float]:
         """
-        Generate embedding for a single text.
+        Generate embedding for a single text (with LRU cache).
 
         Args:
             text: Text to embed
@@ -39,6 +49,16 @@ class EmbeddingService:
         Returns:
             Embedding vector as list of floats
         """
+        # Check cache first
+        cache_key = hashlib.sha256(
+            text.strip().lower().encode("utf-8")
+        ).hexdigest()
+
+        if cache_key in self._cache:
+            self._cache.move_to_end(cache_key)
+            logger.debug("Embedding cache hit")
+            return self._cache[cache_key]
+
         endpoint = f"{self.base_url}/embeddings"
         payload = {
             "model": self.model,
@@ -60,6 +80,12 @@ class EmbeddingService:
 
             embedding = result["data"][0]["embedding"]
             logger.debug(f"Generated embedding with dimension {len(embedding)}")
+
+            # Store in cache, evict oldest if over limit
+            self._cache[cache_key] = embedding
+            if len(self._cache) > self._cache_max_size:
+                self._cache.popitem(last=False)
+
             return embedding
 
         except Exception as e:
@@ -132,4 +158,7 @@ def create_embedding_service() -> EmbeddingService:
     if not api_key:
         raise ValueError("HDMS_API_KEY environment variable is required")
 
-    return EmbeddingService(base_url, api_key, model)
+    return EmbeddingService(
+        base_url, api_key, model,
+        cache_max_size=config.EMBEDDING_CACHE_MAX_SIZE,
+    )

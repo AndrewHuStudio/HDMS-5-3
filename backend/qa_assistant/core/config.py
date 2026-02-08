@@ -96,3 +96,18 @@ if CORS_ALLOW_PRIVATE_ORIGINS and not CORS_ORIGIN_REGEX:
         r"172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}"
         r")(:\d+)?$"
     )
+
+# --- Embedding Cache ---
+EMBEDDING_CACHE_MAX_SIZE = int(os.getenv("EMBEDDING_CACHE_MAX_SIZE", "256"))
+
+# --- Query Cache ---
+QUERY_CACHE_ENABLED = os.getenv("QUERY_CACHE_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+QUERY_CACHE_MAX_SIZE = int(os.getenv("QUERY_CACHE_MAX_SIZE", "128"))
+QUERY_CACHE_TTL_SECONDS = int(os.getenv("QUERY_CACHE_TTL_SECONDS", "3600"))
+
+# --- Rerank Configuration ---
+RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+RERANK_BASE_URL = os.getenv("RERANK_BASE_URL", "https://api.apiyi.com/v1")
+RERANK_API_KEY = os.getenv("RERANK_API_KEY", "")
+RERANK_MODEL = os.getenv("RERANK_MODEL", "bge-reranker-v2-m3")
+RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "5"))

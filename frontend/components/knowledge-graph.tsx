@@ -272,7 +272,7 @@ export function KnowledgeGraph({ selectedElement }: KnowledgeGraphProps) {
             <ForceGraph2D
               graphData={graphData}
               nodeLabel="name"
-              nodeColor={getNodeColor}
+              nodeColor={getNodeColor as any}
               nodeRelSize={6}
               linkColor={() => graphLinkColor}
               linkWidth={2}

@@ -41,6 +41,35 @@ class RAGChatResponse(BaseModel):
     model: str = Field(..., description="Model used for generation")
 
 
+class RetrievalStats(BaseModel):
+    """Statistics about the retrieval process."""
+
+    vector_count: int = Field(0, description="Number of vector search results")
+    graph_count: int = Field(0, description="Number of graph search results")
+    keyword_count: int = Field(0, description="Number of keyword search results")
+    fused_count: int = Field(0, description="Number of fused results after dedup")
+    reranked: bool = Field(False, description="Whether reranking was applied")
+    cached: bool = Field(False, description="Whether result was from cache")
+    weights: Dict[str, float] = Field(default_factory=dict, description="Fusion weights used")
+
+
+class FeedbackRequest(BaseModel):
+    """Request to submit answer quality feedback."""
+
+    message_id: str = Field(..., min_length=1, description="Frontend message ID")
+    question: str = Field(..., min_length=1, description="The original question")
+    answer: str = Field(..., description="The answer that was rated")
+    rating: str = Field(..., description="'useful' or 'not_useful'")
+    comment: Optional[str] = Field(None, max_length=500, description="Optional user comment")
+
+
+class FeedbackResponse(BaseModel):
+    """Response after submitting feedback."""
+
+    success: bool
+    feedback_id: str
+
+
 class RAGSearchRequest(BaseModel):
     """Request for RAG search (retrieval only)."""
 

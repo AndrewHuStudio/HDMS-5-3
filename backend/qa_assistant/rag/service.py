@@ -11,7 +11,9 @@ import os
 
 import openai
 
+from core import config as app_config
 from rag.retriever import MultiSourceRetriever
+from rag.cache import get_query_cache
 
 logger = logging.getLogger(__name__)
 
@@ -51,18 +53,15 @@ class RAGService:
         use_retrieval: bool = True,
         top_k: int = 5
     ) -> Dict[str, Any]:
-        """
-        Answer a question using RAG.
+        """Answer a question using RAG."""
+        # Check cache first
+        cache = get_query_cache()
+        if use_retrieval and app_config.QUERY_CACHE_ENABLED:
+            cached = cache.get(question)
+            if cached is not None:
+                logger.info("Returning cached answer for query")
+                return cached
 
-        Args:
-            question: User question
-            history: Conversation history (list of {role, content})
-            use_retrieval: Whether to use retrieval
-            top_k: Number of retrieval results
-
-        Returns:
-            Dictionary with answer, sources, and metadata
-        """
         # Retrieve context
         context = ""
         sources = []
@@ -81,12 +80,18 @@ class RAGService:
         # Generate answer
         answer = self._generate_answer(prompt)
 
-        return {
+        result = {
             "answer": answer,
             "sources": sources,
             "context_used": bool(context),
             "model": self.llm_model
         }
+
+        # Store in cache
+        if use_retrieval and app_config.QUERY_CACHE_ENABLED:
+            cache.put(question, result)
+
+        return result
 
     def _build_prompt(
         self,
@@ -213,14 +218,37 @@ class RAGService:
 
         Yields (event_type, data) tuples:
         - ("sources", {"sources": [...]})
+        - ("retrieval_stats", {...})
         - ("thinking", {"content": "..."})
         - ("answer", {"content": "..."})
-        - ("done", {"model": ..., "context_used": ...})
+        - ("done", {"model": ..., "context_used": ..., "cached": ...})
         - ("error", {"detail": "..."})
         """
+        # Check cache first
+        cache = get_query_cache()
+        if use_retrieval and app_config.QUERY_CACHE_ENABLED:
+            cached = cache.get(question)
+            if cached is not None:
+                logger.info("Returning cached answer via stream")
+                yield ("sources", {"sources": cached.get("sources", [])})
+                yield ("retrieval_stats", {
+                    "vector_count": 0, "graph_count": 0,
+                    "keyword_count": 0, "fused_count": 0,
+                    "reranked": False, "cached": True,
+                    "weights": {},
+                })
+                yield ("answer", {"content": cached["answer"]})
+                yield ("done", {
+                    "model": cached.get("model", self.llm_model),
+                    "context_used": cached.get("context_used", True),
+                    "cached": True,
+                })
+                return
+
         # Step 1: Retrieve context (synchronous, before streaming)
         context = ""
         sources = []
+        retrieval_results = None
 
         if use_retrieval:
             try:
@@ -238,6 +266,18 @@ class RAGService:
         # Step 2: Yield sources event first
         yield ("sources", {"sources": sources})
 
+        # Step 2.5: Yield retrieval stats
+        if retrieval_results is not None:
+            yield ("retrieval_stats", {
+                "vector_count": len(retrieval_results.get("vector_results", [])),
+                "graph_count": len(retrieval_results.get("graph_results", [])),
+                "keyword_count": len(retrieval_results.get("keyword_results", [])),
+                "fused_count": len(retrieval_results.get("fused_results", [])),
+                "reranked": retrieval_results.get("reranked", False),
+                "cached": False,
+                "weights": self.retriever._compute_weights(question),
+            })
+
         # Step 3: Build prompt
         prompt = self._build_prompt(question, context, history)
 
@@ -251,6 +291,7 @@ class RAGService:
         # that don't support reasoning_content field)
         in_think_tag = False
         has_reasoning_content = False
+        full_answer_parts: List[str] = []
 
         try:
             stream = client.chat.completions.create(
@@ -281,9 +322,11 @@ class RAGService:
                         if not in_think_tag:
                             idx = content.find("<think>")
                             if idx == -1:
+                                full_answer_parts.append(content)
                                 yield ("answer", {"content": content})
                                 break
                             if idx > 0:
+                                full_answer_parts.append(content[:idx])
                                 yield ("answer", {"content": content[:idx]})
                             in_think_tag = True
                             content = content[idx + 7:]  # len("<think>") == 7
@@ -298,12 +341,25 @@ class RAGService:
                             content = content[idx + 8:]  # len("</think>") == 8
                 elif content and has_reasoning_content:
                     # API provides reasoning_content, so content is the answer
+                    full_answer_parts.append(content)
                     yield ("answer", {"content": content})
 
                 if choice.finish_reason:
                     yield ("done", {
                         "model": self.llm_model,
                         "context_used": bool(context),
+                        "cached": False,
+                    })
+
+            # Cache the complete answer after streaming finishes
+            if use_retrieval and app_config.QUERY_CACHE_ENABLED:
+                full_answer = "".join(full_answer_parts)
+                if full_answer:
+                    cache.put(question, {
+                        "answer": full_answer,
+                        "sources": sources,
+                        "context_used": bool(context),
+                        "model": self.llm_model,
                     })
 
         except Exception as e:

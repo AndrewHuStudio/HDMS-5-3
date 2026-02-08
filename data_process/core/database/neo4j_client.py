@@ -155,6 +155,76 @@ class Neo4jClient:
             result = session.run(cypher, parameters or {})
             return [record.data() for record in result]
 
+    def get_document_doc_ids(self) -> List[str]:
+        """
+        Get doc_id values from Document nodes.
+
+        Returns:
+            List of non-empty doc_id values
+        """
+        rows = self.query(
+            "MATCH (d:Document) WHERE d.doc_id IS NOT NULL RETURN d.doc_id as doc_id"
+        )
+        doc_ids: List[str] = []
+        for row in rows:
+            doc_id = str(row.get("doc_id") or "").strip()
+            if doc_id:
+                doc_ids.append(doc_id)
+        return doc_ids
+
+    def delete_document_subgraph(self, doc_id: str, prune_orphan_entities: bool = True) -> Dict[str, int]:
+        """
+        Delete a document node and optionally orphan entities attached to it.
+
+        Args:
+            doc_id: Document ID stored on :Document node
+            prune_orphan_entities: Delete entities no longer referenced by any document
+
+        Returns:
+            Dictionary containing delete counters
+        """
+        if not doc_id:
+            return {"deleted_document_nodes": 0, "pruned_entities": 0}
+
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (d:Document {doc_id: $doc_id})
+                OPTIONAL MATCH (d)-[:CONTAINS]->(e)
+                WITH collect(DISTINCT d) as docs, collect(DISTINCT e) as entities
+                FOREACH (doc IN docs | DETACH DELETE doc)
+                RETURN size(docs) as deleted_documents,
+                       [entity IN entities WHERE entity IS NOT NULL | elementId(entity)] as entity_ids
+                """,
+                doc_id=doc_id,
+            )
+            record = result.single()
+            deleted_documents = int((record or {}).get("deleted_documents") or 0)
+            entity_ids = (record or {}).get("entity_ids") or []
+
+            pruned_entities = 0
+            if prune_orphan_entities and entity_ids:
+                prune_result = session.run(
+                    """
+                    UNWIND $entity_ids as entity_id
+                    MATCH (entity)
+                    WHERE elementId(entity) = entity_id
+                    OPTIONAL MATCH (entity)<-[:CONTAINS]-(:Document)
+                    WITH entity, count(*) as refs
+                    WHERE refs = 0
+                    DETACH DELETE entity
+                    RETURN count(entity) as pruned
+                    """,
+                    entity_ids=entity_ids,
+                )
+                prune_record = prune_result.single()
+                pruned_entities = int((prune_record or {}).get("pruned") or 0)
+
+        return {
+            "deleted_document_nodes": deleted_documents,
+            "pruned_entities": pruned_entities,
+        }
+
     def get_node_with_relationships(
         self,
         node_id: str,

@@ -4,7 +4,7 @@ MongoDB document database client for HDMS.
 
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ class MongoDBClient:
         try:
             self.client = MongoClient(self.uri, serverSelectionTimeoutMS=5000)
             # Test connection
-            self.client.admin.command('ping')
+            self.client.admin.command("ping")
             self.db = self.client[self.database_name]
             logger.info(f"Connected to MongoDB database: {self.database_name}")
         except ConnectionFailure as e:
@@ -76,10 +76,12 @@ class MongoDBClient:
         Returns:
             List of inserted document IDs as strings
         """
+        if not documents:
+            return []
         try:
             result = self.db[collection].insert_many(documents)
             logger.info(f"Inserted {len(documents)} documents into {collection}")
-            return [str(id) for id in result.inserted_ids]
+            return [str(doc_id) for doc_id in result.inserted_ids]
         except OperationFailure as e:
             logger.error(f"Failed to insert documents: {e}")
             raise
@@ -102,7 +104,8 @@ class MongoDBClient:
         collection: str,
         query: Dict[str, Any],
         limit: Optional[int] = 10,
-        projection: Optional[Dict[str, Any]] = None
+        projection: Optional[Dict[str, Any]] = None,
+        sort: Optional[List[Tuple[str, int]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Find documents by query.
@@ -112,11 +115,14 @@ class MongoDBClient:
             query: MongoDB query filter
             limit: Maximum number of results
             projection: Fields to include/exclude
+            sort: Optional sort expression, e.g. [("updated_at", -1)]
 
         Returns:
             List of matching documents
         """
         cursor = self.db[collection].find(query, projection)
+        if sort:
+            cursor = cursor.sort(sort)
         if limit is not None:
             cursor = cursor.limit(limit)
         return list(cursor)
@@ -162,6 +168,31 @@ class MongoDBClient:
             {"$set": update}
         )
         return result.modified_count > 0
+
+    def upsert_document(
+        self,
+        collection: str,
+        doc_id: str,
+        update: Dict[str, Any],
+        set_on_insert: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Upsert a document by ID.
+
+        Args:
+            collection: Collection name
+            doc_id: Document ID
+            update: Fields to set
+            set_on_insert: Optional fields set only when inserting
+
+        Returns:
+            True if a document was inserted or modified
+        """
+        payload: Dict[str, Any] = {"$set": update}
+        if set_on_insert:
+            payload["$setOnInsert"] = set_on_insert
+        result = self.db[collection].update_one({"_id": doc_id}, payload, upsert=True)
+        return bool(result.modified_count or result.upserted_id)
 
     def delete_document(self, collection: str, doc_id: str) -> bool:
         """
