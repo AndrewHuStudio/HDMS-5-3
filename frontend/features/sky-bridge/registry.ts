@@ -1,4 +1,4 @@
-import { Bridge } from "lucide-react";
+import { Link2 } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
 import { SkyBridgePanel } from "./panel";
 import { SkyBridgeSceneLayer } from "./scene";
@@ -11,7 +11,7 @@ toolRegistry.register({
   category: "building",
   status: "implemented",
   apiEndpoint: "/sky-bridge-check",
-  icon: Bridge,
+  icon: Link2,
   Panel: SkyBridgePanel,
   SceneLayer: SkyBridgeSceneLayer,
   reset: () => useSkyBridgeStore.getState().reset(),
