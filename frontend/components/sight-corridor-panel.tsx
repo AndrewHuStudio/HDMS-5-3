@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Slider } from "@/components/ui/slider";
-import { AlertCircle, Navigation, Trash2, Eye } from "lucide-react";
+import { AlertCircle, Navigation, Trash2, Eye, CheckCircle2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { API_BASE, normalizeApiBase } from "@/lib/api-base";
 import type {
   SightCorridorResult,
   SightCorridorPosition,
@@ -75,7 +76,7 @@ export function SightCorridorPanel({
   showBlockingLabels,
   onShowBlockingLabelsChange,
 }: SightCorridorPanelProps) {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+  const apiBase = normalizeApiBase(API_BASE);
   const [isPlacementMode, setIsPlacementMode] = useState(false);
   const [position, setPosition] = useState<SightCorridorPosition | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -219,12 +220,16 @@ export function SightCorridorPanel({
         const formData = new FormData();
         formData.append("file", modelFile);
 
-        const uploadResponse = await fetch(`${apiBase}/models/import?skip_layers=true`, {
+        const uploadUrl = `${apiBase}/models/import?skip_layers=true`;
+        const uploadResponse = await fetch(uploadUrl, {
           method: "POST",
           body: formData,
         });
 
         if (!uploadResponse.ok) {
+          if (uploadResponse.status === 404) {
+            throw new Error(`模型上传接口未找到: ${uploadUrl}`);
+          }
           const errorData = await uploadResponse.json().catch(() => ({}));
           throw new Error(errorData.detail || "模型上传失败");
         }
@@ -484,7 +489,8 @@ export function SightCorridorPanel({
         y: pos.y / safeScale,
         z: pos.z / safeScale,
       };
-      const response = await fetch(`${apiBase}/sight-corridor/check`, {
+      const checkUrl = `${apiBase}/sight-corridor/check`;
+      const response = await fetch(checkUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -498,6 +504,9 @@ export function SightCorridorPanel({
       });
 
       if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error(`检测接口未找到: ${checkUrl}`);
+        }
         throw new Error("检测失败");
       }
 
@@ -673,6 +682,16 @@ export function SightCorridorPanel({
   const corridorBlockedBuildings = corridorCollisionResult?.blocked_buildings ?? [];
   const corridorStatus = corridorCollisionResult?.status ?? null;
   const hasCorridorBlocks = corridorBlockedBuildings.length > 0;
+  const visibleBuildings = sightCorridorResult?.visible_buildings ?? [];
+  const invisibleBuildings = sightCorridorResult?.invisible_buildings ?? [];
+  const totalVisibilityCount = visibleBuildings.length + invisibleBuildings.length;
+  const visibilityItems = useMemo(
+    () => [
+      ...invisibleBuildings.map((item) => ({ ...item, is_visible: false })),
+      ...visibleBuildings.map((item) => ({ ...item, is_visible: true })),
+    ],
+    [invisibleBuildings, visibleBuildings]
+  );
 
   return (
     <div className="space-y-2">
@@ -741,32 +760,71 @@ export function SightCorridorPanel({
             </Alert>
           )}
 
-          {corridorStatus === "clear" && (
-            <Alert className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
-              <Eye className="h-4 w-4 text-green-600" />
-              <AlertDescription className="text-xs text-green-600 dark:text-green-400">
-                视线通廊未发现遮挡
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {corridorBlockedBuildings.length > 0 && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>不合格建筑</span>
-                <span>{corridorBlockedBuildings.length} 个</span>
-              </div>
-              <div className="max-h-32 overflow-auto rounded border bg-muted/30 px-2 py-1 text-xs">
-                {corridorBlockedBuildings.map((building, index) => (
-                  <div key={`${building.mesh_id ?? building.building_name}-${index}`} className="py-0.5">
-                    {building.building_name}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          
         </CardContent>
       </Card>
+
+      {(corridorStatus === "clear" || corridorStatus === "blocked") && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm">通廊检测结果</CardTitle>
+              <div className="flex items-center gap-2">
+                {corridorStatus === "clear" ? (
+                  <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                    未遮挡
+                  </div>
+                ) : (
+                  <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">
+                    {corridorBlockedBuildings.length} 遮挡
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2.5 max-h-[240px] overflow-y-auto pt-2">
+            {corridorStatus === "clear" ? (
+              <div className="border rounded-lg p-3 transition-all hover:shadow-sm border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30">
+                <div className="flex items-center gap-1.5 text-green-700 dark:text-green-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span className="text-xs font-medium">视线通廊未发现遮挡</span>
+                </div>
+              </div>
+            ) : (
+              corridorBlockedBuildings.map((building, index) => (
+                <div
+                  key={`${building.mesh_id ?? building.building_name}-${index}`}
+                  className="border rounded-lg p-3 transition-all hover:shadow-sm border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-medium text-sm">{building.building_name}</span>
+                    <div className="flex items-center gap-1.5 text-red-700 dark:text-red-400">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                      <span className="text-xs font-medium">通廊遮挡</span>
+                    </div>
+                  </div>
+                  {(building.layer_name || building.layer_index !== undefined) && (
+                    <div className="space-y-1 text-xs">
+                      {building.layer_name && (
+                        <div className="flex justify-between items-center py-0.5">
+                          <span className="text-muted-foreground">图层:</span>
+                          <span className="font-medium">{building.layer_name}</span>
+                        </div>
+                      )}
+                      {building.layer_index !== undefined && (
+                        <div className="flex justify-between items-center py-0.5">
+                          <span className="text-muted-foreground">图层编号:</span>
+                          <span className="font-medium">{building.layer_index}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* 错误提示 */}
       {error && (
@@ -859,6 +917,84 @@ export function SightCorridorPanel({
           </div>
         </CardContent>
       </Card>
+
+      {totalVisibilityCount > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm">视野检测结果</CardTitle>
+              <div className="flex items-center gap-2">
+                <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                  {visibleBuildings.length}/{totalVisibilityCount} 可见
+                </div>
+                {invisibleBuildings.length > 0 && (
+                  <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">
+                    {invisibleBuildings.length} 不可见
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2.5 max-h-[320px] overflow-y-auto pt-2">
+            {visibilityItems.map((building, index) => (
+              <div
+                key={`${building.building_name}-${index}`}
+                className={`border rounded-lg p-3 transition-all hover:shadow-sm ${
+                  building.is_visible
+                    ? "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
+                    : "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-sm">
+                    {building.building_name || `建筑 ${index + 1}`}
+                  </span>
+                  {building.is_visible ? (
+                    <div className="flex items-center gap-1.5 text-green-700 dark:text-green-400">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span className="text-xs font-medium">可见</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-red-700 dark:text-red-400">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                      <span className="text-xs font-medium">不可见</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-muted-foreground">距离:</span>
+                    <span
+                      className={`font-medium ${
+                        building.is_visible
+                          ? "text-green-700 dark:text-green-400"
+                          : "text-red-700 dark:text-red-400"
+                      }`}
+                    >
+                      {Number.isFinite(building.distance) ? `${building.distance.toFixed(2)} m` : "-"}
+                    </span>
+                  </div>
+                  {building.layer_name && (
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="text-muted-foreground">图层:</span>
+                      <span className="font-medium">{building.layer_name}</span>
+                    </div>
+                  )}
+                  {!building.is_visible && building.reason && (
+                    <div className="flex justify-between items-center pt-1.5 mt-1.5 border-t border-border">
+                      <span className="text-red-600 dark:text-red-400 font-medium">原因:</span>
+                      <span className="text-red-700 dark:text-red-300 font-bold">
+                        {building.reason}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* 使用提示 */}
       {isPlacementMode && !position && (

@@ -1,23 +1,20 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import type { CityElement } from "@/lib/city-data";
 import { elementTypeNames } from "@/lib/city-data";
-import { Send, Network, MessageSquare } from "lucide-react";
+import { useQAPanelStore, type QAPanelMessage } from "@/lib/stores/qa-store";
+import { Send, Network, MessageSquare, Plus } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-}
+type Message = QAPanelMessage;
 
 interface QAPanelProps {
   selectedElement: CityElement | null;
@@ -31,7 +28,6 @@ const quickQuestions = [
 ];
 
 const CHAT_ENDPOINT = "/qa/chat";
-
 const buildHistory = (messages: Message[]) =>
   messages
     .filter((message) => message.id !== "welcome")
@@ -83,20 +79,30 @@ const normalizeMarkdownLists = (content: string) => {
 };
 
 export function QAPanel({ selectedElement }: QAPanelProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content:
-        "您好！我是城市管控助手。您可以直接提问城市管控相关问题，我会结合知识库与您后续上传的资料生成图文并茂的答案，并提供关键指标解读与调整建议。",
-      timestamp: new Date(),
-    },
-  ]);
+  const [isMounted, setIsMounted] = useState(false);
+  const conversations = useQAPanelStore((state) => state.conversations);
+  const activeConversationId = useQAPanelStore((state) => state.activeConversationId);
+  const createConversation = useQAPanelStore((state) => state.createConversation);
+  const switchConversation = useQAPanelStore((state) => state.switchConversation);
+  const appendMessage = useQAPanelStore((state) => state.appendMessage);
+  const setActiveConversationContextId = useQAPanelStore((state) => state.setActiveConversationContextId);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [activeTab, setActiveTab] = useState<"chat" | "graph">("chat");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const activeConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0],
+    [activeConversationId, conversations]
+  );
+  const messages = activeConversation?.messages ?? [];
+  const lastContextElementId = activeConversation?.lastContextElementId ?? null;
+
+  const sortedConversations = useMemo(
+    () => [...conversations].sort((a, b) => b.updatedAt - a.updatedAt),
+    [conversations]
+  );
 
   const scrollToBottom = useCallback(() => {
     if (scrollContainerRef.current) {
@@ -105,20 +111,32 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
   }, []);
 
   useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping, scrollToBottom]);
 
   useEffect(() => {
-    if (selectedElement) {
-      const systemMessage: Message = {
-        id: `context-${selectedElement.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        role: "assistant",
-        content: `已切换到【${selectedElement.name}】，这是一个${elementTypeNames[selectedElement.type]}。您可以询问关于它的任何问题。`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, systemMessage]);
+    if (!selectedElement) {
+      if (lastContextElementId !== null) {
+        setActiveConversationContextId(null);
+      }
+      return;
     }
-  }, [selectedElement]);
+    if (selectedElement.id === lastContextElementId) {
+      return;
+    }
+    const systemMessage: Message = {
+      id: `context-${selectedElement.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      role: "assistant",
+      content: `已切换到【${selectedElement.name}】，这是一个${elementTypeNames[selectedElement.type]}。您可以询问关于它的任何问题。`,
+      timestamp: new Date(),
+    };
+    appendMessage(systemMessage);
+    setActiveConversationContextId(selectedElement.id);
+  }, [appendMessage, lastContextElementId, selectedElement, setActiveConversationContextId]);
 
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
@@ -131,7 +149,7 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    appendMessage(userMessage);
     setInput("");
     setIsTyping(true);
 
@@ -160,7 +178,7 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
         content: aiResponse,
         timestamp: new Date(),
       };
-      setMessages((prev) => [...prev, assistantMessage]);
+      appendMessage(assistantMessage);
     } catch (error) {
       const fallback = buildFallbackAnswer(question, selectedElement);
       const assistantMessage: Message = {
@@ -169,7 +187,7 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
         content: fallback,
         timestamp: new Date(),
       };
-      setMessages((prev) => [...prev, assistantMessage]);
+      appendMessage(assistantMessage);
     } finally {
       setIsTyping(false);
     }
@@ -181,7 +199,36 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
 
   return (
     <div className="h-full flex flex-col min-h-0 overflow-hidden">
-      <div className="px-4 py-2 border-b border-slate-200 bg-slate-50">
+      <div className="px-4 py-2 border-b border-border bg-card">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="flex-1 min-w-0">
+            <Select value={activeConversationId} onValueChange={switchConversation}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="选择对话" />
+              </SelectTrigger>
+              <SelectContent>
+                {sortedConversations.map((conversation) => (
+                  <SelectItem key={conversation.id} value={conversation.id}>
+                    {conversation.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => {
+              createConversation();
+              setInput("");
+            }}
+          >
+            <Plus className="h-3 w-3 mr-1" />
+            新建对话
+          </Button>
+        </div>
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "chat" | "graph")}>
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="chat" className="flex items-center gap-2">
@@ -197,8 +244,8 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
 
         {selectedElement && (
           <div className="flex items-center gap-2 mt-2">
-            <span className="text-xs text-slate-500">当前上下文:</span>
-            <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200">
+            <span className="text-xs text-muted-foreground">当前上下文:</span>
+            <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded border border-primary/20">
               {selectedElement.name}
             </span>
           </div>
@@ -220,8 +267,8 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
               <div
                 className={`max-w-[80%] rounded-lg px-4 py-2 ${
                   message.role === "user"
-                    ? "ml-auto bg-blue-500 text-white"
-                    : "mr-auto bg-slate-100 text-slate-800"
+                    ? "ml-auto bg-primary text-primary-foreground"
+                    : "mr-auto bg-muted text-foreground"
                 }`}
               >
                   {message.role === "assistant" ? (
@@ -243,17 +290,17 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
                             children?: ReactNode;
                           }) =>
                             inline ? (
-                              <code className="rounded bg-slate-200/60 px-1 py-0.5 text-[0.85em]">
+                              <code className="rounded bg-muted px-1 py-0.5 text-[0.85em]">
                                 {children}
                               </code>
                             ) : (
-                              <code className="block rounded bg-slate-900 text-slate-100 p-3 text-xs overflow-x-auto">
+                              <code className="block rounded bg-slate-900 text-slate-100 dark:bg-slate-800 p-3 text-xs overflow-x-auto">
                                 {children}
                               </code>
                             ),
                           pre: ({ children }) => <pre className="mb-2 overflow-x-auto">{children}</pre>,
                           blockquote: ({ children }) => (
-                            <blockquote className="border-l-2 border-slate-300 pl-3 text-slate-600">
+                            <blockquote className="border-l-2 border-border pl-3 text-muted-foreground">
                               {children}
                             </blockquote>
                           ),
@@ -262,16 +309,16 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
                               <table className="min-w-full border-collapse text-xs">{children}</table>
                             </div>
                           ),
-                          thead: ({ children }) => <thead className="bg-slate-200/60">{children}</thead>,
+                          thead: ({ children }) => <thead className="bg-muted">{children}</thead>,
                           th: ({ children }) => (
-                            <th className="border border-slate-300 px-2 py-1 text-left font-semibold">
+                            <th className="border border-border px-2 py-1 text-left font-semibold">
                               {children}
                             </th>
                           ),
                           td: ({ children }) => (
-                            <td className="border border-slate-300 px-2 py-1 align-top">{children}</td>
+                            <td className="border border-border px-2 py-1 align-top">{children}</td>
                           ),
-                          hr: () => <hr className="my-2 border-slate-300" />,
+                          hr: () => <hr className="my-2 border-border" />,
                         }}
                       >
                         {normalizeMarkdownLists(message.content)}
@@ -280,22 +327,27 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
                   ) : (
                     <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
                   )}
-                  <p className={`text-xs mt-1 ${message.role === "user" ? "text-blue-100" : "text-slate-400"}`}>
-                    {message.timestamp.toLocaleTimeString("zh-CN", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                  <p
+                    className={`text-xs mt-1 ${message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"}`}
+                    suppressHydrationWarning
+                  >
+                    {isMounted
+                      ? message.timestamp.toLocaleTimeString("zh-CN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : ""}
                   </p>
                 </div>
               </div>
             ))}
             {isTyping && (
               <div className="flex">
-                <div className="mr-auto bg-slate-100 rounded-lg px-4 py-3">
+                <div className="mr-auto bg-muted rounded-lg px-4 py-3">
                   <div className="flex gap-1">
-                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" />
-                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:0.15s]" />
-                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:0.3s]" />
+                    <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
+                    <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce [animation-delay:0.15s]" />
+                    <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce [animation-delay:0.3s]" />
                   </div>
                 </div>
               </div>
@@ -304,15 +356,15 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
           </div>
 
           {/* 快捷问题 */}
-          <div className="px-4 py-2 border-t border-slate-200 bg-slate-50">
-            <p className="text-xs text-slate-500 mb-2">快捷提问:</p>
+          <div className="px-4 py-2 border-t border-border bg-card">
+            <p className="text-xs text-muted-foreground mb-2">快捷提问:</p>
             <div className="flex flex-wrap gap-2">
               {quickQuestions.map((q, index) => (
                 <Button
                   key={`quick-${index}`}
                   variant="outline"
                   size="sm"
-                  className="text-xs h-7 bg-white hover:bg-slate-100 text-slate-600 border-slate-200"
+                  className="text-xs h-7"
                   onClick={() => handleQuickQuestion(q)}
                 >
                   {q}
@@ -322,7 +374,7 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
           </div>
 
           {/* 输入框 */}
-          <div className="p-4 border-t border-slate-200">
+          <div className="p-4 border-t border-border">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -334,13 +386,13 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
                 placeholder="输入您的问题..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                className="flex-1 bg-white border-slate-200 focus:border-blue-300"
+                className="flex-1"
               />
               <Button
                 type="submit"
                 size="icon"
                 disabled={!input.trim()}
-                className="bg-blue-500 hover:bg-blue-600 text-white"
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 <Send className="h-4 w-4" />
               </Button>

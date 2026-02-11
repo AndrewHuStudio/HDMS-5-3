@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2, Loader2, Eye, X } from "lucide-react";
 import type { HeightCheckSetbackVolume } from "@/lib/height-check-types";
+import { API_BASE, normalizeApiBase } from "@/lib/api-base";
 
 interface HeightCheckPanelPureProps {
   modelFilePath: string | null;
@@ -55,7 +56,7 @@ export function HeightCheckPanelPure({
   onShowHeightCheckLabelsChange,
   onWarningsChange,
 }: HeightCheckPanelPureProps) {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+  const apiBase = normalizeApiBase(API_BASE);
   const [isChecking, setIsChecking] = useState(false);
   const [localResults, setLocalResults] = useState<BuildingResult[]>([]);
   const [localWarnings, setLocalWarnings] = useState<string[]>([]);
@@ -129,12 +130,16 @@ export function HeightCheckPanelPure({
         const formData = new FormData();
         formData.append("file", modelFile);
 
-        const uploadResponse = await fetch(`${apiBase}/models/import?skip_layers=true`, {
+        const uploadUrl = `${apiBase}/models/import?skip_layers=true`;
+        const uploadResponse = await fetch(uploadUrl, {
           method: "POST",
           body: formData,
         });
 
         if (!uploadResponse.ok) {
+          if (uploadResponse.status === 404) {
+            throw new Error(`模型上传接口未找到: ${uploadUrl}`);
+          }
           const errorData = await uploadResponse.json().catch(() => ({}));
           throw new Error(errorData.detail || "模型上传失败");
         }
@@ -168,7 +173,8 @@ export function HeightCheckPanelPure({
       };
       console.log("[DEBUG] 请求体:", JSON.stringify(requestBody, null, 2));
 
-      const response = await fetch(`${apiBase}/height-check/pure-python`, {
+      const checkUrl = `${apiBase}/height-check/pure-python`;
+      const response = await fetch(checkUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json; charset=utf-8",
@@ -179,6 +185,9 @@ export function HeightCheckPanelPure({
       console.log("[DEBUG] 响应状态:", response.status, response.statusText);
 
       if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error(`检测接口未找到: ${checkUrl}`);
+        }
         const errorData = await response.json();
         console.error("[DEBUG] 检测失败:", errorData);
         throw new Error(errorData.detail || "检测失败");

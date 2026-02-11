@@ -1,23 +1,22 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
+import { AlertCircle, CheckCircle2, Eye, Loader2, X } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, Loader2, CheckCircle2, X, Eye } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import type { SetbackCheckResult } from "@/lib/setback-check-types";
+import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import type { SetbackViolationResult } from "@/lib/setback-violation-types";
 
 interface SetbackCheckPanelProps {
   modelFilePath: string | null;
   modelFile?: File | null;
   onModelPathResolved?: (modelPath: string) => void;
-  onResultChange?: (result: SetbackCheckResult | null) => void;
-  onHighlightTargetChange?: (target: { type: "overall" | "plot" | null; plotName?: string | null }) => void;
-  selectedPlotName?: string | null;
-  showSetbackLabels?: boolean;
-  onShowSetbackLabelsChange?: (show: boolean) => void;
+  onResultChange?: (result: SetbackViolationResult | null) => void;
+  showHighlights?: boolean;
+  onShowHighlightsChange?: (show: boolean) => void;
 }
 
 export function SetbackCheckPanel({
@@ -25,86 +24,70 @@ export function SetbackCheckPanel({
   modelFile,
   onModelPathResolved,
   onResultChange,
-  onHighlightTargetChange,
-  selectedPlotName,
-  showSetbackLabels,
-  onShowSetbackLabelsChange,
+  showHighlights,
+  onShowHighlightsChange,
 }: SetbackCheckPanelProps) {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+  const apiBase = normalizeApiBase(API_BASE);
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<SetbackCheckResult | null>(null);
-  const buildingLayer = "模型_建筑体块";
-  const setbackLayer = "限制_建筑退线";
-  const [sampleStep, setSampleStep] = useState(1.0);
-  const [tolerance, setTolerance] = useState(0.5);
-  const [requiredRatePercent, setRequiredRatePercent] = useState(70);
-  const [localShowLabels, setLocalShowLabels] = useState(true);
+  const [result, setResult] = useState<SetbackViolationResult | null>(null);
+  const [localShowHighlights, setLocalShowHighlights] = useState(true);
   const [uploadedModelPath, setUploadedModelPath] = useState<string | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
-  const plotRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  const buildingLayer = "模型_建筑体块";
+  const setbackLayer = "限制_建筑退线";
+  const plotLayer = "场景_地块";
 
   const effectiveModelPath =
     modelFilePath || (modelFile?.name === uploadedFileName ? uploadedModelPath : null);
-  const showLabels = showSetbackLabels ?? localShowLabels;
+  const highlightEnabled = showHighlights ?? localShowHighlights;
 
   useEffect(() => {
     setUploadedModelPath(null);
     setUploadedFileName(null);
   }, [modelFile]);
 
-  useEffect(() => {
-    if (!selectedPlotName) return;
-    const target = plotRefs.current.get(selectedPlotName);
-    if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [selectedPlotName]);
+  const resolveModelPath = async () => {
+    let resolvedModelPath = effectiveModelPath;
+    if (resolvedModelPath) return resolvedModelPath;
+
+    if (!modelFile) {
+      setError("请先上传3dm模型文件");
+      return null;
+    }
+
+    const formData = new FormData();
+    formData.append("file", modelFile);
+
+    const uploadResponse = await fetch(`${apiBase}/models/import?skip_layers=true`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!uploadResponse.ok) {
+      const errorData = await uploadResponse.json().catch(() => ({}));
+      throw new Error(errorData.detail || "模型上传失败");
+    }
+
+    const uploadData = await uploadResponse.json();
+    resolvedModelPath = uploadData.model_path;
+    if (resolvedModelPath) {
+      setUploadedModelPath(resolvedModelPath);
+      setUploadedFileName(modelFile.name);
+      onModelPathResolved?.(resolvedModelPath);
+    }
+
+    return resolvedModelPath ?? null;
+  };
 
   const handleStartCheck = async () => {
     try {
       setIsChecking(true);
       setError(null);
 
-      let resolvedModelPath = effectiveModelPath;
-      if (!resolvedModelPath) {
-        if (!modelFile) {
-          setError("请先上传3dm模型文件");
-          return;
-        }
-
-        const formData = new FormData();
-        formData.append("file", modelFile);
-
-        const uploadResponse = await fetch(`${apiBase}/models/import?skip_layers=true`, {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!uploadResponse.ok) {
-          const errorData = await uploadResponse.json().catch(() => ({}));
-          throw new Error(errorData.detail || "模型上传失败");
-        }
-
-        const uploadData = await uploadResponse.json();
-        resolvedModelPath = uploadData.model_path;
-        if (resolvedModelPath) {
-          setUploadedModelPath(resolvedModelPath);
-          setUploadedFileName(modelFile.name);
-          onModelPathResolved?.(resolvedModelPath);
-        }
-      }
-
-      if (!resolvedModelPath) {
-        setError("模型路径无效，请重新上传");
-        return;
-      }
-
-      const safeSampleStep = Number.isFinite(sampleStep) && sampleStep > 0 ? sampleStep : 1.0;
-      const safeTolerance = Number.isFinite(tolerance) && tolerance >= 0 ? tolerance : 0.5;
-      const requiredRate =
-        Number.isFinite(requiredRatePercent) && requiredRatePercent > 0
-          ? requiredRatePercent / 100
-          : null;
+      const resolvedModelPath = await resolveModelPath();
+      if (!resolvedModelPath) return;
 
       const response = await fetch(`${apiBase}/setback-check`, {
         method: "POST",
@@ -115,9 +98,7 @@ export function SetbackCheckPanel({
           model_path: resolvedModelPath,
           building_layer: buildingLayer,
           setback_layer: setbackLayer,
-          sample_step: safeSampleStep,
-          tolerance: safeTolerance,
-          required_rate: requiredRate,
+          plot_layer: plotLayer,
         }),
       });
 
@@ -126,17 +107,17 @@ export function SetbackCheckPanel({
         throw new Error(errorData.detail || "检测失败");
       }
 
-      const data = (await response.json()) as SetbackCheckResult;
+      const data = (await response.json()) as SetbackViolationResult;
       setResult(data);
       onResultChange?.(data);
-      if (onShowSetbackLabelsChange) {
-        onShowSetbackLabelsChange(true);
+      if (onShowHighlightsChange) {
+        onShowHighlightsChange(true);
       } else {
-        setLocalShowLabels(true);
+        setLocalShowHighlights(true);
       }
       setError(null);
     } catch (err) {
-      console.error("贴线率检测失败:", err);
+      console.error("退线检测失败:", err);
       if (err instanceof TypeError && err.message.includes("Failed to fetch")) {
         setError(`无法连接后端服务，请确认后端已启动（${apiBase}）`);
       } else {
@@ -151,20 +132,19 @@ export function SetbackCheckPanel({
     setResult(null);
     setError(null);
     onResultChange?.(null);
-    onHighlightTargetChange?.({ type: null });
-    if (onShowSetbackLabelsChange) {
-      onShowSetbackLabelsChange(false);
+    if (onShowHighlightsChange) {
+      onShowHighlightsChange(false);
     } else {
-      setLocalShowLabels(false);
+      setLocalShowHighlights(false);
     }
   };
 
-  const overallRate = result?.summary?.overall_rate ?? 0;
-  const overallRateText = `${(overallRate * 100).toFixed(1)}%`;
+  const buildingResults = result?.buildings ?? [];
+  const exceededCount = buildingResults.filter((item) => item.is_exceeded).length;
+  const compliantCount = buildingResults.length - exceededCount;
 
   return (
     <div className="space-y-3">
-      {/* 可视化选项 */}
       <Card className="gap-0">
         <CardHeader className="pb-1">
           <div className="flex items-center gap-2">
@@ -181,20 +161,20 @@ export function SetbackCheckPanel({
                 <Eye className="h-4 w-4 text-blue-600" />
               </div>
               <div>
-                <Label className="text-sm font-medium cursor-pointer">显示贴线率标记</Label>
+                <Label className="text-sm font-medium cursor-pointer">显示超限高亮</Label>
                 <p className="text-xs text-muted-foreground">
-                  {result?.plots?.length ? `${result.plots.length} 个地块` : "暂无检测结果"}
+                  {buildingResults.length ? `${buildingResults.length} 个建筑` : "暂无检测结果"}
                 </p>
               </div>
             </div>
             <Switch
-              checked={showLabels}
+              checked={highlightEnabled}
               disabled={!result}
               onCheckedChange={(checked) => {
-                if (onShowSetbackLabelsChange) {
-                  onShowSetbackLabelsChange(checked);
+                if (onShowHighlightsChange) {
+                  onShowHighlightsChange(checked);
                 } else {
-                  setLocalShowLabels(checked);
+                  setLocalShowHighlights(checked);
                 }
               }}
             />
@@ -202,55 +182,6 @@ export function SetbackCheckPanel({
         </CardContent>
       </Card>
 
-      {/* 参数配置 */}
-      <Card className="gap-0">
-        <CardHeader className="pb-1">
-          <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">2</div>
-            <CardTitle className="text-sm">配置参数</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3 pt-1">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="space-y-2">
-              <Label className="text-xs font-medium text-muted-foreground">采样步长(m)</Label>
-              <input
-                type="number"
-                value={sampleStep}
-                min={0.1}
-                step={0.1}
-                onChange={(e) => setSampleStep(Number(e.target.value))}
-                className="w-full px-2 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-medium text-muted-foreground">距离容差(m)</Label>
-              <input
-                type="number"
-                value={tolerance}
-                min={0}
-                step={0.1}
-                onChange={(e) => setTolerance(Number(e.target.value))}
-                className="w-full px-2 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-medium text-muted-foreground">贴线率阈值(%)</Label>
-              <input
-                type="number"
-                value={requiredRatePercent}
-                min={0}
-                max={100}
-                step={1}
-                onChange={(e) => setRequiredRatePercent(Number(e.target.value))}
-                className="w-full px-2 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* 错误提示 */}
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
@@ -258,12 +189,13 @@ export function SetbackCheckPanel({
         </Alert>
       )}
 
-      {/* 开始检测 */}
       <Card className="gap-0">
         <CardHeader className="pb-1">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">3</div>
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+                2
+              </div>
               <CardTitle className="text-sm">开始检测</CardTitle>
             </div>
             <Button
@@ -297,132 +229,67 @@ export function SetbackCheckPanel({
         </CardContent>
       </Card>
 
-      {/* 检测结果 */}
-      {result && (
-        <Card
-          onMouseEnter={() => onHighlightTargetChange?.({ type: "overall" })}
-          onMouseLeave={() => onHighlightTargetChange?.({ type: null })}
-        >
+      {buildingResults.length > 0 && (
+        <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm">综合贴线率</CardTitle>
-              <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
-                {overallRateText}
+              <CardTitle className="text-sm">检测结果</CardTitle>
+              <div className="flex items-center gap-2">
+                <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                  {compliantCount}/{buildingResults.length} 合规
+                </div>
+                {exceededCount > 0 && (
+                  <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">
+                    {exceededCount} 超限
+                  </div>
+                )}
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-3 pt-2">
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>总退线长度</span>
-                <span>{result.summary.total_setback_length.toFixed(1)} m</span>
-              </div>
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>重合长度</span>
-                <span>{result.summary.total_overlap_length.toFixed(1)} m</span>
-              </div>
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>未匹配建筑</span>
-                <span>{result.summary.unmatched_buildings}</span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              {result.plots.map((plot) => {
-                const ratePercent = plot.frontage_rate * 100;
-                const required = plot.required_rate ?? null;
-                const requiredPercent = required !== null ? required * 100 : null;
-                const statusText =
-                  plot.is_compliant === null
-                    ? "仅计算"
-                    : plot.is_compliant
-                      ? "达标"
-                      : "未达标";
-                return (
-                  <div
-                    key={plot.plot_name}
-                    className={`border rounded-lg p-3 space-y-2 ${
-                      plot.is_compliant === true
-                        ? "border-green-500 bg-green-50/40 text-green-700"
-                        : plot.is_compliant === false
-                          ? "border-orange-500 bg-orange-50/40 text-orange-700"
-                          : ""
-                    } ${selectedPlotName === plot.plot_name ? "ring-1 ring-blue-400" : ""}`}
-                    ref={(node) => {
-                      if (!node) return;
-                      plotRefs.current.set(plot.plot_name, node);
-                    }}
-                    onMouseEnter={() =>
-                      onHighlightTargetChange?.({ type: "plot", plotName: plot.plot_name })
-                    }
-                    onMouseLeave={() => onHighlightTargetChange?.({ type: "overall" })}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className={`text-sm font-medium ${
-                        plot.is_compliant === true
-                          ? "text-green-700"
-                          : plot.is_compliant === false
-                            ? "text-orange-700"
-                            : ""
-                      }`}>{plot.plot_name}</span>
-                      <div className="flex items-center gap-1 text-xs">
-                        {plot.is_compliant ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-                        ) : (
-                          <AlertCircle className="h-3.5 w-3.5 text-orange-600" />
-                        )}
-                        <span>{statusText}</span>
-                      </div>
+          <CardContent className="space-y-2.5 max-h-[420px] overflow-y-auto pt-2">
+            {buildingResults.map((building) => (
+              <div
+                key={building.building_index}
+                className={`border rounded-lg p-3 transition-all hover:shadow-sm ${
+                  building.is_exceeded
+                    ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
+                    : "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-sm">
+                    {building.building_name || `建筑 ${building.building_index + 1}`}
+                  </span>
+                  {building.is_exceeded ? (
+                    <div className="flex items-center gap-1.5 text-red-700 dark:text-red-400">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                      <span className="text-xs font-medium">超限</span>
                     </div>
-                    <div className="h-2 w-full rounded bg-secondary">
-                      <div
-                        className={`h-2 rounded ${
-                          plot.is_compliant === true
-                            ? "bg-green-500"
-                            : plot.is_compliant === false
-                              ? "bg-orange-500"
-                              : "bg-blue-500"
-                        }`}
-                        style={{ width: `${Math.min(100, ratePercent)}%` }}
-                      />
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-green-700 dark:text-green-400">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span className="text-xs font-medium">合规</span>
                     </div>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>贴线率</span>
-                      <span className={
-                        plot.is_compliant === true
-                          ? "text-green-700"
-                          : plot.is_compliant === false
-                            ? "text-orange-700"
-                            : ""
-                      }>{ratePercent.toFixed(1)}%</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>退线长度</span>
-                      <span>{plot.setback_length.toFixed(1)} m</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>重合长度</span>
-                      <span>{plot.overlap_length.toFixed(1)} m</span>
-                    </div>
-                    {requiredPercent !== null && (
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>阈值</span>
-                        <span>{requiredPercent.toFixed(1)}%</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>参与建筑</span>
-                      <span>{plot.building_count}</span>
-                    </div>
+                  )}
+                </div>
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-muted-foreground">所属退线:</span>
+                    <span className="font-medium">{building.plot_name ?? "未匹配退线"}</span>
                   </div>
-                );
-              })}
-            </div>
+                  {building.is_exceeded && building.reason === "missing_setback" && (
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="text-muted-foreground">原因:</span>
+                      <span className="text-red-600 font-medium">未匹配退线</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}
 
-      {/* 警告 */}
       {result?.warnings && result.warnings.length > 0 && (
         <Alert className="border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/30">
           <AlertCircle className="h-4 w-4 text-amber-600" />

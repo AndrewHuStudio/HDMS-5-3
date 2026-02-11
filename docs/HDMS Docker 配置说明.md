@@ -144,6 +144,18 @@ curl http://localhost:19531/healthz
 
 ## 常见问题
 
+### 0. Nginx 网关是否会自动启动？是否需要放入 docker-compose？
+
+当前项目里有 `nginx/hdms.conf`，但 `docker-compose.yml` 没有定义 `nginx` 服务。
+
+- **默认行为**：Nginx 不会“开机自动启动”，通常需要手动执行 `nginx -c nginx/hdms.conf`。
+- **脚本行为**：如果通过 `start_all.py` 启动，脚本会尝试自动拉起 Nginx（前提是本机能找到 `nginx` 可执行文件）。
+- **是否必须容器化 Nginx**：不是必须。现在是“容器跑数据库/中间件 + 宿主机跑应用和 Nginx”的混合模式，也可以工作。
+- **为什么考虑加到 compose**：便于一键启动、环境一致、部署迁移更简单。
+- **迁移注意**：若 Nginx 放到容器中，`nginx/hdms.conf` 里的上游地址不能继续使用 `127.0.0.1:8001~8004`，应改为服务名（如 `review:8001`）或 `host.docker.internal`。
+
+> 待讨论项：是否将 Nginx 与应用服务一并容器化，形成完整的 `docker compose up` 启动链路。
+
 ### 1. 端口被占用
 如果启动失败提示端口被占用，检查是否有其他服务使用了相同端口：
 ```bash
@@ -199,4 +211,4 @@ driver = GraphDatabase.driver(
 ```
 
 ## 更新日期
-2026-01-29
+2026-02-07

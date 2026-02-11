@@ -45,7 +45,7 @@ export function ViewControls({ currentView, onViewChange }: ViewControlsProps) {
       {/* 下拉菜单选择器 */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-2 bg-white">
+          <Button variant="outline" size="sm" className="gap-2">
             <Layers className="h-4 w-4" />
             {currentOption.label}
             <ChevronDown className="h-3 w-3" />
@@ -57,7 +57,7 @@ export function ViewControls({ currentView, onViewChange }: ViewControlsProps) {
           
           <DropdownMenuItem 
             onClick={() => onViewChange("perspective")}
-            className={currentView === "perspective" ? "bg-slate-100" : ""}
+            className={currentView === "perspective" ? "bg-muted" : ""}
           >
             <Eye className="h-4 w-4 mr-2" />
             <div>
@@ -73,7 +73,7 @@ export function ViewControls({ currentView, onViewChange }: ViewControlsProps) {
             <DropdownMenuItem 
               key={option.value}
               onClick={() => onViewChange(option.value)}
-              className={currentView === option.value ? "bg-slate-100" : ""}
+              className={currentView === option.value ? "bg-muted" : ""}
             >
               {option.icon}
               <span className="ml-2">{option.label}</span>
@@ -84,7 +84,7 @@ export function ViewControls({ currentView, onViewChange }: ViewControlsProps) {
           
           <DropdownMenuItem 
             onClick={() => onViewChange("plan")}
-            className={currentView === "plan" ? "bg-slate-100" : ""}
+            className={currentView === "plan" ? "bg-muted" : ""}
           >
             <Grid3X3 className="h-4 w-4 mr-2" />
             <div>
@@ -96,11 +96,11 @@ export function ViewControls({ currentView, onViewChange }: ViewControlsProps) {
       </DropdownMenu>
 
       {/* 快捷按钮 - 四个方向（东北->西北->西南->东南）*/}
-      <div className="flex items-center border border-border rounded-md bg-white overflow-hidden">
+      <div className="flex items-center border border-border rounded-md bg-card overflow-hidden">
         <Button 
           variant="ghost" 
           size="sm" 
-          className={`h-8 w-8 p-0 rounded-none ${currentView === "isometric-ne" ? "bg-slate-100" : ""}`}
+          className={`h-8 w-8 p-0 rounded-none ${currentView === "isometric-ne" ? "bg-muted" : ""}`}
           onClick={() => onViewChange("isometric-ne")}
           title="东北视角"
         >
@@ -109,7 +109,7 @@ export function ViewControls({ currentView, onViewChange }: ViewControlsProps) {
         <Button 
           variant="ghost" 
           size="sm" 
-          className={`h-8 w-8 p-0 rounded-none border-l border-border ${currentView === "isometric-nw" ? "bg-slate-100" : ""}`}
+          className={`h-8 w-8 p-0 rounded-none border-l border-border ${currentView === "isometric-nw" ? "bg-muted" : ""}`}
           onClick={() => onViewChange("isometric-nw")}
           title="西北视角"
         >
@@ -118,7 +118,7 @@ export function ViewControls({ currentView, onViewChange }: ViewControlsProps) {
         <Button 
           variant="ghost" 
           size="sm" 
-          className={`h-8 w-8 p-0 rounded-none border-l border-border ${currentView === "isometric-sw" ? "bg-slate-100" : ""}`}
+          className={`h-8 w-8 p-0 rounded-none border-l border-border ${currentView === "isometric-sw" ? "bg-muted" : ""}`}
           onClick={() => onViewChange("isometric-sw")}
           title="西南视角"
         >
@@ -127,7 +127,7 @@ export function ViewControls({ currentView, onViewChange }: ViewControlsProps) {
         <Button 
           variant="ghost" 
           size="sm" 
-          className={`h-8 w-8 p-0 rounded-none border-l border-border ${currentView === "isometric-se" ? "bg-slate-100" : ""}`}
+          className={`h-8 w-8 p-0 rounded-none border-l border-border ${currentView === "isometric-se" ? "bg-muted" : ""}`}
           onClick={() => onViewChange("isometric-se")}
           title="东南视角"
         >

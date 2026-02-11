@@ -21,14 +21,14 @@ export function ToolPanelWrapper({ tool, children }: ToolPanelWrapperProps) {
           <div>
             <div className="flex items-center justify-center gap-2">
               <p className="font-medium">{tool.name}</p>
-              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
                 开发中
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mt-1">
               {tool.description}
             </p>
-            <p className="text-xs text-amber-600 mt-2">
+            <p className="text-xs text-amber-600 dark:text-amber-300 mt-2">
               该功能正在开发中，敬请期待
             </p>
           </div>

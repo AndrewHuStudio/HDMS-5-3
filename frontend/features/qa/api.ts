@@ -1,11 +1,8 @@
 ﻿import type { ChatHistoryMessage, ChatResponse } from "./types";
+import { QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { streamChat, type SSECallbacks } from "@/lib/sse-client";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_HDMS_API_BASE ||
-  process.env.NEXT_PUBLIC_API_BASE ||
-  "http://localhost:8000";
-
-const CHAT_ENDPOINT = `${API_BASE.replace(/\/$/, "")}/qa/chat`;
+const CHAT_ENDPOINT = `${normalizeApiBase(QA_API_BASE)}/qa/chat`;
 
 export async function sendQuestion(
   question: string,
@@ -25,4 +22,38 @@ export async function sendQuestion(
   }
 
   return (await response.json()) as ChatResponse;
+}
+
+export async function sendQuestionStream(
+  question: string,
+  history: ChatHistoryMessage[],
+  callbacks: SSECallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamChat(question, history, callbacks, signal);
+}
+
+export interface FeedbackPayload {
+  message_id: string;
+  question: string;
+  answer: string;
+  rating: "useful" | "not_useful";
+  comment?: string;
+}
+
+export async function submitFeedback(
+  payload: FeedbackPayload,
+): Promise<{ success: boolean; feedback_id: string }> {
+  const response = await fetch("/qa/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Feedback failed: ${response.status}`);
+  }
+
+  return response.json();
 }

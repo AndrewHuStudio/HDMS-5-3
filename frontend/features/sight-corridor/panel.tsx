@@ -4,10 +4,11 @@ import * as THREE from "three";
 import { PlanViewport } from "@/components/city-scene";
 import { SightCorridorPanel } from "@/components/sight-corridor-panel";
 import { useModelStore } from "@/lib/stores/model-store";
+import { API_BASE, normalizeApiBase } from "@/lib/api-base";
 import { useSightCorridorStore } from "./store";
 
 export function SightCorridorPanelAdapter() {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+  const apiBase = normalizeApiBase(API_BASE);
 
   const modelFilePath = useModelStore((state) => state.modelFilePath);
   const modelFile = useModelStore((state) => state.externalModelFile);
@@ -40,7 +41,8 @@ export function SightCorridorPanelAdapter() {
     setCollisionResult(null);
     setShowCorridorLayer(true);
     try {
-      const response = await fetch(`${apiBase}/sight-corridor/collision`, {
+      const checkUrl = `${apiBase}/sight-corridor/collision`;
+      const response = await fetch(checkUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -53,6 +55,9 @@ export function SightCorridorPanelAdapter() {
       });
 
       if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error(`检测接口未找到: ${checkUrl}`);
+        }
         throw new Error("视线通廊碰撞检测失败");
       }
 
