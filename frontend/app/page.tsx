@@ -31,6 +31,8 @@ export default function CityControlSystem() {
   const [activeView, setActiveView] = useState<ActiveView>("data-upload");
   const [selectedImportedMesh, setSelectedImportedMesh] = useState<ImportedMeshInfo | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("perspective");
+  const [rightPanelWidth, setRightPanelWidth] = useState(360);
+  const [isResizing, setIsResizing] = useState(false);
 
   const externalModelUrl = useModelStore((state) => state.externalModelUrl);
   const externalModelType = useModelStore((state) => state.externalModelType);
@@ -141,6 +143,34 @@ export default function CityControlSystem() {
     };
     return titles[activeView] || "未知面板";
   };
+
+  // 处理右侧面板宽度调整
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const newWidth = window.innerWidth - e.clientX;
+      const clampedWidth = Math.max(360, Math.min(500, newWidth));
+      setRightPanelWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    }
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizing]);
 
   return (
     <div className="h-screen flex bg-background text-foreground overflow-hidden">
@@ -372,7 +402,17 @@ export default function CityControlSystem() {
       </main>
 
       {/* 右侧详情面板 */}
-      <aside className="w-[360px] xl:w-[500px] border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden">
+      <aside
+        className="border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden relative"
+        style={{ width: `${rightPanelWidth}px` }}
+      >
+        {/* 可拖拽的分隔条 */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 transition-colors z-10"
+          onMouseDown={() => setIsResizing(true)}
+          title="拖动调整宽度"
+        />
+
         <div className="h-12 border-b border-border flex items-center px-4 flex-shrink-0">
           <div className="flex items-center gap-2">
             {isQAPanel && <Sparkles className="h-4 w-4 text-blue-500" />}
