@@ -1,31 +1,18 @@
-﻿import { Move } from "lucide-react";
+import { Ruler } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
 import { SetbackPanel } from "./panel";
+import { SetbackSceneLayer } from "./scene";
 import { useSetbackCheckStore } from "./store";
-
-const useSceneState = () => {
-  const result = useSetbackCheckStore((state) => state.result);
-  const highlightTarget = useSetbackCheckStore((state) => state.highlightTarget);
-  const showSetbackLabels = useSetbackCheckStore((state) => state.showSetbackLabels);
-  const setSelectedPlotName = useSetbackCheckStore((state) => state.setSelectedPlotName);
-
-  return {
-    setbackHighlightResult: result,
-    setbackHighlightTarget: highlightTarget,
-    showSetbackLabels,
-    onSetbackPlotSelect: (plotName: string) => setSelectedPlotName(plotName),
-  };
-};
 
 toolRegistry.register({
   id: "setback-check",
-  name: "贴线率检测",
-  description: "检测贴线率是否符合要求",
+  name: "退线检测",
+  description: "检测建筑是否超出建筑退线",
   category: "building",
   status: "implemented",
   apiEndpoint: "/setback-check",
-  icon: Move,
+  icon: Ruler,
   Panel: SetbackPanel,
-  useSceneState,
+  SceneLayer: SetbackSceneLayer,
   reset: () => useSetbackCheckStore.getState().reset(),
 });
