@@ -1,4 +1,4 @@
-﻿export type ChatRole = "user" | "assistant";
+export type ChatRole = "user" | "assistant";
 
 export interface SourceInfo {
   type: string;
@@ -6,6 +6,14 @@ export interface SourceInfo {
   section?: string;
   source: string;
   chunk_id?: string;
+  doc_id?: string;
+  chunk_index?: number;
+  page?: number;
+  score?: number;
+  quote?: string;
+  pdf_url?: string;
+  image_url?: string;
+  image_name?: string;
 }
 
 export interface RetrievalStats {
@@ -18,6 +26,26 @@ export interface RetrievalStats {
   weights: Record<string, number>;
 }
 
+export interface GraphNode {
+  id: string;
+  label: string;
+  name: string;
+  properties: Record<string, unknown>;
+}
+
+export interface GraphEdge {
+  id: string;
+  type: string;
+  source: string;
+  target: string;
+  properties: Record<string, unknown>;
+}
+
+export interface SubgraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
@@ -26,8 +54,10 @@ export interface ChatMessage {
   thinking?: string;
   sources?: SourceInfo[];
   retrievalStats?: RetrievalStats;
+  subgraph?: SubgraphData;
   feedback?: "useful" | "not_useful";
   isStreaming?: boolean;
+  statusMessage?: string;
 }
 
 export interface ChatHistoryMessage {

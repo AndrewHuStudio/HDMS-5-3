@@ -7,6 +7,7 @@ import { CityScene, type ImportedMeshInfo, type ModelFileType, type ViewMode } f
 import { ViewControls } from "@/components/view-controls";
 import { ReviewPanel } from "@/components/review-panel";
 import { QAPanel } from "@/components/qa-panel";
+import { DataUploadPanel } from "@/components/data-upload-panel";
 import { ModelUploader, type LayerInfo } from "@/components/model-uploader";
 import { SidebarNav } from "@/components/navigation/sidebar-nav";
 import { ToolPanelWrapper } from "@/components/tools/tool-panel-wrapper";
@@ -24,23 +25,19 @@ import {
   CheckCircle2,
   Sparkles,
 } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 
 export default function CityControlSystem() {
   const [selectedElement, setSelectedElement] = useState<CityElement | null>(null);
-  const [activeView, setActiveView] = useState<ActiveView>("qa-assistant");
+  const [activeView, setActiveView] = useState<ActiveView>("data-upload");
   const [selectedImportedMesh, setSelectedImportedMesh] = useState<ImportedMeshInfo | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("perspective");
 
   const externalModelUrl = useModelStore((state) => state.externalModelUrl);
   const externalModelType = useModelStore((state) => state.externalModelType);
   const externalModelName = useModelStore((state) => state.externalModelName);
-  const showDemoModel = useModelStore((state) => state.showDemoModel);
   const modelError = useModelStore((state) => state.modelError);
 
   const setExternalModel = useModelStore((state) => state.setExternalModel);
-  const setShowDemoModel = useModelStore((state) => state.setShowDemoModel);
   const setModelFilePath = useModelStore((state) => state.setModelFilePath);
   const setModelLayers = useModelStore((state) => state.setModelLayers);
   const setModelBounds = useModelStore((state) => state.setModelBounds);
@@ -82,7 +79,6 @@ export default function CityControlSystem() {
     setExternalModel({ url, type: fileType, name: fileName, file: file ?? null });
     currentModelRef.current = { url, type: fileType };
     setModelError(null);
-    setShowDemoModel(false);
     setModelFilePath(modelPath ?? null);
     setModelLayers(layers || []);
     setModelBounds(undefined);
@@ -122,6 +118,7 @@ export default function CityControlSystem() {
 
   const activeTool = toolRegistry.get(activeView);
   const isQAPanel = activeView === "qa-assistant";
+  const isDataUploadView = activeView === "data-upload";
   const previousViewRef = useRef<ActiveView>(activeView);
   const toolIdSet = useMemo(() => new Set(tools.map((tool) => tool.id)), [tools]);
 
@@ -138,6 +135,7 @@ export default function CityControlSystem() {
     if (activeTool) return activeTool.name;
 
     const titles: Record<string, string> = {
+      "data-upload": "管控资料上传",
       "qa-assistant": "管控问答助手",
       "approval-checklist": "管控审批清单",
     };
@@ -172,6 +170,23 @@ export default function CityControlSystem() {
       </aside>
 
       {/* 主内容区 */}
+      {isDataUploadView ? (
+        <section className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+          <header className="h-12 border-b border-border bg-card flex items-center justify-between px-4 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <h2 className="font-medium">管控资料上传</h2>
+              <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
+                严格串行
+              </span>
+            </div>
+
+            <ThemeToggle />
+          </header>
+
+          <DataUploadPanel />
+        </section>
+      ) : (
+        <>
       <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         {/* 顶部栏 */}
         <header className="h-12 border-b border-border bg-card flex items-center justify-end px-4 flex-shrink-0">
@@ -189,14 +204,6 @@ export default function CityControlSystem() {
               onClearModel={handleClearModel}
             />
 
-            <div className="flex items-center gap-2">
-              <Switch
-                id="demo-toggle"
-                checked={showDemoModel}
-                onCheckedChange={setShowDemoModel}
-              />
-              <Label htmlFor="demo-toggle" className="text-xs">演示数据</Label>
-            </div>
 
             <ThemeToggle />
           </div>
@@ -212,7 +219,6 @@ export default function CityControlSystem() {
             selectedElement={selectedElement}
             externalModelUrl={externalModelUrl}
             externalModelType={externalModelType}
-            showDemoModel={showDemoModel}
             onModelError={setModelError}
             onImportedMeshSelect={(mesh) => {
               setSelectedImportedMesh(mesh);
@@ -366,7 +372,7 @@ export default function CityControlSystem() {
       </main>
 
       {/* 右侧详情面板 */}
-      <aside className="w-[360px] border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden">
+      <aside className="w-[360px] xl:w-[500px] border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden">
         <div className="h-12 border-b border-border flex items-center px-4 flex-shrink-0">
           <div className="flex items-center gap-2">
             {isQAPanel && <Sparkles className="h-4 w-4 text-blue-500" />}
@@ -387,6 +393,10 @@ export default function CityControlSystem() {
           )}
         </div>
       </aside>
+        </>
+      )}
     </div>
   );
 }
+
+

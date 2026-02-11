@@ -73,8 +73,23 @@ class DatabaseManager:
             try:
                 self.neo4j.create_constraint("Plot", "name")
                 self.neo4j.create_constraint("Document", "doc_id")
+                self.neo4j.create_constraint("Topic", "name")
+                self.neo4j.create_constraint("Standard", "name")
+                self.neo4j.create_constraint("District", "name")
+                self.neo4j.create_constraint("Indicator", "name")
             except Exception as e:
                 logger.warning(f"Constraints may already exist: {e}")
+
+            # Create full-text search index for concept queries
+            try:
+                self.neo4j.query("""
+                    CREATE FULLTEXT INDEX concept_search IF NOT EXISTS
+                    FOR (n:Indicator|Standard|DesignGuideline|ResearchFinding|PerformanceDimension|SpatialElement)
+                    ON EACH [n.name, n.description]
+                """)
+                logger.info("Full-text index 'concept_search' ensured")
+            except Exception as e:
+                logger.warning(f"Full-text index may already exist: {e}")
 
             self._initialized = True
             logger.info("All database connections initialized successfully")

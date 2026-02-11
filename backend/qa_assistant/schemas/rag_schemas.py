@@ -30,6 +30,15 @@ class SourceInfo(BaseModel):
     section: Optional[str] = Field(None, description="Document section")
     source: str = Field(..., description="Retrieval source (vector_search, knowledge_graph)")
     chunk_id: Optional[str] = Field(None, description="Chunk ID for fetching preview text")
+    doc_id: Optional[str] = Field(None, description="Document ID in MongoDB")
+    chunk_index: Optional[int] = Field(None, description="Chunk index within the source document")
+    page: Optional[int] = Field(None, description="Best-effort page hint for PDF locating")
+    page_end: Optional[int] = Field(None, description="End page when chunk spans multiple pages")
+    score: Optional[float] = Field(None, description="Retriever score for this source")
+    quote: Optional[str] = Field(None, description="Short quote/excerpt from the source chunk")
+    pdf_url: Optional[str] = Field(None, description="Direct PDF URL if available")
+    image_url: Optional[str] = Field(None, description="Preview image URL if chunk contains an image")
+    image_name: Optional[str] = Field(None, description="Image file name for the preview")
 
 
 class RAGChatResponse(BaseModel):
@@ -53,6 +62,32 @@ class RetrievalStats(BaseModel):
     weights: Dict[str, float] = Field(default_factory=dict, description="Fusion weights used")
 
 
+class GraphNode(BaseModel):
+    """A node in the knowledge graph subgraph."""
+
+    id: str = Field(..., description="Neo4j element ID")
+    label: str = Field(..., description="Node label (Plot, Indicator, Standard, etc.)")
+    name: str = Field(..., description="Node name")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Additional properties")
+
+
+class GraphEdge(BaseModel):
+    """An edge in the knowledge graph subgraph."""
+
+    id: str = Field(..., description="Neo4j element ID")
+    type: str = Field(..., description="Relationship type (HAS_INDICATOR, DEFINES, etc.)")
+    source: str = Field(..., description="Source node ID")
+    target: str = Field(..., description="Target node ID")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Edge properties")
+
+
+class SubgraphData(BaseModel):
+    """Subgraph data for frontend knowledge graph visualization."""
+
+    nodes: List[GraphNode] = Field(default_factory=list, description="Graph nodes")
+    edges: List[GraphEdge] = Field(default_factory=list, description="Graph edges")
+
+
 class FeedbackRequest(BaseModel):
     """Request to submit answer quality feedback."""
 
@@ -68,6 +103,16 @@ class FeedbackResponse(BaseModel):
 
     success: bool
     feedback_id: str
+
+
+class IntentResult(BaseModel):
+    """Result from LLM intent classification."""
+
+    intent: str = Field(..., description="Classified intent: greeting|domain|follow_up|out_of_scope|meta|clarification")
+    rewritten_query: Optional[str] = Field(None, description="Rewritten query for retrieval (follow_up/domain)")
+    confidence: float = Field(0.0, ge=0.0, le=1.0, description="Classification confidence")
+    use_retrieval: bool = Field(True, description="Whether retrieval is needed")
+    suggested_top_k: int = Field(5, ge=1, le=20, description="Suggested retrieval depth")
 
 
 class RAGSearchRequest(BaseModel):

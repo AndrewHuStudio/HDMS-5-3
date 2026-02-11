@@ -490,21 +490,28 @@ class IngestionPipeline:
                 chunk_records = []
                 for chunk, embedding in zip(chunks_to_upsert, embeddings):
                     chunk_id = str(chunk["_id"])
+                    milvus_meta = {
+                        "section_title": chunk["section_title"],
+                        "has_table": chunk["has_table"],
+                        "has_image": chunk["has_image"],
+                        "file_name": metadata.get("file_name", ""),
+                        "category": metadata.get("category", ""),
+                        "chunk_hash": chunk["chunk_hash"],
+                        "version": version,
+                    }
+                    # Propagate page info into Milvus JSON metadata
+                    if chunk.get("page") is not None:
+                        milvus_meta["page"] = int(chunk["page"])
+                    if chunk.get("page_end") is not None:
+                        milvus_meta["page_end"] = int(chunk["page_end"])
+
                     milvus_data.append({
                         "id": chunk_id,
                         "embedding": embedding,
                         "text": chunk["enhanced_text"],
                         "doc_id": doc_id,
                         "chunk_index": chunk["chunk_index"],
-                        "metadata": {
-                            "section_title": chunk["section_title"],
-                            "has_table": chunk["has_table"],
-                            "has_image": chunk["has_image"],
-                            "file_name": metadata.get("file_name", ""),
-                            "category": metadata.get("category", ""),
-                            "chunk_hash": chunk["chunk_hash"],
-                            "version": version,
-                        }
+                        "metadata": milvus_meta,
                     })
                     chunk_record = dict(chunk)
                     chunk_record["embedding_dimension"] = len(embedding)
@@ -574,22 +581,26 @@ class IngestionPipeline:
         for chunk in chunks:
             chunk_index = int(chunk.get("chunk_index") or 0)
             enhanced_text = self._build_enhanced_chunk_text(chunk, image_descriptions)
-            payloads.append(
-                {
-                    "_id": f"{doc_id}_{chunk_index}",
-                    "doc_id": doc_id,
-                    "chunk_index": chunk_index,
-                    "text": chunk.get("text", ""),
-                    "enhanced_text": enhanced_text,
-                    "section_title": chunk.get("section_title", ""),
-                    "has_table": bool(chunk.get("has_table")),
-                    "has_image": bool(chunk.get("has_image")),
-                    "chunk_hash": self._hash_text(enhanced_text),
-                    "version": version,
-                    "file_name": metadata.get("file_name", ""),
-                    "category": metadata.get("category", ""),
-                }
-            )
+            payload: Dict[str, Any] = {
+                "_id": f"{doc_id}_{chunk_index}",
+                "doc_id": doc_id,
+                "chunk_index": chunk_index,
+                "text": chunk.get("text", ""),
+                "enhanced_text": enhanced_text,
+                "section_title": chunk.get("section_title", ""),
+                "has_table": bool(chunk.get("has_table")),
+                "has_image": bool(chunk.get("has_image")),
+                "chunk_hash": self._hash_text(enhanced_text),
+                "version": version,
+                "file_name": metadata.get("file_name", ""),
+                "category": metadata.get("category", ""),
+            }
+            # Page info injected by chunker (may be absent for legacy data)
+            if chunk.get("page") is not None:
+                payload["page"] = int(chunk["page"])
+            if chunk.get("page_end") is not None:
+                payload["page_end"] = int(chunk["page_end"])
+            payloads.append(payload)
         return payloads
 
     def _diff_chunks(

@@ -1,10 +1,12 @@
-import type { SourceInfo, RetrievalStats } from "@/features/qa/types";
+import type { SourceInfo, RetrievalStats, SubgraphData } from "@/features/qa/types";
 
 export interface SSECallbacks {
   onSources: (sources: SourceInfo[]) => void;
   onRetrievalStats: (stats: RetrievalStats) => void;
+  onGraph: (data: SubgraphData) => void;
   onThinking: (token: string) => void;
   onAnswer: (token: string) => void;
+  onStatus: (stage: string, message: string) => void;
   onDone: (meta: { model?: string; context_used?: boolean; cached?: boolean }) => void;
   onError: (detail: string) => void;
 }
@@ -50,8 +52,17 @@ export async function streamChat(
             case "retrieval_stats":
               callbacks.onRetrievalStats(data);
               break;
+            case "graph":
+              callbacks.onGraph({
+                nodes: data.nodes || [],
+                edges: data.edges || [],
+              });
+              break;
             case "thinking":
               callbacks.onThinking(data.content || "");
+              break;
+            case "status":
+              callbacks.onStatus(data.stage || "", data.message || "");
               break;
             case "answer":
               callbacks.onAnswer(data.content || "");

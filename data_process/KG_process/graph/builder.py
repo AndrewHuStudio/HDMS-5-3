@@ -48,6 +48,19 @@ class GraphBuilder:
         """
         logger.info(f"Building graph for document {doc_id}")
 
+        # Retrieve document metadata for file_name and file_path
+        doc_meta = self.mongodb.find_by_query(
+            "documents",
+            {"_id": doc_id},
+            limit=1,
+            projection={"file_name": 1, "file_path": 1}
+        )
+        file_name = ""
+        file_path = ""
+        if doc_meta:
+            file_name = doc_meta[0].get("file_name", "")
+            file_path = doc_meta[0].get("file_path", "")
+
         # Retrieve document chunks from MongoDB
         chunks = self.mongodb.find_by_query(
             "chunks",
@@ -63,11 +76,13 @@ class GraphBuilder:
                 "error": "No chunks found"
             }
 
-        # Build graph
+        # Build graph with enhanced two-pass extraction
         result = self.graph_store.build_graph_from_document(
             doc_id,
             chunks,
-            use_llm=use_llm
+            use_llm=use_llm,
+            file_name=file_name,
+            file_path=file_path,
         )
 
         return result

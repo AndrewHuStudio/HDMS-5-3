@@ -16,6 +16,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from data_process.ocr_process import core
 from data_process.core import config
+from data_process.gradio_app.launch_env import ensure_loopback_no_proxy
 
 STATUS_LABELS = {
     "queued": "\u6392\u961f\u4e2d",
@@ -33,6 +34,116 @@ ROOT_CATEGORY_LABEL = "(\u6839\u76ee\u5f55)"
 FILTER_ALL_LABEL = "\u5168\u90e8"
 FILTER_PENDING_LABEL = "\u672a\u5b8c\u6210\u5411\u91cf\u5316"
 FILTER_DONE_LABEL = "\u5df2\u5b8c\u6210\u5411\u91cf\u5316"
+
+UPLOAD_LIST_HEIGHT = 620
+TABLE_VIEW_HEIGHT = 360
+DOC_SELECT_HEIGHT = 360
+
+APP_CSS = f"""
+#ocr-root {{
+  max-width: none;
+  margin: 0 auto;
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+  padding: 14px 16px 24px;
+}}
+
+#ocr-root .tabs {{
+  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+}}
+
+#ocr-root .tab-nav button {{
+  transition: all 0.2s ease;
+  border-bottom: 2px solid transparent;
+}}
+
+#ocr-root .tab-nav button.selected {{
+  color: #f97316;
+  border-bottom-color: rgba(249, 115, 22, 0.85);
+}}
+
+#ocr-root .hdms-panel,
+#ocr-root .hdms-table,
+#ocr-root .hdms-upload,
+#ocr-root .hdms-select {{
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.32), rgba(15, 23, 42, 0.18));
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+}}
+
+#ocr-root .hdms-column {{
+  gap: 10px;
+}}
+
+#ocr-root .hdms-upload {{
+  min-height: {UPLOAD_LIST_HEIGHT}px;
+}}
+
+#ocr-root #ingest-main-row {{
+  align-items: stretch;
+}}
+
+#ocr-root #ingest-doc-select {{
+  height: {DOC_SELECT_HEIGHT}px;
+  max-height: {DOC_SELECT_HEIGHT}px;
+  overflow: hidden;
+  padding: 8px;
+}}
+
+#ocr-root #ingest-doc-select .wrap,
+#ocr-root #ingest-doc-select .checkboxgroup {{
+  max-height: {DOC_SELECT_HEIGHT - 36}px;
+  overflow-y: auto;
+}}
+
+#ocr-root .hdms-table .table-wrap {{
+  border-radius: 10px;
+}}
+
+#ocr-root .hdms-table .table-wrap,
+#ocr-root #ingest-doc-select,
+#ocr-root #ingest-doc-select .wrap,
+#ocr-root #ingest-doc-select .checkboxgroup {{
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.9) transparent;
+}}
+
+#ocr-root .hdms-table .table-wrap::-webkit-scrollbar,
+#ocr-root #ingest-doc-select::-webkit-scrollbar,
+#ocr-root #ingest-doc-select .wrap::-webkit-scrollbar,
+#ocr-root #ingest-doc-select .checkboxgroup::-webkit-scrollbar {{
+  width: 10px;
+  height: 10px;
+}}
+
+#ocr-root .hdms-table .table-wrap::-webkit-scrollbar-thumb,
+#ocr-root #ingest-doc-select::-webkit-scrollbar-thumb,
+#ocr-root #ingest-doc-select .wrap::-webkit-scrollbar-thumb,
+#ocr-root #ingest-doc-select .checkboxgroup::-webkit-scrollbar-thumb {{
+  background-color: rgba(100, 116, 139, 0.92);
+  border-radius: 10px;
+}}
+
+#ocr-root .gr-button {{
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  transition: all 0.2s ease;
+}}
+
+#ocr-root .gr-button:hover {{
+  border-color: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 6px 20px rgba(249, 115, 22, 0.16);
+  transform: translateY(-1px);
+}}
+
+#ocr-root .hdms-panel textarea,
+#ocr-root .hdms-panel input,
+#ocr-root .hdms-panel .wrap,
+#ocr-root .hdms-select .wrap,
+#ocr-root .hdms-upload .wrap {{
+  border-radius: 10px;
+}}
+"""
 
 
 def _default_ocr_output_dir() -> str:
@@ -1314,24 +1425,28 @@ def build_app() -> gr.Blocks:
         else (init_db_category_choices[0] if init_db_category_choices else "")
     )
 
-    with gr.Blocks(title="HDMS OCR") as demo:
+    with gr.Blocks(title="HDMS OCR", css=APP_CSS, fill_width=True, elem_id="ocr-root") as demo:
         job_state = gr.State("")
         ingest_items_state = gr.State(init_items)
         ingest_dir_state = gr.State(default_ocr_dir)
 
         with gr.Tab("OCR"):
-            with gr.Row():
-                with gr.Column(scale=1):
+            with gr.Row(equal_height=True):
+                with gr.Column(scale=1, variant="panel", elem_classes=["hdms-column"]):
                     files = gr.File(
                         label="PDF \u6587\u4ef6",
                         file_count="multiple",
                         file_types=[".pdf"],
+                        height=UPLOAD_LIST_HEIGHT,
+                        elem_id="ocr-file-input",
+                        elem_classes=["hdms-upload"],
                     )
                     destination = gr.Dropdown(
                         label="\u8f93\u51fa\u76ee\u5f55",
                         choices=destinations,
                         value=default_dest,
                         allow_custom_value=True,
+                        elem_classes=["hdms-panel"],
                     )
                     refresh_dest_btn = gr.Button("\u5237\u65b0\u8f93\u51fa\u76ee\u5f55")
                     submit_btn = gr.Button("\u5f00\u59cb\u8bc6\u522b")
@@ -1339,21 +1454,26 @@ def build_app() -> gr.Blocks:
                         label="\u63d0\u4ea4\u72b6\u6001",
                         lines=6,
                         interactive=False,
+                        elem_classes=["hdms-panel"],
                     )
                     dest_status_box = gr.Textbox(
                         label="\u8f93\u51fa\u6839\u76ee\u5f55",
                         value=dest_status,
                         lines=2,
                         interactive=False,
+                        elem_classes=["hdms-panel"],
                     )
 
-                with gr.Column(scale=1):
+                with gr.Column(scale=1, variant="panel", elem_classes=["hdms-column"]):
                     progress_text = gr.Textbox(
                         label="\u8fdb\u5ea6\u6982\u89c8",
                         lines=3,
                         interactive=False,
+                        elem_classes=["hdms-panel"],
                     )
                     progress_table = gr.Dataframe(
+                        elem_id="ocr-progress-table",
+                        elem_classes=["hdms-table"],
                         headers=[
                             "\u6587\u4ef6",
                             "\u72b6\u6001",
@@ -1365,39 +1485,46 @@ def build_app() -> gr.Blocks:
                         value=[],
                         wrap=True,
                         interactive=False,
+                        max_height=TABLE_VIEW_HEIGHT,
                     )
                     timer = gr.Timer(value=2, active=False)
 
-                with gr.Column(scale=1):
+                with gr.Column(scale=1, variant="panel", elem_classes=["hdms-column"]):
                     summary_text = gr.Textbox(
                         label="\u7edf\u8ba1\u6982\u89c8",
                         value="[INFO] \u70b9\u51fb\u5237\u65b0\u83b7\u53d6\u7edf\u8ba1",
                         lines=5,
                         interactive=False,
+                        elem_classes=["hdms-panel"],
                     )
                     summary_table = gr.Dataframe(
+                        elem_id="ocr-summary-table",
+                        elem_classes=["hdms-table"],
                         headers=["\u5206\u7c7b", "\u6587\u4ef6\u6570", "\u9875\u6570", "\u56fe\u7247\u6570"],
                         datatype=["str", "number", "number", "number"],
                         value=[],
                         wrap=True,
                         interactive=False,
+                        max_height=TABLE_VIEW_HEIGHT,
                     )
                     refresh_summary_btn = gr.Button("\u5237\u65b0\u7edf\u8ba1")
                     clear_output_btn = gr.Button("\u6e05\u7a7a\u8f93\u51fa\u76ee\u5f55")
 
         with gr.Tab("\u5411\u91cf\u5316\u5165\u5e93"):
-            with gr.Row():
-                with gr.Column(scale=1):
+            with gr.Row(equal_height=True, elem_id="ingest-main-row"):
+                with gr.Column(scale=1, variant="panel", elem_id="ingest-left-col", elem_classes=["hdms-column"]):
                     ingest_category = gr.Dropdown(
                         label="\u6587\u6863\u5411\u91cf\u5316\u9009\u62e9",
                         choices=init_category_choices,
                         value=default_category,
+                        elem_classes=["hdms-panel"],
                     )
                     status_filter = gr.Radio(
                         label="\u7b5b\u9009",
                         choices=status_filter_choices,
                         value=default_status_filter,
                         interactive=True,
+                        elem_classes=["hdms-panel"],
                     )
                     refresh_ingest_btn = gr.Button("\u5237\u65b0\u5217\u8868")
                     ingest_overview = gr.Textbox(
@@ -1405,16 +1532,21 @@ def build_app() -> gr.Blocks:
                         value=init_overview,
                         lines=2,
                         interactive=False,
+                        elem_classes=["hdms-panel"],
                     )
                     doc_select = gr.CheckboxGroup(
                         label="\u53ef\u5411\u91cf\u5316\u6587\u6863",
                         choices=init_select_choices,
                         value=[],
+                        elem_id="ingest-doc-select",
+                        elem_classes=["hdms-select"],
                     )
                     with gr.Row():
                         select_all_btn = gr.Button("\u5168\u9009")
                         clear_select_btn = gr.Button("\u6e05\u7a7a\u9009\u62e9")
                     doc_table = gr.Dataframe(
+                        elem_id="ingest-doc-table",
+                        elem_classes=["hdms-table"],
                         headers=[
                             "\u72b6\u6001",
                             "\u6587\u6863",
@@ -1428,14 +1560,16 @@ def build_app() -> gr.Blocks:
                         value=init_doc_table,
                         wrap=True,
                         interactive=False,
+                        max_height=TABLE_VIEW_HEIGHT,
                     )
 
-                with gr.Column(scale=1):
+                with gr.Column(scale=1, variant="panel", elem_id="ingest-right-col", elem_classes=["hdms-column"]):
                     process_images = gr.State(True)
                     db_category = gr.Dropdown(
                         label="\u5411\u91cf\u5220\u9664\u5206\u7c7b",
                         choices=init_db_category_choices,
                         value=init_db_category_value,
+                        elem_classes=["hdms-panel"],
                     )
                     with gr.Row():
                         clear_vectors_all_btn = gr.Button("\u5220\u9664\u5411\u91cf(\u5168\u90e8)")
@@ -1448,12 +1582,14 @@ def build_app() -> gr.Blocks:
                         step=1,
                         value=0,
                         interactive=False,
+                        elem_classes=["hdms-panel"],
                     )
                     ingest_result_box = gr.Textbox(
                         label="\u5165\u5e93\u7ed3\u679c",
                         value="\u603b\u8ba1: 0\n\u6210\u529f: 0\n\u5931\u8d25: 0\n\u8df3\u8fc7: 0",
                         lines=4,
                         interactive=False,
+                        elem_classes=["hdms-panel"],
                     )
                     acceptance_btn = gr.Button("\u4e00\u952e\u9a8c\u6536")
                     acceptance_box = gr.Textbox(
@@ -1461,8 +1597,11 @@ def build_app() -> gr.Blocks:
                         value="[INFO] \u5c1a\u672a\u6267\u884c",
                         lines=6,
                         interactive=False,
+                        elem_classes=["hdms-panel"],
                     )
                     ingest_table = gr.Dataframe(
+                        elem_id="ingest-progress-table",
+                        elem_classes=["hdms-table"],
                         headers=[
                             "\u6587\u6863",
                             "\u72b6\u6001",
@@ -1476,6 +1615,7 @@ def build_app() -> gr.Blocks:
                         value=[],
                         wrap=True,
                         interactive=False,
+                        max_height=TABLE_VIEW_HEIGHT,
                     )
 
         demo.load(_init_ui, outputs=[destination, dest_status_box, summary_text, summary_table])
@@ -1555,5 +1695,6 @@ def build_app() -> gr.Blocks:
 demo = build_app()
 
 if __name__ == "__main__":
+    ensure_loopback_no_proxy()
     demo.launch()
 

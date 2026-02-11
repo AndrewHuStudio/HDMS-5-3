@@ -21,6 +21,16 @@ logger = logging.getLogger(__name__)
 PLOT_PATTERN = re.compile(r'DU\d{2}-\d{2}(?:-\d+)?')
 INDICATOR_KEYWORDS = ["容积率", "建筑限高", "建筑密度", "绿地率", "退线", "停车"]
 
+# Expanded concept keywords for broader graph search triggering
+CONCEPT_KEYWORDS = {
+    "performance": ["环境性能", "安全性能", "健康性能", "人本性能", "使用效能"],
+    "perception": ["热舒适", "安全感", "归属感", "情绪健康", "地域性"],
+    "spatial": ["街道空间", "绿地广场", "公共空间", "步行网络", "开放空间", "近地空间", "地下空间"],
+    "standard": ["标准", "导则", "规范", "评估", "指标体系", "分类标准"],
+    "research": ["研究发现", "相关性", "影响因素", "预测方法", "深度学习"],
+    "guideline": ["设计导则", "管控要求", "实施手册", "开发建设"],
+}
+
 
 class MultiSourceRetriever:
     """Retriever that combines results from multiple sources."""
@@ -54,7 +64,8 @@ class MultiSourceRetriever:
         top_k: int = 5,
         use_vector: bool = True,
         use_graph: bool = True,
-        use_keyword: bool = True
+        use_keyword: bool = True,
+        enable_rerank: bool = True,
     ) -> Dict[str, Any]:
         """
         Retrieve relevant information from multiple sources.
@@ -65,6 +76,7 @@ class MultiSourceRetriever:
             use_vector: Whether to use vector search
             use_graph: Whether to use graph search
             use_keyword: Whether to use keyword search
+            enable_rerank: Whether to apply reranking after fusion
 
         Returns:
             Dictionary with results from each source
@@ -108,7 +120,7 @@ class MultiSourceRetriever:
 
         # Rerank fused results if reranker is available
         results["reranked"] = False
-        if self.reranker and results["fused_results"]:
+        if enable_rerank and self.reranker and results["fused_results"]:
             try:
                 reranked = self.reranker.rerank(
                     query=query,
@@ -134,31 +146,45 @@ class MultiSourceRetriever:
         Returns:
             List of search results
         """
+        import time
+        start_time = time.perf_counter()
+
         # Generate query embedding
+        embed_start = time.perf_counter()
         query_embedding = self.embedder.embed_text(query)
+        embed_elapsed = (time.perf_counter() - embed_start) * 1000
+        logger.info(f"[TIMING] Vector search - embedding took {embed_elapsed:.2f}ms")
 
         # Search in Milvus
+        milvus_start = time.perf_counter()
         results = self.milvus.search(
             collection_name=self.collection_name,
             query_vector=query_embedding,
             top_k=top_k
         )
+        milvus_elapsed = (time.perf_counter() - milvus_start) * 1000
+        logger.info(f"[TIMING] Vector search - Milvus query took {milvus_elapsed:.2f}ms")
 
         # Add source and score
         for result in results:
             result["source"] = "vector"
             result["score"] = 1.0 - result.get("distance", 1.0)  # Convert distance to similarity
 
-        logger.info(f"Vector search returned {len(results)} results")
+        total_elapsed = (time.perf_counter() - start_time) * 1000
+        logger.info(f"[TIMING] Vector search total - {len(results)} results in {total_elapsed:.2f}ms")
         return results
 
     def _graph_search(self, query: str) -> List[Dict[str, Any]]:
-        """Perform graph-based search."""
+        """
+        Perform graph-based search with concept search and subgraph extraction.
+
+        Returns ranked results plus a subgraph entry for visualization.
+        """
         results = []
+        seed_names: List[str] = []
 
-        # Extract plot names from query
+        # 1. Plot ID search (existing logic, kept)
         plots = PLOT_PATTERN.findall(query)
-
         if plots:
             for plot_name in plots:
                 info = self.graph_store.get_plot_info(plot_name)
@@ -170,21 +196,19 @@ class MultiSourceRetriever:
                         "data": info,
                         "score": 0.9
                     })
+                    seed_names.append(plot_name)
 
-        # Extract indicator keywords
+        # 2. Indicator keyword search (existing logic, kept)
         for indicator in INDICATOR_KEYWORDS:
             if indicator in query:
-                # Find plots with this indicator
                 cypher = """
                 MATCH (p:Plot)-[r:HAS_INDICATOR]->(i:Indicator {name: $indicator})
                 RETURN p.name as plot_name, r.value as value
                 LIMIT 5
                 """
                 indicator_results = self.graph_store.query_graph(
-                    cypher,
-                    {"indicator": indicator}
+                    cypher, {"indicator": indicator}
                 )
-
                 if indicator_results:
                     results.append({
                         "source": "graph",
@@ -193,8 +217,47 @@ class MultiSourceRetriever:
                         "data": indicator_results,
                         "score": 0.8
                     })
+                    seed_names.append(indicator)
 
-        logger.info(f"Graph search returned {len(results)} results")
+        # 3. NEW: Concept search via full-text index
+        try:
+            concept_results = self.graph_store.search_concepts(query, limit=5)
+            for concept in concept_results:
+                score = concept.get("score", 0)
+                if score > 0.3:
+                    cname = concept.get("name", "")
+                    if cname and cname not in seed_names:
+                        seed_names.append(cname)
+                        results.append({
+                            "source": "graph",
+                            "type": "concept_match",
+                            "name": cname,
+                            "node_type": concept.get("label", ""),
+                            "data": concept.get("properties", {}),
+                            "score": min(score * 0.7, 0.85),
+                        })
+        except Exception as e:
+            logger.debug(f"Concept search skipped: {e}")
+
+        # 4. NEW: Extract subgraph for visualization (not ranked)
+        if seed_names:
+            try:
+                subgraph = self.graph_store.get_subgraph(
+                    seed_names=seed_names[:5],
+                    max_depth=2,
+                    max_nodes=30,
+                )
+                if subgraph.get("nodes"):
+                    results.append({
+                        "source": "graph",
+                        "type": "subgraph",
+                        "data": subgraph,
+                        "score": 0.0,  # Not ranked, visualization only
+                    })
+            except Exception as e:
+                logger.debug(f"Subgraph extraction skipped: {e}")
+
+        logger.info(f"Graph search returned {len(results)} results (seeds: {seed_names[:3]})")
         return results
 
     def _keyword_search(self, query: str, top_k: int) -> List[Dict[str, Any]]:
@@ -252,17 +315,25 @@ class MultiSourceRetriever:
 
         - Plot ID detected (DU01-01): boost graph weight
         - Indicator keyword detected: moderate graph boost
+        - Concept keyword detected: moderate graph boost
         - Default: vector dominates
         """
         has_plot_id = bool(PLOT_PATTERN.search(query))
         has_indicator = any(kw in query for kw in INDICATOR_KEYWORDS)
+        has_concept = any(
+            kw in query
+            for keywords in CONCEPT_KEYWORDS.values()
+            for kw in keywords
+        )
 
         if has_plot_id:
             return {"vector": 0.25, "graph": 0.55, "keyword": 0.20}
         elif has_indicator:
-            return {"vector": 0.35, "graph": 0.45, "keyword": 0.20}
+            return {"vector": 0.30, "graph": 0.50, "keyword": 0.20}
+        elif has_concept:
+            return {"vector": 0.35, "graph": 0.40, "keyword": 0.25}
         else:
-            return {"vector": 0.55, "graph": 0.20, "keyword": 0.25}
+            return {"vector": 0.50, "graph": 0.25, "keyword": 0.25}
 
     def _fuse_results(
         self,
@@ -280,6 +351,12 @@ class MultiSourceRetriever:
             "vector": 0.5, "graph": 0.3, "keyword": 0.2
         }
         logger.info(f"Fusion weights: {weights}")
+
+        # Filter out subgraph/concept_match entries before fusion (visualization only)
+        graph_results = [
+            r for r in graph_results
+            if r.get("type") not in ("subgraph", "concept_match")
+        ]
 
         # Normalize scores per source before weighting
         vector_results = self._normalize_scores(list(vector_results))
@@ -335,9 +412,8 @@ class MultiSourceRetriever:
     def format_context(self, results: Dict[str, Any]) -> str:
         """
         Format retrieval results into context string for LLM.
-        Numbering [1], [2], ... matches the order of sources extracted by
-        RAGService._extract_sources so inline citations align correctly.
-        Uses the same dedup logic (by chunk id) as _extract_sources.
+        Numbering [1], [2], ... follows fused_results order so citations align
+        with source extraction in RAGService.
 
         Args:
             results: Results from retrieve()
@@ -346,52 +422,100 @@ class MultiSourceRetriever:
             Formatted context string
         """
         context = ""
-        idx = 1  # global counter across all source types
-        seen_ids: set = set()
+        idx = 1
 
-        # Add vector results (dedup by chunk id, same as _extract_sources)
-        vector_results = results.get("vector_results", [])
-        if vector_results:
-            context += "## 相关文档内容\n\n"
-            for result in vector_results[:5]:
-                chunk_id = result.get("id", "")
-                if not chunk_id or chunk_id in seen_ids:
-                    continue
-                seen_ids.add(chunk_id)
+        ranked_results = results.get("fused_results") or []
+        if not ranked_results:
+            ranked_results = [
+                *results.get("vector_results", []),
+                *results.get("graph_results", []),
+                *results.get("keyword_results", []),
+            ]
 
-                text = result.get("text", "")
-                metadata = result.get("metadata", {})
-                file_name = metadata.get("file_name", "未知文档")
-                section = metadata.get("section_title", "")
-                section_label = f" - {section}" if section else ""
-                # Keep more text for better context (up to 800 chars)
-                display_text = text[:800]
-                if len(text) > 800:
-                    display_text += "..."
-                context += f"[{idx}] 来源：{file_name}{section_label}\n{display_text}\n\n"
-                idx += 1
+        seen_doc_keys: set[str] = set()
+        seen_graph_keys: set[str] = set()
+        doc_blocks: List[str] = []
+        graph_blocks: List[str] = []
 
-        # Add graph results (dedup by plot_name, same as _extract_sources)
-        graph_results = results.get("graph_results", [])
-        if graph_results:
-            context += "## 知识图谱信息\n\n"
-            for result in graph_results:
-                if result.get("type") == "plot_info":
-                    plot_name = result.get("plot_name", "")
-                    if not plot_name or plot_name in seen_ids:
+        for result in ranked_results:
+            source_type = str(result.get("source") or "")
+            result_type = str(result.get("type") or "")
+            is_graph = source_type == "graph" or result_type in {"plot_info", "indicator_search"}
+
+            if is_graph:
+                if result_type == "plot_info":
+                    plot_name = str(result.get("plot_name") or "").strip()
+                    if not plot_name or plot_name in seen_graph_keys:
                         continue
-                    seen_ids.add(plot_name)
-
-                    data = result.get("data", {})
-                    context += f"[{idx}] 地块 {plot_name}：\n"
-
-                    indicators = data.get("indicators", [])
+                    seen_graph_keys.add(plot_name)
+                    data = result.get("data", {}) or {}
+                    lines = [f"[{idx}] 地块 {plot_name}："]
+                    indicators = data.get("indicators", []) if isinstance(data, dict) else []
                     if indicators:
-                        context += "指标：\n"
-                        for ind in indicators[:5]:
+                        lines.append("指标：")
+                        for ind in indicators[:6]:
                             if ind.get("indicator"):
-                                context += f"  - {ind['indicator']}: {ind.get('value', '未指定')}\n"
-                    context += "\n"
+                                lines.append(f"  - {ind['indicator']}: {ind.get('value', '未指定')}")
+                    graph_blocks.append("\n".join(lines))
                     idx += 1
+                    continue
+
+                indicator = str(result.get("indicator") or "").strip()
+                graph_key = f"indicator:{indicator}" if indicator else f"graph:{len(graph_blocks)}"
+                if graph_key in seen_graph_keys:
+                    continue
+                seen_graph_keys.add(graph_key)
+
+                data = result.get("data", [])
+                lines = [f"[{idx}] 指标查询：{indicator or '图谱结果'}"]
+                if isinstance(data, list):
+                    for item in data[:5]:
+                        plot_name = item.get("plot_name") if isinstance(item, dict) else None
+                        value = item.get("value") if isinstance(item, dict) else None
+                        if plot_name:
+                            lines.append(f"  - {plot_name}: {value if value is not None else '未指定'}")
+                graph_blocks.append("\n".join(lines))
+                idx += 1
+                continue
+
+            metadata = result.get("metadata", {}) or {}
+            chunk_id = str(result.get("id") or result.get("_id") or "").strip()
+            text = str(result.get("text", "") or "").strip()
+            if not text:
+                continue
+
+            dedup_key = chunk_id or text[:120]
+            if dedup_key in seen_doc_keys:
+                continue
+            seen_doc_keys.add(dedup_key)
+
+            file_name = (
+                metadata.get("file_name")
+                or result.get("file_name")
+                or "未知文档"
+            )
+            section = (
+                metadata.get("section_title")
+                or result.get("section_title")
+                or ""
+            )
+            section_label = f" - {section}" if section else ""
+
+            display_text = text[:1200]
+            if len(text) > 1200:
+                display_text += "..."
+
+            doc_blocks.append(f"[{idx}] 来源：{file_name}{section_label}\n{display_text}")
+            idx += 1
+
+        if doc_blocks:
+            context += "## 相关文档内容\n\n"
+            context += "\n\n".join(doc_blocks)
+            context += "\n\n"
+
+        if graph_blocks:
+            context += "## 知识图谱信息\n\n"
+            context += "\n\n".join(graph_blocks)
+            context += "\n\n"
 
         return context

@@ -7,10 +7,10 @@ import { sendQuestion, sendQuestionStream } from "./api";
 import type { ChatHistoryMessage, ChatMessage } from "./types";
 
 const quickQuestions = [
-  "城市管控要素有哪些",
-  "限高控制有什么要求",
-  "容积率如何影响开发强度",
-  "如何展示管控要素关系",
+  "高强度片区的核心管控指标有哪些",
+  "请总结课题知识库中的主要结论",
+  "DU01-01地块的容积率与限高要求是什么",
+  "城市设计管控方案评估的关键依据有哪些",
 ];
 
 const createMessage = (
@@ -73,6 +73,10 @@ export function QAView() {
         onRetrievalStats: (stats) => {
           updateMessage(assistantId, (msg) => ({ ...msg, retrievalStats: stats }));
         },
+        onGraph: (subgraph) => {
+          updateMessage(assistantId, (msg) => ({ ...msg, subgraph }));
+        },
+        onStatus: () => undefined,
         onThinking: (token) => {
           updateMessage(assistantId, (msg) => ({
             ...msg,
@@ -89,6 +93,7 @@ export function QAView() {
           updateMessage(assistantId, (msg) => ({
             ...msg,
             isStreaming: false,
+            statusMessage: undefined,
           }));
         },
         onError: (detail) => {
@@ -96,6 +101,7 @@ export function QAView() {
             ...msg,
             content: msg.content || `Error: ${detail}`,
             isStreaming: false,
+            statusMessage: undefined,
           }));
         },
       });

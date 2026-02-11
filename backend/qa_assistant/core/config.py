@@ -105,6 +105,12 @@ QUERY_CACHE_ENABLED = os.getenv("QUERY_CACHE_ENABLED", "1").strip().lower() in {
 QUERY_CACHE_MAX_SIZE = int(os.getenv("QUERY_CACHE_MAX_SIZE", "128"))
 QUERY_CACHE_TTL_SECONDS = int(os.getenv("QUERY_CACHE_TTL_SECONDS", "3600"))
 
+# --- Streaming latency tuning ---
+STREAM_ENABLE_RERANK = os.getenv("STREAM_ENABLE_RERANK", "0").strip().lower() in {"1", "true", "yes"}
+STREAM_RETRIEVAL_MODE = os.getenv("STREAM_RETRIEVAL_MODE", "vector").strip().lower()
+STREAM_RETRIEVAL_TOP_K_CAP = int(os.getenv("STREAM_RETRIEVAL_TOP_K_CAP", "2"))
+
+
 # --- Rerank Configuration ---
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
 RERANK_BASE_URL = os.getenv("RERANK_BASE_URL", "https://api.apiyi.com/v1")

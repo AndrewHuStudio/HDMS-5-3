@@ -11,6 +11,7 @@ export interface QAPanelMessage {
   retrievalStats?: RetrievalStats;
   feedback?: "useful" | "not_useful";
   isStreaming?: boolean;
+  statusMessage?: string;
 }
 
 export interface QAPanelConversation {
@@ -27,7 +28,7 @@ const createPanelWelcomeMessage = (): QAPanelMessage => ({
   id: "welcome",
   role: "assistant",
   content:
-    "您好！我是城市管控助手。您可以直接提问城市管控相关问题，我会结合知识库与您后续上传的资料生成图文并茂的答案，并提供关键指标解读与调整建议。",
+    "您好！我是 HDMS 城市设计知识问答助手，服务于高强度片区的设计管控决策。您可以提问城市设计管控相关问题，我会结合课题知识库与上传资料，提供有据可查的分析与建议。",
   timestamp: new Date(),
 });
 
@@ -35,7 +36,7 @@ const createViewWelcomeMessage = (): ChatMessage => ({
   id: "welcome",
   role: "assistant",
   content:
-    "你好，我是 HDMS 问答助手。你可以提问管控要素、指标解释或上传资料中的具体问题。",
+    "您好，我是 HDMS 城市设计知识问答助手。您可以提问高强度片区的规划管控、地块指标、方案评估等问题，我会基于课题知识库为您提供结构化的分析回答。",
   createdAt: new Date().toLocaleTimeString("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
