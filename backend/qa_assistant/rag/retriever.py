@@ -1,10 +1,12 @@
-"""
+﻿"""
 Multi-source retriever for RAG system.
 """
 
 from __future__ import annotations
 
+import concurrent.futures
 import re
+import time
 from typing import List, Dict, Any, Optional
 import logging
 
@@ -88,26 +90,32 @@ class MultiSourceRetriever:
             "fused_results": []
         }
 
-        # Vector search
-        if use_vector:
-            try:
-                results["vector_results"] = self._vector_search(query, top_k)
-            except Exception as e:
-                logger.error(f"Vector search failed: {e}")
+        # Fan out enabled retrieval branches in parallel so slower branches
+        # do not block faster ones.
+        futures: Dict[str, concurrent.futures.Future] = {}
+        start_times: Dict[str, float] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            if use_vector:
+                start_times["vector_results"] = time.perf_counter()
+                futures["vector_results"] = executor.submit(self._vector_search, query, top_k)
+            if use_graph:
+                start_times["graph_results"] = time.perf_counter()
+                futures["graph_results"] = executor.submit(self._graph_search, query)
+            if use_keyword:
+                start_times["keyword_results"] = time.perf_counter()
+                futures["keyword_results"] = executor.submit(self._keyword_search, query, top_k)
 
-        # Graph search
-        if use_graph:
-            try:
-                results["graph_results"] = self._graph_search(query)
-            except Exception as e:
-                logger.error(f"Graph search failed: {e}")
-
-        # Keyword search
-        if use_keyword:
-            try:
-                results["keyword_results"] = self._keyword_search(query, top_k)
-            except Exception as e:
-                logger.error(f"Keyword search failed: {e}")
+            for key, future in futures.items():
+                start_at = start_times.get(key, time.perf_counter())
+                try:
+                    branch_results = future.result()
+                    elapsed_ms = (time.perf_counter() - start_at) * 1000
+                    results[key] = branch_results
+                    hit_count = len(branch_results) if isinstance(branch_results, list) else 0
+                    logger.info("[TIMING] %s took %.2fms (%d hits)", key, elapsed_ms, hit_count)
+                except Exception as e:
+                    elapsed_ms = (time.perf_counter() - start_at) * 1000
+                    logger.error("[TIMING] %s failed after %.2fms: %s", key, elapsed_ms, e)
 
         # Fuse results
         results["fused_results"] = self._fuse_results(

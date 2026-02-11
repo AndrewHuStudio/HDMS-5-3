@@ -1,6 +1,5 @@
 ﻿import { create } from "zustand";
-import type { HeightCheckSetbackVolume } from "@/lib/height-check-types";
-import type { BuildingResult } from "@/components/height-check-panel-pure";
+import type { HeightCheckSetbackVolume, BuildingResult } from "./types";
 
 interface HeightCheckState {
   results: BuildingResult[];

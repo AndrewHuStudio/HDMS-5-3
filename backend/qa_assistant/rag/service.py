@@ -1,4 +1,4 @@
-"""
+﻿"""
 RAG service for intelligent question answering.
 """
 
@@ -18,6 +18,10 @@ from rag.retriever import MultiSourceRetriever
 from rag.cache import get_query_cache
 
 logger = logging.getLogger(__name__)
+
+_QUICK_GREETING_REPLY = "\u60a8\u597d\uff0c\u6211\u5728\u3002\u8bf7\u76f4\u63a5\u544a\u8bc9\u6211\u60a8\u60f3\u54a8\u8be2\u7684\u95ee\u9898\u3002"
+_QUICK_IDENTITY_REPLY = "\u6211\u662fHDMS\u95ee\u7b54\u52a9\u624b\uff0c\u4e13\u6ce8\u7247\u533a\u7ba1\u63a7\u8d44\u6599\u95ee\u7b54\u548c\u5efa\u8bbe\u5408\u89c4\u5efa\u8bae\u3002"
+
 
 # Run retrieval in background so stream output can start immediately.
 _STREAM_RETRIEVE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
@@ -50,6 +54,21 @@ class RAGService:
         top_k: int = 5
     ) -> Dict[str, Any]:
         """Answer a question using retrieval-augmented generation."""
+        question = (question or "").strip()
+        quick_reply: Optional[str] = None
+        if self._is_brief_greeting(question):
+            quick_reply = _QUICK_GREETING_REPLY
+        elif self._is_identity_query(question):
+            quick_reply = _QUICK_IDENTITY_REPLY
+
+        if quick_reply is not None:
+            return {
+                "answer": quick_reply,
+                "sources": [],
+                "context_used": False,
+                "model": self.llm_model,
+            }
+
         effective_use_retrieval = bool(use_retrieval)
         effective_top_k = max(1, min(top_k, 20))
         retrieval_query = question
@@ -69,6 +88,9 @@ class RAGService:
             retrieval_results = self.retriever.retrieve(
                 query=retrieval_query,
                 top_k=effective_top_k,
+                use_vector=True,
+                use_graph=False,
+                use_keyword=False,
             )
             context, sources = self._build_context_and_sources(retrieval_results)
 
@@ -87,6 +109,47 @@ class RAGService:
 
         return result
 
+    @staticmethod
+    def _is_brief_greeting(question: str) -> bool:
+        """Return True when the input is a pure greeting with no real question."""
+        normalized = re.sub(r"[\s!,\.\?~\uFF01\uFF0C\u3002\uFF1F\uFF5E]+", "", (question or "").strip().lower())
+        if not normalized:
+            return False
+
+        return normalized in {
+            "\u4f60\u597d",
+            "\u60a8\u597d",
+            "\u4f60\u597d\u5440",
+            "\u60a8\u597d\u5440",
+            "\u55e8",
+            "\u54c8\u55bd",
+            "\u5728\u5417",
+            "\u5728\u4e0d\u5728",
+            "hello",
+            "hi",
+            "hey",
+        }
+
+    @staticmethod
+    def _is_identity_query(question: str) -> bool:
+        """Return True when the user asks about assistant identity/capabilities."""
+        normalized = re.sub(r"[\s!,\.\?~\uFF01\uFF0C\u3002\uFF1F\uFF5E]+", "", (question or "").strip().lower())
+        if not normalized:
+            return False
+
+        return any(token in normalized for token in {
+            "\u4f60\u662f\u8c01",
+            "\u4f60\u662f\u505a\u4ec0\u4e48\u7684",
+            "\u4f60\u80fd\u505a\u4ec0\u4e48",
+            "\u4f60\u7684\u80fd\u529b",
+            "\u4f60\u4f1a\u4ec0\u4e48",
+            "whoareyou",
+            "whoyouare",
+            "whatcanyoudo",
+            "yourability",
+        })
+
+    @staticmethod
     @staticmethod
     def _build_history_summary(history: Optional[List[Dict[str, str]]]) -> str:
         """Build a compact summary of recent history for cache key differentiation."""
@@ -663,15 +726,32 @@ class RAGService:
         """
         import time
 
+        question = (question or "").strip()
         stream_start = time.perf_counter()
         logger.info("[TIMING] Stream started for question: %s...", question[:50])
+
+        quick_reply: Optional[str] = None
+        if self._is_brief_greeting(question):
+            quick_reply = _QUICK_GREETING_REPLY
+        elif self._is_identity_query(question):
+            quick_reply = _QUICK_IDENTITY_REPLY
+
+        if quick_reply is not None:
+            yield ("sources", {"sources": []})
+            yield ("answer", {"content": quick_reply})
+            yield ("done", {
+                "model": self.llm_model,
+                "context_used": False,
+                "cached": False,
+            })
+            return
 
         effective_use_retrieval = bool(use_retrieval)
         effective_top_k = max(1, min(top_k, 20))
         retrieval_query = question
 
         retrieval_mode = (app_config.STREAM_RETRIEVAL_MODE or "vector").strip().lower()
-        if retrieval_mode not in {"vector", "vector_only", "hybrid", "all", "none", "off", "disabled"}:
+        if retrieval_mode not in {"vector", "vector_only", "vector_keyword", "keyword_vector", "hybrid", "all", "none", "off", "disabled"}:
             retrieval_mode = "vector"
 
         if retrieval_mode in {"none", "off", "disabled"}:
@@ -680,9 +760,10 @@ class RAGService:
         stream_top_k_cap = max(1, int(app_config.STREAM_RETRIEVAL_TOP_K_CAP))
         stream_top_k = max(1, min(effective_top_k, stream_top_k_cap))
 
-        use_vector = retrieval_mode in {"vector", "vector_only", "hybrid", "all"}
+        use_vector = retrieval_mode in {"vector", "vector_only", "vector_keyword", "keyword_vector", "hybrid", "all"}
         use_graph = retrieval_mode in {"hybrid", "all"}
-        use_keyword = retrieval_mode in {"hybrid", "all"}
+        # Keep _keyword_search in codebase, but disable keyword retrieval in QA flow for now.
+        use_keyword = False
 
         cache = get_query_cache()
         history_summary = self._build_history_summary(history)
@@ -730,8 +811,8 @@ class RAGService:
             context="",
             history=history,
             retrieval_hint=(
-                "请先用1-2句话快速响应用户问题，并明确说明你正在检索资料，"
-                "稍后会补充基于资料的完整答案。不要编造具体条文。"
+                "\u8bf7\u76f4\u63a5\u56de\u7b54\u7528\u6237\u95ee\u9898\u8981\u70b9\uff0c\u4e0d\u8981\u5bd2\u6684\uff0c\u4e0d\u8981\u53cd\u95ee\uff0c\u4e0d\u8981\u63cf\u8ff0\u68c0\u7d22\u8fc7\u7a0b\u3002"
+                ""
                 if effective_use_retrieval
                 else None
             ),

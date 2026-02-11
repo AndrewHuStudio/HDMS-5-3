@@ -1,5 +1,5 @@
 ﻿import { create } from "zustand";
-import type { SightCorridorPosition, SightCorridorResult, CorridorCollisionResult } from "@/lib/sight-corridor-types";
+import type { SightCorridorPosition, SightCorridorResult, CorridorCollisionResult } from "./types";
 
 interface SightCorridorState {
   position: SightCorridorPosition | null;
