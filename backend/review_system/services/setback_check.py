@@ -157,6 +157,49 @@ def _point_in_curve_2d(point: rhino3dm.Point3d, curve: rhino3dm.Curve) -> bool:
     return intersections % 2 == 1
 
 
+def _point_in_polygon_2d(point: Point2D, polygon: List[Point2D]) -> bool:
+    if len(polygon) < 3:
+        return False
+    px, py = point
+    intersections = 0
+    for i in range(len(polygon)):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % len(polygon)]
+        # On edge is considered inside
+        dx = x2 - x1
+        dy = y2 - y1
+        cross = (px - x1) * dy - (py - y1) * dx
+        if abs(cross) <= 1e-6:
+            dot = (px - x1) * (px - x2) + (py - y1) * (py - y2)
+            if dot <= 1e-6:
+                return True
+        if (y1 > py) != (y2 > py):
+            x_intersect = (x2 - x1) * (py - y1) / (y2 - y1) + x1
+            if px < x_intersect:
+                intersections += 1
+    return intersections % 2 == 1
+
+
+def _building_footprint_points(geometry: rhino3dm.CommonObject) -> List[Point2D]:
+    segments = _bottom_edge_segments(geometry)
+    points: List[Point2D] = []
+    for segment in segments:
+        points.append(segment[0])
+        points.append(segment[1])
+    if len(points) < 3:
+        bbox = _get_bounding_box(geometry)
+        if bbox is None:
+            return []
+        points = [
+            (bbox.Min.X, bbox.Min.Y),
+            (bbox.Min.X, bbox.Max.Y),
+            (bbox.Max.X, bbox.Max.Y),
+            (bbox.Max.X, bbox.Min.Y),
+        ]
+    hull = _convex_hull(points)
+    return hull if len(hull) >= 3 else points
+
+
 def _points_to_2d(points: Iterable[rhino3dm.Point3d]) -> List[Point2D]:
     return [(float(pt.X), float(pt.Y)) for pt in points]
 
@@ -605,5 +648,156 @@ def check_setback_rate_pure_python(
             "sample_step": sample_step,
             "tolerance": tolerance,
             "required_rate": safe_required_rate,
+        },
+    }
+
+
+def check_setback_violation_pure_python(
+    model_path: Path,
+    building_layer: str = "模型_建筑体块",
+    setback_layer: str = "限制_建筑退线",
+    plot_layer: str = "场景_地块",
+) -> Dict:
+    file3dm = rhino3dm.File3dm.Read(str(model_path))
+    if file3dm is None:
+        raise ValueError(f"Failed to read 3dm file: {model_path}")
+
+    building_objects = _load_objects_from_layer(file3dm, building_layer)
+    if not building_objects:
+        raise ValueError(f"No buildings found in layer: {building_layer}")
+
+    setback_objects = _load_objects_from_layer(file3dm, setback_layer)
+    if not setback_objects:
+        raise ValueError(f"No setbacks found in layer: {setback_layer}")
+
+    plot_objects = _load_objects_from_layer(file3dm, plot_layer)
+    plot_candidates = []
+    for idx, (obj, geometry) in enumerate(plot_objects):
+        bbox = _get_bounding_box(geometry)
+        if bbox is None:
+            continue
+        name = _get_user_text(obj, "地块名称") or f"地块{idx + 1}"
+        center = bbox.Center
+        plot_candidates.append({"name": name, "center": center})
+
+    setback_info = []
+    invalid_setbacks = 0
+    open_curves = 0
+
+    for idx, (obj, geometry) in enumerate(setback_objects):
+        if not isinstance(geometry, rhino3dm.Curve):
+            invalid_setbacks += 1
+            continue
+
+        if not geometry.IsClosed:
+            open_curves += 1
+            continue
+
+        plot_name = _get_user_text(obj, "地块名称") or f"地块{len(setback_info) + 1}"
+        points3d = _curve_to_points(geometry)
+        points2d = _points_to_2d(points3d)
+        if len(points2d) < 3:
+            invalid_setbacks += 1
+            continue
+
+        if plot_candidates:
+            for candidate in plot_candidates:
+                if _point_in_curve_2d(candidate["center"], geometry):
+                    plot_name = candidate["name"]
+                    break
+
+        setback_info.append({
+            "name": plot_name,
+            "curve": geometry,
+            "points2d": points2d,
+        })
+
+    if not setback_info:
+        raise ValueError(f"No valid setback curves found in layer: {setback_layer}")
+
+    results = []
+    unmatched_buildings = 0
+    exceeded_count = 0
+
+    for idx, (obj, geometry) in enumerate(building_objects):
+        bbox = _get_bounding_box(geometry)
+        if bbox is None:
+            continue
+        center = bbox.Center
+        matched_setback = None
+        for plot in setback_info:
+            if _point_in_curve_2d(center, plot["curve"]):
+                matched_setback = plot
+                break
+
+        attributes = getattr(obj, "Attributes", None)
+        object_id = getattr(attributes, "Id", None) if attributes else None
+        layer_index = getattr(attributes, "LayerIndex", None) if attributes else None
+        layer_name = None
+        if layer_index is not None and layer_index < len(file3dm.Layers):
+            layer = file3dm.Layers[layer_index]
+            layer_name = getattr(layer, "FullPath", None) or getattr(layer, "Name", None)
+
+        building_name = _get_user_text(obj, "建筑名称") or getattr(obj, "Name", None) or f"建筑{idx + 1}"
+
+        is_exceeded = False
+        reason = None
+        plot_name = matched_setback["name"] if matched_setback else None
+
+        if matched_setback is None:
+            is_exceeded = True
+            reason = "missing_setback"
+            unmatched_buildings += 1
+        else:
+            footprint = _building_footprint_points(geometry)
+            if not footprint:
+                is_exceeded = True
+                reason = "invalid_setback"
+            else:
+                polygon = matched_setback["points2d"]
+                for point in footprint:
+                    if not _point_in_polygon_2d(point, polygon):
+                        is_exceeded = True
+                        break
+
+        if is_exceeded:
+            exceeded_count += 1
+
+        results.append({
+            "building_index": idx,
+            "building_name": building_name,
+            "plot_name": plot_name,
+            "is_exceeded": is_exceeded,
+            "reason": reason,
+            "object_id": str(object_id) if object_id else None,
+            "layer_name": layer_name,
+            "layer_index": layer_index,
+        })
+
+    total_buildings = len(results)
+    compliant_count = total_buildings - exceeded_count
+
+    warnings: List[str] = []
+    if unmatched_buildings > 0:
+        warnings.append(f"{unmatched_buildings} buildings are not within any setback boundary")
+    if invalid_setbacks > 0:
+        warnings.append(f"{invalid_setbacks} setback objects are not valid curves")
+    if open_curves > 0:
+        warnings.append(f"{open_curves} setback curves are not closed; plot matching may be incomplete")
+
+    return {
+        "status": "ok",
+        "summary": {
+            "total_buildings": total_buildings,
+            "exceeded_count": exceeded_count,
+            "compliant_count": compliant_count,
+            "unmatched_buildings": unmatched_buildings,
+        },
+        "buildings": results,
+        "warnings": warnings,
+        "parameters": {
+            "building_layer": building_layer,
+            "setback_layer": setback_layer,
+            "plot_layer": plot_layer,
         },
     }

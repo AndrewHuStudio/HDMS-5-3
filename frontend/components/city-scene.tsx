@@ -481,6 +481,7 @@ interface ExternalModelProps {
   setbackHighlightTarget?: { type: "overall" | "plot" | null; plotName?: string | null };
   onSetbackPlotSelect?: (plotName: string) => void;
   sceneUpAxis?: UpAxis;
+  resetVisibilityOnLoad?: boolean;
 }
 
 function ExternalModel({
@@ -509,6 +510,7 @@ function ExternalModel({
   setbackHighlightTarget = { type: null },
   onSetbackPlotSelect,
   sceneUpAxis = SCENE_UP_AXIS,
+  resetVisibilityOnLoad = true,
 }: ExternalModelProps) {
   const [model, setModel] = useState<THREE.Group | null>(null);
   const [meshList, setMeshList] = useState<ImportedMeshInfo[]>([]);
@@ -973,6 +975,11 @@ function ExternalModel({
         url,
         (object) => {
           const scene = object.clone(true);
+          if (resetVisibilityOnLoad) {
+            scene.traverse((child) => {
+              child.visible = true;
+            });
+          }
           const bounds = applyTransform(scene);
           const meshBounds = collectMeshes(scene, bounds);
           onBoundsComputed?.(meshBounds);
@@ -989,6 +996,11 @@ function ExternalModel({
         url,
         (gltf) => {
           const scene = gltf.scene.clone(true);
+          if (resetVisibilityOnLoad) {
+            scene.traverse((child) => {
+              child.visible = true;
+            });
+          }
           const bounds = applyTransform(scene);
           const meshBounds = collectMeshes(scene, bounds);
           onBoundsComputed?.(meshBounds);
@@ -1161,6 +1173,9 @@ function ExternalModel({
 
     meshList.forEach((meshInfo) => {
       if (isSightCorridorLayerName(meshInfo.layerName)) {
+        return;
+      }
+      if (meshInfo.mesh.userData?.persistentHighlight) {
         return;
       }
       const mesh = meshInfo.mesh;
@@ -1940,6 +1955,136 @@ function PlanViewportCameraController({
   return null;
 }
 
+function PlanViewportLayerFilter({
+  visibleLayerPrefixes,
+  updateKey,
+  filterRoot,
+}: {
+  visibleLayerPrefixes?: string[];
+  updateKey?: unknown;
+  filterRoot?: THREE.Object3D | null;
+}) {
+  const { scene } = useThree();
+  const visibilityState = useRef<Map<THREE.Object3D, boolean>>(new Map());
+
+  useEffect(() => {
+    if (!scene || !visibleLayerPrefixes || visibleLayerPrefixes.length === 0) return;
+
+    if (!filterRoot) return;
+    const root = filterRoot;
+    if (!root) return;
+    if (filterRoot) {
+      let current: THREE.Object3D | null = root;
+      let isInScene = false;
+      while (current) {
+        if (current === scene) {
+          isInScene = true;
+          break;
+        }
+        current = current.parent;
+      }
+      if (!isInScene) return;
+    }
+
+    const normalize = (value?: string | null) => (value ?? "").trim().toLowerCase();
+    const prefixes = visibleLayerPrefixes.map(normalize).filter(Boolean);
+
+    if (prefixes.length === 0) return;
+
+    const resolveLayers = (target: THREE.Object3D) => {
+      if (Array.isArray(target.userData?.layers)) {
+        return target.userData.layers as Array<{ name?: string }>;
+      }
+      let found: Array<{ name?: string }> | null = null;
+      target.traverse((child) => {
+        if (!found && Array.isArray(child.userData?.layers)) {
+          found = child.userData.layers as Array<{ name?: string }>;
+        }
+      });
+      return found ?? [];
+    };
+
+    const layers = resolveLayers(root);
+
+    const matchesPrefix = (layerName?: string | null) => {
+      if (!layerName) return false;
+      const normalized = normalize(layerName);
+      if (!normalized) return false;
+      const parts = normalized.split("::").filter(Boolean);
+      return parts.some((part) => prefixes.some((prefix) => part.startsWith(prefix)));
+    };
+
+    const entries: Array<{
+      obj: THREE.Object3D;
+      layerName?: string;
+      isLine: boolean;
+      isEdgeLine: boolean;
+      isOverlayLine: boolean;
+    }> = [];
+    let hasLayerInfo = false;
+
+    root.traverse((child) => {
+      const attributes = child.userData?.attributes as
+        | { layerIndex?: number; LayerIndex?: number; layer_index?: number }
+        | undefined;
+      const directIndex =
+        typeof (child.userData?.layerIndex as number | undefined) === "number"
+          ? (child.userData.layerIndex as number)
+          : typeof (child.userData?.LayerIndex as number | undefined) === "number"
+            ? (child.userData.LayerIndex as number)
+            : typeof attributes?.layerIndex === "number"
+              ? attributes.layerIndex
+              : typeof attributes?.LayerIndex === "number"
+                ? attributes.LayerIndex
+                : typeof attributes?.layer_index === "number"
+                  ? attributes.layer_index
+                  : undefined;
+      const layerName =
+        (child.userData?.layerName as string | undefined) ??
+        (typeof directIndex === "number" ? layers[directIndex]?.name : undefined);
+
+      if (layerName) {
+        hasLayerInfo = true;
+      }
+
+      entries.push({
+        obj: child,
+        layerName,
+        isLine: child instanceof THREE.Line || child instanceof THREE.LineSegments,
+        isEdgeLine: Boolean(child.userData?.isEdgeLine),
+        isOverlayLine: Boolean(child.userData?.isOverlayLine),
+      });
+    });
+
+    if (!hasLayerInfo) return;
+
+    entries.forEach((entry) => {
+      let shouldShow = true;
+      if (entry.layerName) {
+        shouldShow = matchesPrefix(entry.layerName);
+      } else if (entry.isLine && !entry.isEdgeLine && !entry.isOverlayLine) {
+        // Hide stray linework when we already have layer information.
+        shouldShow = false;
+      }
+
+      if (!shouldShow) {
+        if (!visibilityState.current.has(entry.obj)) {
+          visibilityState.current.set(entry.obj, entry.obj.visible);
+        }
+        entry.obj.visible = false;
+      }
+    });
+
+    return () => {
+      visibilityState.current.forEach((wasVisible, obj) => {
+        obj.visible = wasVisible;
+      });
+      visibilityState.current.clear();
+    };
+  }, [scene, visibleLayerPrefixes, updateKey, filterRoot]);
+
+  return null;
+}
 export function PlanViewport({
   modelBounds,
   externalModelUrl,
@@ -1964,6 +2109,7 @@ export function PlanViewport({
   const hemisphereRadius = Math.max(0, sightCorridorRadius) * sightCorridorScale;
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const controlsRef = useRef<any | null>(null);
+  const modelRootRef = useRef<THREE.Group | null>(null);
   const [planModelBounds, setPlanModelBounds] = useState<THREE.Box3 | null>(null);
   const fitBounds = planModelBounds ?? modelBounds;
   const { resolvedTheme } = useTheme();
@@ -2043,24 +2189,33 @@ export function PlanViewport({
             />
 
             {externalModelUrl && externalModelType && (
-              <ExternalModel
-                url={externalModelUrl}
-                format={externalModelType}
-                onError={onModelError || (() => {})}
-                onMeshSelect={() => {}}
-                onBoundsComputed={(bounds) => {
-                  setPlanModelBounds(bounds.clone());
-                }}
-                transformOverride={modelTransform ?? undefined}
-                sightCorridorResult={sightCorridorResult}
-                corridorCollisionResult={corridorCollisionResult}
-                showSightCorridorLayer={showSightCorridorLayer}
-                showSightCorridorLabels={showSightCorridorLabels}
-                showBlockingLabels={showBlockingLabels}
-                sceneUpAxis={sceneUpAxis}
+              <group ref={modelRootRef}>
+                <ExternalModel
+                  url={externalModelUrl}
+                  format={externalModelType}
+                  onError={onModelError || (() => {})}
+                  onMeshSelect={() => {}}
+                  onBoundsComputed={(bounds) => {
+                    setPlanModelBounds(bounds.clone());
+                  }}
+                  transformOverride={modelTransform ?? undefined}
+                  sightCorridorResult={sightCorridorResult}
+                  corridorCollisionResult={corridorCollisionResult}
+                  showSightCorridorLayer={showSightCorridorLayer}
+                  showSightCorridorLabels={showSightCorridorLabels}
+                  showBlockingLabels={showBlockingLabels}
+                  sceneUpAxis={sceneUpAxis}
                 />
+              </group>
             )}
 
+            <PlanViewportLayerFilter
+              visibleLayerPrefixes={visibleLayerPrefixes}
+              updateKey={planModelBounds}
+              filterRoot={modelRootRef.current}
+            />
+
+            {overlayContent}
             {sightCorridorPosition && (
               <>
                 <PersonModel

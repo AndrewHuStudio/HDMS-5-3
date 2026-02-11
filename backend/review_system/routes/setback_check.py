@@ -1,5 +1,5 @@
-﻿"""
-贴线率检测 API
+"""
+退线检测 API
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from core import config
-from services.setback_check import check_setback_rate_pure_python
+from services.setback_check import check_setback_violation_pure_python
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -23,8 +23,9 @@ class SetbackCheckRequest(BaseModel):
     building_layer: str = "模型_建筑体块"
     setback_layer: str = "限制_建筑退线"
     plot_layer: str = "场景_地块"
-    sample_step: float = 1.0
-    tolerance: float = 0.5
+    # 预留字段，避免旧客户端报错
+    sample_step: Optional[float] = None
+    tolerance: Optional[float] = None
     required_rate: Optional[float] = None
 
 
@@ -39,17 +40,14 @@ def _resolve_model_path(model_path: str) -> Path:
 
 @router.post("/setback-check")
 def setback_check(request: SetbackCheckRequest) -> Dict[str, Any]:
-    """贴线率检测接口 - 纯Python实现"""
+    """退线检测接口 - 纯Python实现"""
     resolved_path = _resolve_model_path(request.model_path)
     try:
-        return check_setback_rate_pure_python(
+        return check_setback_violation_pure_python(
             model_path=resolved_path,
             building_layer=request.building_layer,
             setback_layer=request.setback_layer,
             plot_layer=request.plot_layer,
-            sample_step=request.sample_step,
-            tolerance=request.tolerance,
-            required_rate=request.required_rate,
         )
     except ValueError as exc:
         logger.warning(
