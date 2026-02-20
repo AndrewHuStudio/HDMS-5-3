@@ -27,6 +27,7 @@ import { resolvePdfSearchKeyword } from "@/lib/pdf-auto-highlight";
 import { sanitizeAnswerCitations } from "@/lib/sanitize-answer-citations";
 import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
 import { stripInlineCitationLabels } from "@/lib/strip-inline-citation-labels";
+import { convertCitationsToAnchors } from "@/lib/convert-citations-to-anchors";
 import { collapseFigureMentions } from "@/lib/stream-source-utils";
 
 interface QAShellProps {
@@ -190,6 +191,11 @@ export function QAShell({
     const lastMsg = messages[messages.length - 1];
     if (lastMsg?.role === "user") {
       userScrolledUpRef.current = false;
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      });
     }
   }, [messages.length]);
 
@@ -395,11 +401,16 @@ function AssistantContent({
       streaming: isStreaming,
     });
     const normalized = isStreaming ? withArtifacts : normalizeCitations(withArtifacts, sourcesNormalized);
-    const withoutInlineCitations = stripInlineCitationLabels(normalized);
-    const withImages = injectSourceImages(withoutInlineCitations, sourcesNormalized, precedingQuestion);
+    const validLabels = new Set(
+      sourcesNormalized.map((s) => s.citation_label).filter((v): v is string => Boolean(v))
+    );
+    const withAnchors = isStreaming ? normalized : convertCitationsToAnchors(normalized, validLabels);
+    const withoutInlineCitations = stripInlineCitationLabels(withAnchors);
     if (isStreaming) {
-      return collapseFigureMentions(withImages);
+      // Keep streaming text stable; inject images only after the answer is complete.
+      return collapseFigureMentions(withoutInlineCitations);
     }
+    const withImages = injectSourceImages(withoutInlineCitations, sourcesNormalized, precedingQuestion);
     const withTablesAndImages = injectSourceTables(withImages, sourcesNormalized);
     return collapseFigureMentions(withTablesAndImages);
   }, [cleanContent, sourcesNormalized, isStreaming, precedingQuestion]);
@@ -505,10 +516,10 @@ function AssistantContent({
                     ? String(Array.isArray(children) ? children.join("") : children).trim()
                     : null;
 
-                  if (plain && (plain.startsWith("FIGCAPTION ") || /^图\d+：/.test(plain))) {
+                  if (plain && (plain.startsWith("FIGCAPTION ") || /^图\d+[：:.]/.test(plain))) {
                     const shown = plain.replace(/^FIGCAPTION\s+/u, "");
                     return (
-                      <p className="mt-1 mb-3 text-[10px] leading-snug text-muted-foreground">
+                      <p className="mt-1 mb-3 text-[11px] leading-snug text-left text-muted-foreground/75">
                         {shown}
                       </p>
                     );

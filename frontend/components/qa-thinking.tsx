@@ -33,21 +33,16 @@ export function ThinkingProcess({
     statusStage || "understanding"
   );
   const stageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const understandingStartRef = useRef<number>(Date.now());
-  const UNDERSTANDING_MIN_MS = 1500;
+  const displayStageStartRef = useRef<number>(Date.now());
+  const STAGE_MIN_MS: Record<string, number> = {
+    understanding: 1000,
+    retrieving: 1000,
+    reasoning: 1000,
+  };
 
   useEffect(() => {
-    if (!isStreaming) {
-      if (stageTimerRef.current) {
-        clearTimeout(stageTimerRef.current);
-        stageTimerRef.current = null;
-      }
-      return;
-    }
-    if (!statusStage || statusStage === "understanding") {
-      understandingStartRef.current = Date.now();
-    }
-  }, [isStreaming, statusStage]);
+    displayStageStartRef.current = Date.now();
+  }, [displayStage]);
 
   useEffect(() => {
     if (!isStreaming || hasThinking) {
@@ -61,19 +56,18 @@ export function ThinkingProcess({
     const targetStage = statusStage || "understanding";
     if (targetStage === displayStage) return;
 
-    if (displayStage === "understanding" && targetStage !== "understanding") {
-      const elapsed = Date.now() - understandingStartRef.current;
-      const remaining = UNDERSTANDING_MIN_MS - elapsed;
-      if (remaining > 0) {
-        if (stageTimerRef.current) {
-          clearTimeout(stageTimerRef.current);
-        }
-        stageTimerRef.current = setTimeout(() => {
-          setDisplayStage(targetStage);
-          stageTimerRef.current = null;
-        }, remaining);
-        return;
+    const elapsed = Date.now() - displayStageStartRef.current;
+    const minMs = STAGE_MIN_MS[displayStage] ?? 0;
+    const remaining = minMs - elapsed;
+    if (remaining > 0) {
+      if (stageTimerRef.current) {
+        clearTimeout(stageTimerRef.current);
       }
+      stageTimerRef.current = setTimeout(() => {
+        setDisplayStage(targetStage);
+        stageTimerRef.current = null;
+      }, remaining);
+      return;
     }
 
     setDisplayStage(targetStage);

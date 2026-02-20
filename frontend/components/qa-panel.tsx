@@ -34,6 +34,7 @@ import { sanitizeAnswerCitations } from "@/lib/sanitize-answer-citations";
 import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
 import { countReferencedCitations } from "@/lib/align-sources-to-answer";
 import { stripInlineCitationLabels } from "@/lib/strip-inline-citation-labels";
+import { convertCitationsToAnchors } from "@/lib/convert-citations-to-anchors";
 import { collapseFigureMentions, mergeStreamingSources } from "@/lib/stream-source-utils";
 
 type Message = QAPanelMessage;
@@ -302,8 +303,11 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
     const lastMsg = messages[messages.length - 1];
     if (lastMsg?.role === "user") {
       userScrolledUpRef.current = false;
+      requestAnimationFrame(() => {
+        scrollToBottom();
+      });
     }
-  }, [messages.length]);
+  }, [messages.length, scrollToBottom]);
 
   // Track previous messages length & isTyping to avoid scrolling on tab switches
   const prevMessagesLenRef = useRef(messages.length);
@@ -522,6 +526,7 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
               content: fullAnswer,
               pendingContent: "",
               thinkingDone: true,
+              isStreaming: false,
               ...(replacedSources
                 ? {
                     sources: mergeStreamingSources(
@@ -968,11 +973,16 @@ function AssistantMessageBlock({
       streaming: message.isStreaming,
     });
     const normalized = message.isStreaming ? withArtifacts : normalizeCitations(withArtifacts, sources);
-    const baseContent = stripInlineCitationLabels(normalized);
-    const withImages = injectSourceImages(baseContent, sources, precedingQuestion);
+    const validLabels = new Set(
+      sources.map((s) => s.citation_label).filter((v): v is string => Boolean(v))
+    );
+    const withAnchors = message.isStreaming ? normalized : convertCitationsToAnchors(normalized, validLabels);
+    const baseContent = stripInlineCitationLabels(withAnchors);
     if (message.isStreaming) {
-      return collapseFigureMentions(withImages);
+      // Keep streaming text stable; inject images only after the answer is complete.
+      return collapseFigureMentions(baseContent);
     }
+    const withImages = injectSourceImages(baseContent, sources, precedingQuestion);
     const withTablesAndImages = injectSourceTables(withImages, sources);
     return collapseFigureMentions(withTablesAndImages);
   }, [cleanContent, sources, message.isStreaming, precedingQuestion]);
@@ -1022,7 +1032,7 @@ function AssistantMessageBlock({
                 if (plain && (plain.startsWith("FIGCAPTION ") || /^图\d+[：:.]/.test(plain))) {
                   const shown = plain.replace(/^FIGCAPTION\s+/u, "");
                   return (
-                    <p className="mt-1 mb-3 text-[11px] leading-snug text-muted-foreground/70 text-center italic">
+                    <p className="mt-1 mb-3 text-[11px] leading-snug text-left text-muted-foreground/75">
                       {shown}
                     </p>
                   );

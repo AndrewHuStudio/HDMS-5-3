@@ -108,6 +108,7 @@ export function QAView() {
           updateMessage(assistantId, (msg) => ({
             ...msg,
             content: fullAnswer,
+            isStreaming: false,
             ...(replacedSources
               ? { sources: mergeStreamingSources(msg.sources, replacedSources) }
               : {}),

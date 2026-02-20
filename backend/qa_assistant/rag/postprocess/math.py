@@ -168,31 +168,50 @@ def convert_plain_formulas_to_latex(text: str) -> str:
         return _to_latex_term(rhs)
 
     def _is_safe_context(text_: str, start: int) -> bool:
-        """Return False if the match position is inside a markdown link, code, or table row."""
+        """Return False if the match position is inside a context where LaTeX conversion is inappropriate."""
         line_start = text_.rfind("\n", 0, start) + 1
+        line_end = text_.find("\n", start)
+        if line_end == -1:
+            line_end = len(text_)
+        full_line = text_[line_start:line_end]
         prefix = text_[line_start:start].strip()
         if prefix.endswith(("(", "[", "`", "$")):
             return False
         # Skip table rows (lines starting with |).
         if prefix.startswith("|") or prefix.startswith("|-"):
             return False
+        # Skip heading lines.
+        if prefix.lstrip().startswith("#"):
+            return False
+        # Skip blockquote lines.
+        if prefix.lstrip().startswith(">"):
+            return False
+        # Skip lines containing Chinese sentence punctuation (likely prose, not formulas).
+        if any(ch in full_line for ch in "\uff0c\u3002\uff1b\uff01\uff1f\u3001"):
+            return False
         return True
 
     def _formula_replacer(match: re.Match) -> str:
         if not _is_safe_context(text, match.start()):
             return match.group(0)
+        rhs = match.group(3).strip()
+        # Reject if RHS is purely Chinese text with no math operators.
+        if re.match(r'^[\u4e00-\u9fff\s]+$', rhs) and not re.search(r'[+\-*/\u00d7\u00f7]', rhs):
+            return match.group(0)
         lhs = match.group(1).strip()
         op = match.group(2).strip()
-        rhs = match.group(3).strip()
         latex_op = _OP_MAP.get(op, op)
         return f"${_to_latex_term(lhs)} {latex_op} {_convert_rhs(rhs)}$"
 
     def _ineq_replacer(match: re.Match) -> str:
         if not _is_safe_context(text, match.start()):
             return match.group(0)
+        rhs = match.group(3).strip()
+        # Reject if RHS is purely Chinese text with no math operators.
+        if re.match(r'^[\u4e00-\u9fff\s]+$', rhs) and not re.search(r'[+\-*/\u00d7\u00f7]', rhs):
+            return match.group(0)
         lhs = match.group(1).strip()
         op = match.group(2).strip()
-        rhs = match.group(3).strip()
         latex_op = _OP_MAP.get(op, op)
         return f"${_to_latex_term(lhs)} {latex_op} {_convert_rhs(rhs)}$"
 

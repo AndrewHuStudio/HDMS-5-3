@@ -10,7 +10,7 @@ interface MergeThinkingArgs {
   heading?: string;
 }
 
-const FIGURE_MENTION_RE = /[（(]?\s*见图\s*(\d{1,2})\s*[)）]?/gu;
+const FIGURE_MENTION_RE = /[（(]?\s*(?:见)?图\s*(\d{1,2})\s*[)）]?/gu;
 
 function hasImagePayload(source: SourceInfo): boolean {
   return Boolean(
@@ -114,7 +114,7 @@ export function collapseFigureMentions(text: string): string {
       if (!normalized) return "";
       if (seenGlobal.has(normalized)) return "";
       seenGlobal.add(normalized);
-      return `（见图${normalized}）`;
+      return `（图${normalized}）`;
     });
 
     return deduped

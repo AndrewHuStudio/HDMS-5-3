@@ -38,7 +38,7 @@ function transformUnprotected(text: string, fn: (segment: string) => string): st
 }
 
 const MAJOR_SECTION_TITLE_RE =
-  /^(?:检索综述|详细解析|核心结论|结论|总结|小结)(?:\s*[:：].*)?$/;
+  /^(?:检索综述|详细解析|相关概念|核心结论|结论|总结|小结)(?:\s*[:：].*)?$/;
 
 function stripInlineMdWrappers(value: string): string {
   let s = (value || "").trim();
@@ -258,11 +258,22 @@ function normalizeMarkdownHeadingHierarchy(text: string): string {
       HEADING_NUM_SECTION_RE.test(semanticTitle) ||
       HEADING_NUM_SUBSECTION_RE.test(semanticTitle);
 
+    // Demote headings that are clearly full sentences or figure/table captions.
+    const startsLikeStructuredHeading =
+      HEADING_CN_SECTION_RE.test(semanticTitle) ||
+      HEADING_CN_SUBSECTION_RE.test(semanticTitle) ||
+      HEADING_NUM_SECTION_RE.test(semanticTitle) ||
+      HEADING_NUM_SUBSECTION_RE.test(semanticTitle);
+
+    // Keep heading normalization conservative:
+    // - always demote figure/table captions;
+    // - demote very long punctuation-heavy sentence-like pseudo headings;
+    // - keep numbered/structured headings intact.
     const looksLikeBodySentence =
       HEADING_CAPTION_RE.test(semanticTitle) ||
-      semanticTitle.length >= 36 ||
-      /[。！？；]/.test(semanticTitle) ||
-      ((/[，,]/.test(semanticTitle) || /[：:]/.test(semanticTitle)) && semanticTitle.length >= 20);
+      (!startsLikeStructuredHeading &&
+        semanticTitle.length >= 32 &&
+        /[，,:：；。！？]/.test(semanticTitle));
 
     // Demote sentence-like pseudo-headings so content/body no longer renders as title.
     if (!semanticHeading && looksLikeBodySentence) {
@@ -355,6 +366,15 @@ function sanitizeBrokenLatexFragment(fragment: string): string {
   return out;
 }
 
+/**
+ * Light-touch fix for broken inline math delimiters.
+ *
+ * Philosophy: the model's output is trusted by default.  We only intervene
+ * when a `$...$` span is *clearly* broken (unbalanced braces, contains
+ * markdown heading markers, or spans multiple lines).  In all other cases
+ * the original text passes through unchanged so the model's formatting
+ * intent is preserved.
+ */
 function normalizeBrokenInlineMath(text: string): string {
   let out = "";
   let idx = 0;
@@ -364,8 +384,15 @@ function normalizeBrokenInlineMath(text: string): string {
 
     // Keep $$...$$ blocks untouched.
     if (ch === "$" && text[idx + 1] === "$") {
-      out += "$$";
-      idx += 2;
+      // Find closing $$
+      const closeIdx = text.indexOf("$$", idx + 2);
+      if (closeIdx >= 0) {
+        out += text.slice(idx, closeIdx + 2);
+        idx = closeIdx + 2;
+      } else {
+        out += "$$";
+        idx += 2;
+      }
       continue;
     }
 
@@ -394,19 +421,26 @@ function normalizeBrokenInlineMath(text: string): string {
     }
 
     if (found < 0) {
-      // Unmatched single '$' -> drop to avoid raw delimiter leakage.
+      // Unmatched single '$' — keep it as-is rather than silently dropping.
+      // The markdown renderer / KaTeX will handle it gracefully.
+      out += ch;
       idx += 1;
       continue;
     }
 
     const inner = text.slice(idx + 1, found);
-    const suspicious =
-      inner.includes("\n") || !hasBalancedBraces(inner) || /###/.test(inner);
 
-    if (!suspicious) {
-      out += `$${inner}$`;
-    } else {
+    // Only sanitize when the span is *clearly* broken:
+    // - contains heading markers (### glued into math)
+    // - spans multiple lines AND has unbalanced braces
+    const hasBrokenHeading = /#{2,}/.test(inner);
+    const multilineAndUnbalanced = inner.includes("\n") && !hasBalancedBraces(inner);
+
+    if (hasBrokenHeading || multilineAndUnbalanced) {
       out += sanitizeBrokenLatexFragment(inner);
+    } else {
+      // Trust the model — keep the math span intact.
+      out += `$${inner}$`;
     }
 
     idx = found + 1;
@@ -416,15 +450,6 @@ function normalizeBrokenInlineMath(text: string): string {
   out = out.replace(/([^\n#])\s*(#{2,6}\s*[一二三四五六七八九十0-9]+[、.．])/g, "$1\n$2");
   // Remove standalone orphan heading markers like "###".
   out = out.replace(/^[ \t]*#{2,6}[ \t]*$/gm, "");
-  // Drop line-level unmatched single-dollar leakage.
-  out = out
-    .split("\n")
-    .map((line) => {
-      const singles = line.match(/(?<!\\)\$(?!\$)/g)?.length ?? 0;
-      if (singles % 2 === 1) return line.replace(/(?<!\\)\$(?!\$)/g, "");
-      return line;
-    })
-    .join("\n");
 
   // Final cleanup for accidental empty lines after orphan marker removal.
   out = out.replace(/\n{3,}/g, "\n\n");
@@ -537,9 +562,8 @@ function normalizeChineseHeadings(text: string): string {
 
       const looksLikeHeadingText =
         title.length > 0 &&
-        title.length <= 50 &&
-        !/[。；;，,]$/.test(title) &&
-        !/[。；;，,]/.test(title);
+        title.length <= 80 &&
+        !/[。！？；]$/.test(title);
 
       if (!looksLikeListNeighbor && looksLikeHeadingText && (nextLooksLikeBody || Boolean(next))) {
         result.push(`### ${match[1]}. ${title}`);
@@ -549,13 +573,13 @@ function normalizeChineseHeadings(text: string): string {
 
     // Level-3: 1) 标题 or ① 标题
     match = trimmed.match(CN_H3_RE);
-    if (match && match[2].length <= 50 && !/[。；;，,]/.test(match[2])) {
+    if (match && match[2].length <= 80 && !/[。！？；]$/.test(match[2])) {
       result.push(`#### ${match[1]}) ${match[2].trim()}`);
       continue;
     }
 
     match = trimmed.match(CIRCLED_H3_RE);
-    if (match && match[2].length <= 50 && !/[。；;，,]/.test(match[2])) {
+    if (match && match[2].length <= 80 && !/[。！？；]$/.test(match[2])) {
       result.push(`#### ${match[1]} ${match[2].trim()}`);
       continue;
     }
@@ -599,12 +623,21 @@ export function normalizeMarkdownLists(content: string): string {
       if (orderedMatch) {
         const indent = orderedMatch[1] ?? "";
         const body = orderedMatch[2] ?? "";
+        const originalNum = parseInt(line.match(/^\s*(\d+)\./)?.[1] ?? "1", 10);
 
         if (indent === activeIndent && orderedCounter > 0) {
           orderedCounter += 1;
         } else {
           orderedCounter = 1;
           activeIndent = indent;
+        }
+
+        // Preserve original numbering when it diverges significantly from
+        // sequential order — likely a clause/section reference (e.g. "3.", "4.")
+        // rather than a misnumbered list.
+        if (originalNum > 1 && Math.abs(originalNum - orderedCounter) > 2) {
+          orderedCounter = originalNum;
+          return line;
         }
 
         return `${indent}${orderedCounter}. ${body}`;

@@ -14,7 +14,7 @@ _LIST_NEEDS_BLANK_RE = re.compile(r"(\S[^\n]*)\n([ \t]*[-*\d]+[.)]\s)")
 # Heading level normalization: top-level `#` → `##` (reserve h1 for page title).
 _H1_RE = re.compile(r"^#\s", re.MULTILINE)
 # Known top-level section titles that should stay as level-2 headings.
-_MAJOR_SECTION_TITLE_RE = re.compile(r"^(?:检索综述|详细解析|核心结论|结论|总结|小结)(?:\s*[:：].*)?$")
+_MAJOR_SECTION_TITLE_RE = re.compile(r"^(?:检索综述|详细解析|相关概念|核心结论|结论|总结|小结)(?:\s*[:：].*)?$")
 # Match subheadings (### and deeper).
 _SUB_HEADING_RE = re.compile(r"^(#{3,})\s+(.+?)\s*$")
 # Setext underline markers that can accidentally promote the previous body line to h2/h1.

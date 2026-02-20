@@ -22,7 +22,7 @@ describe("injectSourceImages", () => {
 
     // Image should be injected inline near the citation, not in a separate appendix
     expect(out).toContain("![公共服务设施立体覆盖率示意图](/rag/documents/doc-1/image?ref=cover.png)");
-    expect(out).toContain("（见图1）");
+    expect(out).toContain("（图1）");
   });
 
   it("injects the matching figure image when a paragraph references 图号", () => {
@@ -42,7 +42,7 @@ describe("injectSourceImages", () => {
     const input = "流程图如图3.0.1所示。[1-1](#source-1-1)\n\n下一段";
     const out = injectSourceImages(input, sources);
 
-    expect(out).toContain("（见图1）[1-1](#source-1-1)");
+    expect(out).toContain("（图1）[1-1](#source-1-1)");
     expect(out).toContain("![评估流程图](/rag/documents/doc-1/image?ref=a.png)");
     expect(out).toContain("图1：评估流程图");
     expect(out).not.toContain("ref=b.png");
@@ -64,7 +64,7 @@ describe("injectSourceImages", () => {
     const out = injectSourceImages(input, sources);
     // Now we inject images from cited sources even without explicit figure mentions
     expect(out).toContain("![a.png](/rag/documents/doc-1/image?ref=a.png)");
-    expect(out).toContain("（见图1）");
+    expect(out).toContain("（图1）");
   });
 
   it("falls back to the first image when the paragraph says '如下图' but no figure number is present", () => {
@@ -82,7 +82,7 @@ describe("injectSourceImages", () => {
 
     const input = "如下图所示，这是一个流程图。[1-1](#source-1-1)";
     const out = injectSourceImages(input, sources);
-    expect(out).toContain("（见图1）[1-1](#source-1-1)");
+    expect(out).toContain("（图1）[1-1](#source-1-1)");
     expect(out).toContain("![流程图](/rag/documents/doc-1/image?ref=a.png)");
     expect(out).toContain("图1：流程图");
   });
@@ -108,7 +108,7 @@ describe("injectSourceImages", () => {
 
     const out = injectSourceImages(input, sources);
     expect(out).toContain("![地下空间剖面示意图](/rag/documents/doc-1/image?ref=section.png)");
-    expect(out).toContain("这里讨论地下空间组织（见图1）。");
+    expect(out).toContain("这里讨论地下空间组织（图1）。");
     expect(out).toContain("图1：地下空间剖面示意图");
     expect(out).not.toContain("此处应插入");
     expect(out).not.toContain("未见附图");
@@ -167,7 +167,7 @@ describe("injectSourceImages", () => {
 
     const input = "控制图展示了街坊空间控制要点。[1-1](#source-1-1)";
     const out = injectSourceImages(input, sources);
-    expect(out).toContain("（见图1）[1-1](#source-1-1)");
+    expect(out).toContain("（图1）[1-1](#source-1-1)");
     expect(out).toContain("![GHJK街坊空间控制总图](/rag/documents/doc-1/image?ref=map.png)");
     expect(out).toContain("图1：GHJK街坊空间控制总图");
   });
@@ -250,7 +250,7 @@ describe("injectSourceImages", () => {
     expect(out).toContain("图2：第二张图");
   });
 
-  it("normalizes existing refs like '（见图3.0.1）' to clean '（见图N）' without leaking suffix fragments", () => {
+  it("normalizes existing refs like '（见图3.0.1）' to clean '（图N）' without leaking suffix fragments", () => {
     const sources: SourceInfo[] = [
       {
         type: "document",
@@ -267,8 +267,8 @@ describe("injectSourceImages", () => {
     const input = "评估流程按五个阶段推进执行（见图3.0.1）。[1-1](#source-1-1)";
     const out = injectSourceImages(input, sources);
 
-    expect(out).toContain("执行（见图1）。[1-1](#source-1-1)");
-    expect(out).not.toContain("（见图1）.0.1");
-    expect(out).not.toContain("见图2）.0.3");
+    expect(out).toContain("执行（图1）。[1-1](#source-1-1)");
+    expect(out).not.toContain("（图1）.0.1");
+    expect(out).not.toContain("图2）.0.3");
   });
 });

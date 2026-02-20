@@ -107,8 +107,8 @@ describe("collapseFigureMentions", () => {
       "流程（见图1）（见图1），结果（见图2）。\n补充仍写（见图1）。"
     );
 
-    expect(output).toContain("流程（见图1），结果（见图2）。");
-    expect(output).not.toContain("补充仍写（见图1）。");
-    expect(output).not.toContain("（见图1）（见图1）");
+    expect(output).toContain("流程（图1），结果（图2）。");
+    expect(output).not.toContain("补充仍写（图1）。");
+    expect(output).not.toContain("（图1）（图1）");
   });
 });

@@ -700,8 +700,6 @@ class RAGService:
 
                 yield ("status", {"stage": "reasoning", "message": "正在进行智能研判..."})
                 doc_nums = sorted({s["doc_num"] for s in sources if s.get("doc_num")})
-                summary_preface = pp_summary.inject_summary_document_names("", sources).strip()
-                summary_preface_attached = False
                 prompt = self._build_prompt(
                     question,
                     context,
@@ -719,10 +717,6 @@ class RAGService:
                 ):
                     if event_type == "answer":
                         answer_piece = payload.get("content", "")
-                        if summary_preface and not summary_preface_attached:
-                            answer_piece = f"{summary_preface}\n\n{answer_piece}"
-                            payload = {"content": answer_piece}
-                            summary_preface_attached = True
                         full_answer_parts.append(answer_piece)
                         if not first_token_received and answer_piece:
                             first_token_received = True

@@ -102,7 +102,7 @@ function appendFigureRefToLine(line: string, figLabel: string): string {
   const src = String(line || "");
   if (!src.trim()) return src;
 
-  const ref = `（见${figLabel}）`;
+  const ref = `（${figLabel}）`;
   if (INLINE_SEE_FIGURE_RE.test(src)) {
     return src.replace(INLINE_SEE_FIGURE_GLOBAL_RE, ref);
   }
