@@ -4,6 +4,8 @@ Database manager for initializing and managing database connections.
 
 from typing import Optional
 import logging
+import threading
+import time
 from .milvus_client import MilvusClient
 from .mongodb_client import MongoDBClient
 from .neo4j_client import Neo4jClient
@@ -21,6 +23,7 @@ class DatabaseManager:
         self.mongodb: Optional[MongoDBClient] = None
         self.neo4j: Optional[Neo4jClient] = None
         self._initialized = False
+        self._init_lock = threading.Lock()
 
     def initialize(self) -> None:
         """Initialize all database connections."""
@@ -69,10 +72,14 @@ class DatabaseManager:
             )
             self.neo4j.connect()
 
-            # Create constraints for unique properties
+            # Create constraints for unique properties (new schema: Chinese labels)
             try:
-                self.neo4j.create_constraint("Plot", "name")
-                self.neo4j.create_constraint("Document", "doc_id")
+                self.neo4j.create_constraint("地块", "name")
+                self.neo4j.create_constraint("片区", "name")
+                self.neo4j.create_constraint("法规", "name")
+                self.neo4j.create_constraint("标准", "name")
+                self.neo4j.create_constraint("导则", "name")
+                self.neo4j.create_constraint("空间要素", "name")
             except Exception as e:
                 logger.warning(f"Constraints may already exist: {e}")
 
@@ -83,6 +90,40 @@ class DatabaseManager:
             logger.error(f"Failed to initialize databases: {e}")
             self.cleanup()
             raise
+
+    def ensure_initialized(self, max_retries: int = 1, retry_delay_seconds: float = 1.0) -> None:
+        """Initialize databases if needed, with bounded retries for transient startup failures."""
+        if self._initialized:
+            return
+
+        retries = max(1, int(max_retries))
+        delay = max(0.0, float(retry_delay_seconds))
+        last_error: Exception | None = None
+
+        with self._init_lock:
+            if self._initialized:
+                return
+
+            for attempt in range(1, retries + 1):
+                try:
+                    self.initialize()
+                    return
+                except Exception as exc:
+                    last_error = exc
+                    if attempt >= retries:
+                        break
+                    logger.warning(
+                        "Database initialization attempt %s/%s failed: %s; retrying in %.1fs",
+                        attempt,
+                        retries,
+                        exc,
+                        delay,
+                    )
+                    if delay > 0:
+                        time.sleep(delay)
+
+        if last_error is not None:
+            raise last_error
 
     def cleanup(self) -> None:
         """Close all database connections."""

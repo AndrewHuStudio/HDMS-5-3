@@ -120,7 +120,7 @@ class MongoDBClient:
         Returns:
             List of matching documents
         """
-        cursor = self.db[collection].find(query, projection)
+        cursor = self.db[collection].find(query, projection).batch_size(1000)
         if sort:
             cursor = cursor.sort(sort)
         if limit is not None:

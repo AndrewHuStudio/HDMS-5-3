@@ -30,6 +30,81 @@ from schemas.rag_schemas import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# --- PDF lookup cache: file_name → resolved Path (or None sentinel) ---
+_pdf_cache: dict[str, Optional[Path]] = {}
+
+
+def _find_project_root() -> Path:
+    """Walk up from this file to find the directory containing .env."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / ".env").exists():
+            return parent
+    return Path(__file__).resolve().parent
+
+
+_PDF_KEY_RE = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff]+")
+
+
+def _normalize_pdf_key(name: str) -> str:
+    """
+    Normalize a PDF filename for fuzzy matching.
+
+    We keep letters/digits/CJK and drop punctuation/whitespace so that
+    e.g. "DU01-01、DU01-02、DU01-03地块...pdf" matches "DU01-01DU01-02DU01-03地块...pdf".
+    """
+    base = Path(str(name or "")).name
+    stem = base[:-4] if base.lower().endswith(".pdf") else Path(base).stem
+    return _PDF_KEY_RE.sub("", stem).lower()
+
+
+def _candidate_pdf_names(document: dict) -> List[str]:
+    """Return candidate PDF *filenames* (not full paths) derived from document fields."""
+    metadata = document.get("metadata") or {}
+    candidates: List[str] = []
+
+    raw_file_name = document.get("file_name") or metadata.get("file_name")
+    if isinstance(raw_file_name, str) and raw_file_name.strip():
+        base = Path(raw_file_name.strip()).name
+        # If it's already a PDF name, keep it; otherwise try a .pdf sibling.
+        if base.lower().endswith(".pdf"):
+            candidates.append(base)
+        else:
+            candidates.append(f"{Path(base).stem}.pdf")
+
+    markdown_path = document.get("markdown_path")
+    if isinstance(markdown_path, str) and markdown_path.strip():
+        try:
+            md_path = Path(markdown_path.strip())
+            candidates.append(f"{md_path.stem}.pdf")
+        except Exception:
+            pass
+
+    # De-dupe while keeping order.
+    out: List[str] = []
+    seen = set()
+    for name in candidates:
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
+def _iter_pdf_roots(project_root: Path) -> List[Path]:
+    """
+    Directories that may contain source PDFs on disk.
+
+    Note: `orginal_input` is intentionally misspelled to match existing folder name.
+    """
+    roots = [
+        project_root / "data" / "orginal_input",
+        project_root / "data" / "original_input",
+        project_root / "data" / "documents",
+        project_root / "data" / "uploads",
+    ]
+    return [p for p in roots if p.is_dir()]
+
 
 def _resolve_pdf_path(document: Optional[dict]) -> Optional[Path]:
     """Resolve a local PDF path for a document record if possible."""
@@ -45,7 +120,8 @@ def _resolve_pdf_path(document: Optional[dict]) -> Optional[Path]:
             candidates.append(value.strip())
 
     markdown_path = document.get("markdown_path")
-    file_name = document.get("file_name")
+    # Prefer top-level file_name, but fall back to metadata.file_name (older records / migrations).
+    file_name = document.get("file_name") or metadata.get("file_name")
     if isinstance(markdown_path, str) and markdown_path.strip():
         md_path = Path(markdown_path)
         candidates.append(str(md_path.with_suffix(".pdf")))
@@ -72,7 +148,164 @@ def _resolve_pdf_path(document: Optional[dict]) -> Optional[Path]:
         if candidate.exists() and candidate.is_file():
             return candidate
 
+    # Fallback: search common data roots by (1) exact filename, then (2) normalized fuzzy match.
+    project_root = _find_project_root()
+    pdf_roots = _iter_pdf_roots(project_root)
+    pdf_names = _candidate_pdf_names(document)
+
+    for base_name in pdf_names:
+        cache_key = base_name.lower()
+        if cache_key in _pdf_cache:
+            return _pdf_cache[cache_key]
+
+        # 1) Exact search by filename
+        for root_dir in pdf_roots:
+            try:
+                for match in root_dir.rglob(base_name):
+                    if match.is_file():
+                        _pdf_cache[cache_key] = match
+                        return match
+            except Exception:
+                continue
+
+        # 2) Fuzzy search: normalize away punctuation/whitespace and match stems
+        target_key = _normalize_pdf_key(base_name)
+        if target_key:
+            for root_dir in pdf_roots:
+                try:
+                    for pdf in root_dir.rglob("*.pdf"):
+                        if not pdf.is_file():
+                            continue
+                        if _normalize_pdf_key(pdf.name) == target_key:
+                            _pdf_cache[cache_key] = pdf
+                            return pdf
+                except Exception:
+                    continue
+
+        _pdf_cache[cache_key] = None
+
     return None
+
+
+_pdf_page_texts_cache: dict[str, Optional[List[str]]] = {}
+
+
+def _safe_positive_int(value: object, default: int, *, minimum: int = 1, maximum: Optional[int] = None) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if parsed < minimum:
+        parsed = minimum
+    if maximum is not None and parsed > maximum:
+        parsed = maximum
+    return parsed
+
+
+def _normalize_history(history: List) -> List[dict]:
+    window = _safe_positive_int(getattr(config, "QA_HISTORY_WINDOW", 8), 8, minimum=1, maximum=100)
+    return [{"role": h.role, "content": h.content} for h in history[-window:]]
+
+
+def _get_pdf_page_texts(pdf_path: Path) -> Optional[List[str]]:
+    """Return normalised per-page texts for a PDF (cached)."""
+    key = str(pdf_path)
+    if key in _pdf_page_texts_cache:
+        return _pdf_page_texts_cache[key]
+
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except ImportError:
+        _pdf_page_texts_cache[key] = None
+        return None
+
+    _ws_re = re.compile(r"\s+")
+
+    try:
+        reader = PdfReader(key, strict=False)
+        if getattr(reader, "is_encrypted", False):
+            try:
+                reader.decrypt("")
+            except Exception:
+                pass
+        texts = []
+        for page in reader.pages:
+            try:
+                raw = page.extract_text() or ""
+            except Exception:
+                raw = ""
+            texts.append(_ws_re.sub("", raw).lower())
+        _pdf_page_texts_cache[key] = texts
+        return texts
+    except Exception as exc:
+        logger.debug("Failed to read PDF pages from %s: %s", pdf_path, exc)
+        _pdf_page_texts_cache[key] = None
+        return None
+
+
+def _search_page_in_pdf(pdf_path: Optional[Path], chunk_text: str) -> Optional[int]:
+    """Search for chunk text inside a PDF and return the 1-based physical page number.
+
+    Extracts short signatures from multiple positions in the chunk text,
+    then scans each PDF page to find a match.  Returns ``None`` when the
+    PDF cannot be read or no match is found.
+    """
+    if not pdf_path or not chunk_text or not chunk_text.strip():
+        return None
+
+    page_texts = _get_pdf_page_texts(pdf_path)
+    if not page_texts:
+        return None
+
+    _ws_re = re.compile(r"\s+")
+
+    def _norm(t: str) -> str:
+        return _ws_re.sub("", t).lower()
+
+    # Strip markdown formatting that won't appear in raw PDF text
+    raw = chunk_text.strip()
+    raw_clean = re.sub(r"^#{1,6}\s+", "", raw, flags=re.MULTILINE)
+    raw_clean = re.sub(r"!\[.*?\]\(.*?\)", "", raw_clean)
+    raw_clean = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", raw_clean)
+    raw_clean = re.sub(r"[*_`~]+", "", raw_clean)
+    raw_clean = re.sub(r"^\s*\|?\s*[-:]+[-|: ]*\|?\s*$", "", raw_clean, flags=re.MULTILINE)
+    raw_clean = raw_clean.strip()
+    if not raw_clean:
+        return None
+
+    norm_chunk = _norm(raw_clean)
+    if len(norm_chunk) < 10:
+        return None
+
+    # Build signatures from multiple positions for robustness.
+    # Using several positions avoids false matches when a short phrase
+    # (e.g. a chapter title) appears on many pages.
+    sigs: List[str] = []
+    chunk_len = len(norm_chunk)
+    # Sample from start, 1/4, 1/2, 3/4 of the normalised chunk
+    offsets = [0, chunk_len // 4, chunk_len // 2, chunk_len * 3 // 4]
+    for off in offsets:
+        for sig_len in (60, 35):
+            sig = norm_chunk[off:off + sig_len]
+            if len(sig) >= 15 and sig not in sigs:
+                sigs.append(sig)
+
+    if not sigs:
+        return None
+
+    # Score each page by how many signatures it contains.
+    # The page with the most hits is the best candidate.
+    best_page: Optional[int] = None
+    best_hits = 0
+    for page_idx, norm_page in enumerate(page_texts):
+        if not norm_page:
+            continue
+        hits = sum(1 for sig in sigs if sig in norm_page)
+        if hits > best_hits:
+            best_hits = hits
+            best_page = page_idx + 1  # 1-based
+
+    return best_page if best_hits > 0 else None
 
 
 def _find_matching_bracket(text: str, start: int, opener: str, closer: str) -> int:
@@ -180,13 +413,31 @@ def _extract_image_refs(markdown_text: str) -> List[str]:
 
 
 def _resolve_image_path(document: Optional[dict], image_ref: str) -> Optional[Path]:
-    """Resolve an image reference to a local file path for this document."""
+    """Resolve an image reference to a local file path for this document.
+
+    Candidate search order:
+    1. Absolute path (if ref is absolute)
+    2. Relative to markdown_path parent dir
+    3. markdown_path parent / images / filename
+    4. images_dir / ref
+    5. images_dir / filename
+    6. Scan common OCR output roots: data/ocr_output/*/{doc_name}/images/
+    """
     if not document or not image_ref:
         return None
+
+    project_root = _find_project_root()
+
+    def _resolve_local_path(raw_path: str) -> Path:
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = project_root / candidate
+        return candidate
 
     metadata = document.get("metadata") or {}
     markdown_path = document.get("markdown_path")
     images_dir = document.get("images_dir") or metadata.get("images_dir")
+    file_name = document.get("file_name") or metadata.get("file_name") or ""
     normalized_ref = _strip_image_ref(image_ref).replace("\\", "/")
     if not normalized_ref:
         return None
@@ -198,14 +449,46 @@ def _resolve_image_path(document: Optional[dict], image_ref: str) -> Optional[Pa
         candidates.append(ref_path)
 
     if isinstance(markdown_path, str) and markdown_path.strip():
-        doc_dir = Path(markdown_path).expanduser().parent
+        doc_dir = _resolve_local_path(markdown_path).parent
         candidates.append(doc_dir / normalized_ref)
         candidates.append(doc_dir / "images" / ref_path.name)
+        # Also try parent's parent (in case markdown is nested)
+        candidates.append(doc_dir.parent / normalized_ref)
+        candidates.append(doc_dir.parent / "images" / ref_path.name)
+
+        # Final local fallback around markdown dir: recursively search by basename.
+        # This covers OCR layouts where images live in nested subfolders.
+        if ref_path.name:
+            recursive_roots = [doc_dir, doc_dir / "images", doc_dir.parent]
+            for root in recursive_roots:
+                if not root.exists() or not root.is_dir():
+                    continue
+                try:
+                    for match in root.rglob(ref_path.name):
+                        candidates.append(match)
+                except Exception:
+                    continue
 
     if isinstance(images_dir, str) and images_dir.strip():
-        img_dir_path = Path(images_dir).expanduser()
+        img_dir_path = _resolve_local_path(images_dir)
         candidates.append(img_dir_path / normalized_ref)
         candidates.append(img_dir_path / ref_path.name)
+
+    # Fallback: scan common OCR output directories
+    if file_name:
+        doc_stem = Path(file_name).stem
+        for ocr_root in [
+            project_root / "data" / "ocr_output",
+            project_root / "data" / "documents",
+        ]:
+            if ocr_root.is_dir():
+                # Try data/ocr_output/*/{doc_stem}/images/{filename}
+                for category_dir in ocr_root.iterdir():
+                    if not category_dir.is_dir():
+                        continue
+                    doc_img_dir = category_dir / doc_stem / "images"
+                    if doc_img_dir.is_dir():
+                        candidates.append(doc_img_dir / ref_path.name)
 
     checked = set()
     for candidate in candidates:
@@ -216,6 +499,7 @@ def _resolve_image_path(document: Optional[dict], image_ref: str) -> Optional[Pa
         if candidate.exists() and candidate.is_file():
             return candidate
 
+    logger.debug("Image not found for ref=%s, doc=%s. Tried %d candidates.", image_ref, file_name, len(checked))
     return None
 
 def _create_retriever() -> MultiSourceRetriever:
@@ -245,10 +529,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         retriever = _create_retriever()
         rag_service = create_rag_service(retriever)
 
-        history = [
-            {"role": h.role, "content": h.content}
-            for h in request.history[-8:]
-        ]
+        history = _normalize_history(request.history)
 
         result = rag_service.answer_question(
             question=request.question.strip(),
@@ -286,10 +567,7 @@ def chat_stream(request: ChatRequest):
         retriever = _create_retriever()
         rag_service = create_rag_service(retriever)
 
-        history = [
-            {"role": h.role, "content": h.content}
-            for h in request.history[-8:]
-        ]
+        history = _normalize_history(request.history)
 
         setup_elapsed = (time.perf_counter() - request_start) * 1000
         logger.info(f"[TIMING] Request setup completed in {setup_elapsed:.2f}ms")
@@ -331,13 +609,24 @@ def submit_feedback(request: FeedbackRequest):
         if not db_manager._initialized:
             raise HTTPException(status_code=503, detail="Database not initialized")
 
-        feedback_id = f"fb-{int(time.time())}-{request.message_id[:8]}"
+        answer_max_chars = _safe_positive_int(
+            getattr(config, "QA_FEEDBACK_ANSWER_MAX_CHARS", 2000),
+            2000,
+            minimum=1,
+        )
+        message_prefix_len = _safe_positive_int(
+            getattr(config, "QA_FEEDBACK_ID_MESSAGE_PREFIX_LEN", 8),
+            8,
+            minimum=1,
+            maximum=64,
+        )
+        feedback_id = f"fb-{int(time.time())}-{request.message_id[:message_prefix_len]}"
 
         feedback_doc = {
             "_id": feedback_id,
             "message_id": request.message_id,
             "question": request.question,
-            "answer": request.answer[:2000],
+            "answer": request.answer[:answer_max_chars],
             "rating": request.rating,
             "comment": request.comment,
             "created_at": time.time(),
@@ -425,6 +714,12 @@ def get_source_details(chunk_id: str, q: str = Query("", description="Original q
         pdf_path = _resolve_pdf_path(document)
         pdf_url = f"/rag/documents/{doc_id}/pdf" if doc_id and pdf_path else None
 
+        # Try to locate the exact physical page by searching chunk text in PDF
+        searched_page = _search_page_in_pdf(pdf_path, text)
+        if searched_page is not None:
+            page_hint = searched_page
+            page_end_hint = None  # single-page precision, drop stale range
+
         image_refs = _extract_image_refs(text)
         preview_images = []
         for ref in image_refs[:3]:
@@ -483,7 +778,7 @@ def open_document_pdf(doc_id: str):
         if not pdf_path:
             raise HTTPException(status_code=404, detail="PDF file not found for this document")
 
-        return FileResponse(path=pdf_path, media_type="application/pdf", filename=pdf_path.name)
+        return FileResponse(path=pdf_path, media_type="application/pdf", filename=pdf_path.name, content_disposition_type="inline")
 
     except HTTPException:
         raise

@@ -630,7 +630,10 @@ def _ensure_db_initialized():
     modules = _get_rhino_modules()
     db_manager = modules["db_manager"]
     if not db_manager._initialized:
-        db_manager.initialize()
+        db_manager.ensure_initialized(
+            max_retries=config.DB_INIT_MAX_RETRIES,
+            retry_delay_seconds=config.DB_INIT_RETRY_DELAY_SECONDS,
+        )
     return db_manager
 
 
@@ -787,7 +790,10 @@ def _init_db_ui(current_category: str | None = None) -> tuple[str, str, Any]:
         modules = _get_rhino_modules()
         db_manager = modules["db_manager"]
         if not db_manager._initialized:
-            db_manager.initialize()
+            db_manager.ensure_initialized(
+                max_retries=config.DB_INIT_MAX_RETRIES,
+                retry_delay_seconds=config.DB_INIT_RETRY_DELAY_SECONDS,
+            )
         status = "[OK] Milvus \u6570\u636e\u5e93\u8fde\u63a5\u5df2\u521d\u59cb\u5316"
         return status, _db_status_text(), _db_category_update(current_category)
     except Exception as exc:
@@ -1004,7 +1010,10 @@ def _create_ingestion_pipeline():
     modules = _get_rhino_modules()
     db_manager = modules["db_manager"]
     if not db_manager._initialized:
-        db_manager.initialize()
+        db_manager.ensure_initialized(
+            max_retries=config.DB_INIT_MAX_RETRIES,
+            retry_delay_seconds=config.DB_INIT_RETRY_DELAY_SECONDS,
+        )
 
     chunker = modules["DocumentChunker"](chunk_size=800, overlap=100)
     embedder = modules["create_embedding_service"]()

@@ -3,17 +3,28 @@ export type ChatRole = "user" | "assistant";
 export interface SourceInfo {
   type: string;
   name: string;
+  citation_label?: string;
+  doc_num?: number;
+  chunk_seq?: number;
   section?: string;
   source: string;
   chunk_id?: string;
+  chunk_ids?: string[];
   doc_id?: string;
   chunk_index?: number;
   page?: number;
+  page_end?: number;
   score?: number;
   quote?: string;
   pdf_url?: string;
+  has_table?: boolean;
+  table_markdown?: string;
   image_url?: string;
   image_name?: string;
+  image_urls?: string[];
+  image_names?: string[];
+  image_figures?: string[];
+  image_captions?: string[];
 }
 
 export interface RetrievalStats {
@@ -57,7 +68,9 @@ export interface ChatMessage {
   subgraph?: SubgraphData;
   feedback?: "useful" | "not_useful";
   isStreaming?: boolean;
+  thinkingDone?: boolean;
   statusMessage?: string;
+  statusStage?: string;
 }
 
 export interface ChatHistoryMessage {

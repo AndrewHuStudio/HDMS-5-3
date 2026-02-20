@@ -5,7 +5,9 @@ export interface SSECallbacks {
   onRetrievalStats: (stats: RetrievalStats) => void;
   onGraph: (data: SubgraphData) => void;
   onThinking: (token: string) => void;
+  onThinkingDone?: () => void;
   onAnswer: (token: string) => void;
+  onAnswerReplaced?: (fullAnswer: string, sources?: SourceInfo[]) => void;
   onStatus: (stage: string, message: string) => void;
   onDone: (meta: { model?: string; context_used?: boolean; cached?: boolean }) => void;
   onError: (detail: string) => void;
@@ -36,6 +38,19 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = "";
   let receivedDone = false;
+  let pendingThinkingToken = "";
+  let pendingAnswerToken = "";
+
+  const flushTokenBuffers = () => {
+    if (pendingThinkingToken) {
+      callbacks.onThinking(pendingThinkingToken);
+      pendingThinkingToken = "";
+    }
+    if (pendingAnswerToken) {
+      callbacks.onAnswer(pendingAnswerToken);
+      pendingAnswerToken = "";
+    }
+  };
 
   const processLines = (lines: string[]) => {
     let currentEvent = "";
@@ -47,31 +62,45 @@ export async function streamChat(
           const data = JSON.parse(line.slice(6));
           switch (currentEvent) {
             case "sources":
+              flushTokenBuffers();
               callbacks.onSources(data.sources || []);
               break;
             case "retrieval_stats":
+              flushTokenBuffers();
               callbacks.onRetrievalStats(data);
               break;
             case "graph":
+              flushTokenBuffers();
               callbacks.onGraph({
                 nodes: data.nodes || [],
                 edges: data.edges || [],
               });
               break;
             case "thinking":
-              callbacks.onThinking(data.content || "");
+              pendingThinkingToken += data.content || "";
+              break;
+            case "thinking_done":
+              flushTokenBuffers();
+              callbacks.onThinkingDone?.();
               break;
             case "status":
+              flushTokenBuffers();
               callbacks.onStatus(data.stage || "", data.message || "");
               break;
             case "answer":
-              callbacks.onAnswer(data.content || "");
+              pendingAnswerToken += data.content || "";
+              break;
+            case "answer_replaced":
+              flushTokenBuffers();
+              callbacks.onAnswerReplaced?.(data.content || "", data.sources);
               break;
             case "done":
+              flushTokenBuffers();
               callbacks.onDone(data);
               receivedDone = true;
               break;
             case "error":
+              flushTokenBuffers();
               callbacks.onError(data.detail || "Unknown error");
               receivedDone = true;
               break;
@@ -84,6 +113,7 @@ export async function streamChat(
         currentEvent = "";
       }
     }
+    flushTokenBuffers();
   };
 
   while (true) {

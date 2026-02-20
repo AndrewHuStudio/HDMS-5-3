@@ -2,20 +2,30 @@
 RAG service for intelligent question answering.
 """
 
-import concurrent.futures
 import json
 import re
 import urllib.request
-from urllib.parse import quote
 from typing import List, Dict, Any, Optional, Generator, Tuple
 import logging
-import os
+from pathlib import Path
+import threading
 
 import openai
 
 from core import config as app_config
 from rag.retriever import MultiSourceRetriever
 from rag.cache import get_query_cache
+from rag import prompting as rag_prompting
+from rag import retrieval_helpers as rag_retrieval
+from rag import context_builder as rag_context_builder
+from rag import retrieval_mode as rag_retrieval_mode
+
+from rag.postprocess import citations as pp_citations
+from rag.postprocess import answer as pp_answer
+from rag.postprocess import sources as pp_sources
+from rag.postprocess import markdown as pp_markdown
+from rag.postprocess import images as pp_images
+from rag.postprocess import summary as pp_summary
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +33,124 @@ _QUICK_GREETING_REPLY = "\u60a8\u597d\uff0c\u6211\u5728\u3002\u8bf7\u76f4\u63a5\
 _QUICK_IDENTITY_REPLY = "\u6211\u662fHDMS\u95ee\u7b54\u52a9\u624b\uff0c\u4e13\u6ce8\u7247\u533a\u7ba1\u63a7\u8d44\u6599\u95ee\u7b54\u548c\u5efa\u8bbe\u5408\u89c4\u5efa\u8bae\u3002"
 
 
-# Run retrieval in background so stream output can start immediately.
-_STREAM_RETRIEVE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+_PDF_KEY_RE = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff]+")
+_PDF_INDEX_LOCK = threading.Lock()
+_PDF_AVAILABLE_KEYS: Optional[set[str]] = None
+
+_PAGE_MARKER_RE = re.compile(r"<!--\s*PAGE\s*(\d+)\s*-->", flags=re.IGNORECASE)
+
+
+def _infer_page_range_from_text(text: str) -> Tuple[Optional[int], Optional[int]]:
+    """Infer 1-based page (and optional end page) from embedded markers like `<!-- PAGE 3 -->`."""
+    if not text:
+        return None, None
+    pages: List[int] = []
+    for m in _PAGE_MARKER_RE.finditer(text):
+        try:
+            n = int(m.group(1))
+        except Exception:
+            continue
+        if n > 0:
+            pages.append(n)
+    if not pages:
+        return None, None
+    pages.sort()
+    start = pages[0]
+    end = pages[-1] if pages[-1] != start else None
+    return start, end
+
+
+_PAGE_RANGE_RE = re.compile(r"(\d{1,5})\s*(?:[-~—–至]\s*(\d{1,5}))?")
+
+
+def _parse_page_like(value: object) -> Tuple[Optional[int], Optional[int]]:
+    """Parse common page formats into (page, page_end)."""
+    if value is None:
+        return None, None
+    if isinstance(value, int):
+        return (value if value > 0 else None), None
+    if isinstance(value, float):
+        iv = int(value)
+        return (iv if iv > 0 else None), None
+
+    s = str(value).strip()
+    if not s:
+        return None, None
+
+    # Examples: "第5页", "第5-7页", "5/20", "p5", "5-7"
+    m = _PAGE_RANGE_RE.search(s)
+    if not m:
+        return None, None
+    try:
+        start = int(m.group(1))
+    except Exception:
+        return None, None
+    if start <= 0:
+        return None, None
+    end_raw = m.group(2)
+    if end_raw:
+        try:
+            end = int(end_raw)
+        except Exception:
+            end = None
+        if end is not None and end > start:
+            return start, end
+    return start, None
+
+
+def _find_project_root() -> Path:
+    """Walk up from this file to find the directory containing .env."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / ".env").exists():
+            return parent
+    return Path(__file__).resolve().parent
+
+
+def _normalize_pdf_key(name: str) -> str:
+    base = Path(str(name or "")).name
+    stem = base[:-4] if base.lower().endswith(".pdf") else Path(base).stem
+    return _PDF_KEY_RE.sub("", stem).lower()
+
+
+def _build_pdf_index(project_root: Path) -> set[str]:
+    """
+    Build a set of normalized keys for all PDFs present on disk.
+
+    Used to ensure a strict invariant: any numbered citation source must have a local PDF.
+    """
+    roots = [
+        project_root / "data" / "orginal_input",  # intentionally misspelled
+        project_root / "data" / "original_input",
+        project_root / "data" / "documents",
+        project_root / "data" / "uploads",
+    ]
+    keys: set[str] = set()
+    for root in roots:
+        if not root.is_dir():
+            continue
+        try:
+            for pdf in root.rglob("*.pdf"):
+                if pdf.is_file():
+                    keys.add(_normalize_pdf_key(pdf.name))
+        except Exception:
+            # Skip unreadable roots; caller will simply see fewer available PDFs.
+            continue
+    return keys
+
+
+def _pdf_is_available(file_name: str) -> bool:
+    """Return True if a local PDF matching the given filename is present in data roots."""
+    global _PDF_AVAILABLE_KEYS
+    key = _normalize_pdf_key(file_name)
+    if not key:
+        return False
+
+    if _PDF_AVAILABLE_KEYS is None:
+        with _PDF_INDEX_LOCK:
+            if _PDF_AVAILABLE_KEYS is None:
+                _PDF_AVAILABLE_KEYS = _build_pdf_index(_find_project_root())
+
+    return key in (_PDF_AVAILABLE_KEYS or set())
 
 
 class RAGService:
@@ -51,15 +177,11 @@ class RAGService:
         question: str,
         history: Optional[List[Dict[str, str]]] = None,
         use_retrieval: bool = True,
-        top_k: int = 5
+        top_k: int = app_config.QA_DEFAULT_TOP_K
     ) -> Dict[str, Any]:
         """Answer a question using retrieval-augmented generation."""
         question = (question or "").strip()
-        quick_reply: Optional[str] = None
-        if self._is_brief_greeting(question):
-            quick_reply = _QUICK_GREETING_REPLY
-        elif self._is_identity_query(question):
-            quick_reply = _QUICK_IDENTITY_REPLY
+        quick_reply = self._get_quick_reply(question)
 
         if quick_reply is not None:
             return {
@@ -70,8 +192,16 @@ class RAGService:
             }
 
         effective_use_retrieval = bool(use_retrieval)
-        effective_top_k = max(1, min(top_k, 20))
+        effective_top_k = self._normalize_top_k(top_k)
         retrieval_query = question
+        retrieval_selection = rag_retrieval_mode.resolve_retrieval_selection(
+            use_retrieval=effective_use_retrieval,
+            raw_mode=getattr(app_config, "QA_RETRIEVAL_MODE", "hybrid"),
+            allowed_modes=getattr(app_config, "QA_RETRIEVAL_MODES", getattr(app_config, "STREAM_RETRIEVAL_MODES", set())),
+            default_mode="hybrid",
+            allow_keyword=False,
+        )
+        effective_use_retrieval = retrieval_selection.enabled
 
         cache = get_query_cache()
         history_summary = self._build_history_summary(history)
@@ -88,14 +218,29 @@ class RAGService:
             retrieval_results = self.retriever.retrieve(
                 query=retrieval_query,
                 top_k=effective_top_k,
-                use_vector=True,
-                use_graph=False,
-                use_keyword=False,
+                use_vector=retrieval_selection.use_vector,
+                use_graph=retrieval_selection.use_graph,
+                use_keyword=retrieval_selection.use_keyword,
             )
-            context, sources = self._build_context_and_sources(retrieval_results)
+            context, sources = self._build_context_and_sources(retrieval_results, query=retrieval_query)
 
-        prompt = self._build_prompt(question, context, history)
+        doc_nums = sorted({s["doc_num"] for s in sources if s.get("doc_num")})
+        prompt = self._build_prompt(
+            question,
+            context,
+            history,
+            source_doc_nums=doc_nums,
+            source_doc_required_labels=rag_prompting.build_doc_required_labels(sources),
+        )
         answer = self._generate_answer(prompt)
+
+        answer, sources = self._finalize_answer_and_sources(
+            answer,
+            sources,
+            question=question,
+            inject_summary_with_llm=True,
+            missing_image_log="Answer mentions figures but no image-bearing sources survived filtering.",
+        )
 
         result = {
             "answer": answer,
@@ -112,426 +257,97 @@ class RAGService:
     @staticmethod
     def _is_brief_greeting(question: str) -> bool:
         """Return True when the input is a pure greeting with no real question."""
-        normalized = re.sub(r"[\s!,\.\?~\uFF01\uFF0C\u3002\uFF1F\uFF5E]+", "", (question or "").strip().lower())
-        if not normalized:
-            return False
-
-        return normalized in {
-            "\u4f60\u597d",
-            "\u60a8\u597d",
-            "\u4f60\u597d\u5440",
-            "\u60a8\u597d\u5440",
-            "\u55e8",
-            "\u54c8\u55bd",
-            "\u5728\u5417",
-            "\u5728\u4e0d\u5728",
-            "hello",
-            "hi",
-            "hey",
-        }
+        return rag_prompting.is_brief_greeting(question)
 
     @staticmethod
     def _is_identity_query(question: str) -> bool:
         """Return True when the user asks about assistant identity/capabilities."""
-        normalized = re.sub(r"[\s!,\.\?~\uFF01\uFF0C\u3002\uFF1F\uFF5E]+", "", (question or "").strip().lower())
-        if not normalized:
-            return False
+        return rag_prompting.is_identity_query(question)
 
-        return any(token in normalized for token in {
-            "\u4f60\u662f\u8c01",
-            "\u4f60\u662f\u505a\u4ec0\u4e48\u7684",
-            "\u4f60\u80fd\u505a\u4ec0\u4e48",
-            "\u4f60\u7684\u80fd\u529b",
-            "\u4f60\u4f1a\u4ec0\u4e48",
-            "whoareyou",
-            "whoyouare",
-            "whatcanyoudo",
-            "yourability",
-        })
-
-    @staticmethod
     @staticmethod
     def _build_history_summary(history: Optional[List[Dict[str, str]]]) -> str:
         """Build a compact summary of recent history for cache key differentiation."""
-        if not history:
-            return ""
-        user_msgs = [
-            msg["content"][:50]
-            for msg in history[-4:]
-            if msg.get("role") == "user" and msg.get("content", "").strip()
-        ]
-        return "|".join(user_msgs[-2:])
+        return rag_prompting.build_history_summary(history)
+
+    @classmethod
+    def _get_quick_reply(cls, question: str) -> Optional[str]:
+        if cls._is_brief_greeting(question):
+            return _QUICK_GREETING_REPLY
+        if cls._is_identity_query(question):
+            return _QUICK_IDENTITY_REPLY
+        return None
 
     @staticmethod
-    def _find_matching_bracket(text: str, start: int, opener: str, closer: str) -> int:
-        if start >= len(text) or text[start] != opener:
-            return -1
+    def _apply_citation_remap_to_sources(sources: List[Dict[str, Any]], remap: Dict[str, str]) -> None:
+        if not remap:
+            return
+        for src in sources:
+            old_label = src.get("citation_label", "")
+            if old_label in remap:
+                src["citation_label"] = remap[old_label]
 
-        depth = 1
-        i = start + 1
-        while i < len(text):
-            ch = text[i]
-            if ch == "\\":
-                i += 2
-                continue
-            if ch == opener:
-                depth += 1
-            elif ch == closer:
-                depth -= 1
-                if depth == 0:
-                    return i
-            i += 1
-        return -1
-
-    @staticmethod
-    def _extract_parenthesized(text: str, start: int):
-        if start >= len(text) or text[start] != "(":
-            return None, start
-
-        depth = 1
-        i = start + 1
-        while i < len(text):
-            ch = text[i]
-            if ch == "\\":
-                i += 2
-                continue
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-                if depth == 0:
-                    return text[start + 1:i], i + 1
-            i += 1
-        return None, start + 1
-
-    @staticmethod
-    def _strip_image_ref(ref: str) -> str:
-        cleaned = ref.strip()
-        if not cleaned:
-            return ""
-
-        if cleaned.startswith("<"):
-            end = cleaned.find(">")
-            cleaned = cleaned[1:end] if end != -1 else cleaned[1:]
+    def _finalize_answer_and_sources(
+        self,
+        answer: str,
+        sources: List[Dict[str, Any]],
+        *,
+        question: str,
+        inject_summary_with_llm: bool,
+        missing_image_log: str,
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        valid_labels = {s["citation_label"] for s in sources if s.get("citation_label")} or None
+        processed, remap = pp_answer.postprocess_answer(answer, valid_labels)
+        self._apply_citation_remap_to_sources(sources, remap)
+        sources = pp_sources.filter_sources_to_referenced(
+            sources,
+            referenced_labels=pp_citations.extract_citation_labels(processed),
+            keep_image_sources=True,
+            keep_uncited_document_sources=True,
+        )
+        if ("见图" in (processed or "")) and not any(s.get("image_urls") or s.get("image_url") for s in sources):
+            logger.warning(missing_image_log)
+        if inject_summary_with_llm:
+            processed = self._inject_summary_document_names_with_llm(processed, question, sources)
         else:
-            title_match = re.match(r'^(.*?)(?:\s+["\'][^"\']*["\'])\s*$', cleaned)
-            if title_match:
-                cleaned = title_match.group(1)
+            processed = pp_summary.inject_summary_document_names(processed, sources)
+        return processed, sources
 
-        cleaned = cleaned.strip().strip("\"'")
-        cleaned = cleaned.replace("\\ ", " ").replace("\\\\", "\\")
-        cleaned = cleaned.split("#", 1)[0]
-        cleaned = cleaned.split("?", 1)[0]
-        return cleaned.strip()
+    def _build_context_and_sources(
+        self,
+        retrieval_results: Dict[str, Any],
+        query: str = "",
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        """Build aligned context and citation sources from retrieval results.
 
-    @classmethod
-    def _extract_image_refs(cls, markdown_text: str) -> List[str]:
-        refs: List[str] = []
-        seen = set()
-
-        idx = 0
-        markdown = markdown_text or ""
-        marker = "!["
-        length = len(markdown)
-        while idx < length:
-            marker_idx = markdown.find(marker, idx)
-            if marker_idx == -1:
-                break
-
-            alt_end = cls._find_matching_bracket(markdown, marker_idx + 1, "[", "]")
-            if alt_end == -1:
-                idx = marker_idx + len(marker)
-                continue
-
-            pos = alt_end + 1
-            while pos < length and markdown[pos].isspace():
-                pos += 1
-
-            if pos >= length or markdown[pos] != "(":
-                idx = marker_idx + len(marker)
-                continue
-
-            raw_ref, next_idx = cls._extract_parenthesized(markdown, pos)
-            if raw_ref is None:
-                idx = marker_idx + len(marker)
-                continue
-
-            ref = cls._strip_image_ref(raw_ref)
-            if ref and not ref.lower().startswith(("http://", "https://", "data:")) and ref not in seen:
-                seen.add(ref)
-                refs.append(ref)
-
-            idx = next_idx
-
-        return refs
-
-    @classmethod
-    def _extract_primary_image_ref(cls, text: str) -> Optional[str]:
-        """Extract the first local markdown image reference from chunk text."""
-        refs = cls._extract_image_refs(text)
-        return refs[0] if refs else None
-
-    @classmethod
-    def _rewrite_image_urls(cls, text: str, doc_id: str) -> str:
-        """Replace all local ![alt](path) refs with accessible API URLs.
-
-        Skips refs that are already http/https/data URLs.
-        Returns the rewritten text.
+        Citation labels use N-M format where N is the document number and M is
+        the chunk number within that document.  Graph sources use plain N.
+        Each chunk becomes an independent source entry so the frontend can
+        render fine-grained citations like [1-1|PDF] [1-2|PDF] [2-1|PDF].
         """
-        if not text or not doc_id:
-            return text
+        return rag_context_builder.build_context_and_sources(
+            retrieval_results=retrieval_results,
+            query=query,
+            mongo=getattr(self.retriever, "mongodb", None),
+            ranked_results_contain_relevant_images=self._ranked_results_contain_relevant_images,
+            search_image_chunks_by_text=self._search_image_chunks_by_text,
+            extract_image_refs=pp_images.extract_image_refs,
+            extract_image_figure_meta=pp_images.extract_image_figure_meta,
+            rewrite_image_urls=pp_images.rewrite_image_urls,
+            extract_first_markdown_table=pp_markdown.extract_first_markdown_table,
+            pdf_is_available=_pdf_is_available,
+            parse_page_like=_parse_page_like,
+            infer_page_range_from_text=_infer_page_range_from_text,
+        )
 
-        result_parts: list[str] = []
-        idx = 0
-        markdown = text
-        marker = "!["
-        length = len(markdown)
+    @staticmethod
+    def _ranked_results_contain_relevant_images(results: List[Dict[str, Any]], query: str) -> bool:
+        """Return True when there is at least one image-bearing result likely relevant to the query."""
+        return rag_retrieval.ranked_results_contain_relevant_images(results, query)
 
-        while idx < length:
-            marker_idx = markdown.find(marker, idx)
-            if marker_idx == -1:
-                result_parts.append(markdown[idx:])
-                break
-
-            result_parts.append(markdown[idx:marker_idx])
-
-            alt_end = cls._find_matching_bracket(markdown, marker_idx + 1, "[", "]")
-            if alt_end == -1:
-                result_parts.append(marker)
-                idx = marker_idx + len(marker)
-                continue
-
-            alt_text = markdown[marker_idx + 2:alt_end]
-
-            pos = alt_end + 1
-            while pos < length and markdown[pos].isspace():
-                pos += 1
-
-            if pos >= length or markdown[pos] != "(":
-                result_parts.append(markdown[marker_idx:pos])
-                idx = pos
-                continue
-
-            raw_ref, next_idx = cls._extract_parenthesized(markdown, pos)
-            if raw_ref is None:
-                result_parts.append(markdown[marker_idx:next_idx])
-                idx = next_idx
-                continue
-
-            ref = cls._strip_image_ref(raw_ref)
-
-            if ref and not ref.lower().startswith(("http://", "https://", "data:")):
-                api_url = f"/rag/documents/{doc_id}/image?ref={quote(ref)}"
-                result_parts.append(f"![{alt_text}]({api_url})")
-            else:
-                result_parts.append(markdown[marker_idx:next_idx])
-
-            idx = next_idx
-
-        return "".join(result_parts)
-
-    def _build_context_and_sources(self, retrieval_results: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]]]:
-        """Build aligned context and citation sources from retrieval results."""
-        ranked_results = retrieval_results.get("fused_results") or []
-        if not ranked_results:
-            ranked_results = [
-                *retrieval_results.get("vector_results", []),
-                *retrieval_results.get("graph_results", []),
-                *retrieval_results.get("keyword_results", []),
-            ]
-
-        seen_doc_keys: set[str] = set()
-        seen_graph_keys: set[str] = set()
-        doc_blocks: List[str] = []
-        graph_blocks: List[str] = []
-        sources: List[Dict[str, Any]] = []
-        idx = 1
-
-        for result in ranked_results:
-            source_type = str(result.get("source") or "")
-            result_type = str(result.get("type") or "")
-
-            # Skip visualization-only entries (subgraph, concept_match)
-            if result_type in ("subgraph", "concept_match"):
-                continue
-
-            is_graph = source_type == "graph" or result_type in {"plot_info", "indicator_search"}
-
-            if is_graph:
-                if result_type == "plot_info":
-                    plot_name = str(result.get("plot_name") or "").strip()
-                    if not plot_name or plot_name in seen_graph_keys:
-                        continue
-                    seen_graph_keys.add(plot_name)
-
-                    data = result.get("data", {}) or {}
-                    lines = [f"[{idx}] 地块 {plot_name}："]
-                    indicators = data.get("indicators", []) if isinstance(data, dict) else []
-                    if indicators:
-                        lines.append("指标：")
-                        for ind in indicators[:6]:
-                            if ind.get("indicator"):
-                                lines.append(f"  - {ind['indicator']}: {ind.get('value', '未指定')}")
-
-                    graph_blocks.append("\n".join(lines))
-                    sources.append({
-                        "type": "plot",
-                        "name": plot_name,
-                        "section": None,
-                        "source": "knowledge_graph",
-                        "chunk_id": None,
-                        "doc_id": None,
-                        "chunk_index": None,
-                        "page": None,
-                        "page_end": None,
-                        "score": None,
-                        "quote": None,
-                        "pdf_url": None,
-                        "image_url": None,
-                        "image_name": None,
-                    })
-                    idx += 1
-                    continue
-
-                indicator = str(result.get("indicator") or "").strip()
-                graph_key = f"indicator:{indicator}" if indicator else f"graph:{len(graph_blocks)}"
-                if graph_key in seen_graph_keys:
-                    continue
-                seen_graph_keys.add(graph_key)
-
-                data = result.get("data", [])
-                lines = [f"[{idx}] 指标查询：{indicator or '图谱结果'}"]
-                if isinstance(data, list):
-                    for item in data[:5]:
-                        if not isinstance(item, dict):
-                            continue
-                        plot_name = item.get("plot_name")
-                        value = item.get("value")
-                        if plot_name:
-                            lines.append(f"  - {plot_name}: {value if value is not None else '未指定'}")
-
-                graph_blocks.append("\n".join(lines))
-                sources.append({
-                    "type": "graph",
-                    "name": indicator or "图谱结果",
-                    "section": None,
-                    "source": "knowledge_graph",
-                    "chunk_id": None,
-                    "doc_id": None,
-                    "chunk_index": None,
-                    "page": None,
-                    "page_end": None,
-                    "score": None,
-                    "quote": None,
-                    "pdf_url": None,
-                    "image_url": None,
-                    "image_name": None,
-                })
-                idx += 1
-                continue
-
-            text = str(result.get("text", "") or "").strip()
-            if not text:
-                continue
-
-            chunk_id = str(result.get("id") or result.get("_id") or "").strip()
-            dedup_key = chunk_id or text[:120]
-            if dedup_key in seen_doc_keys:
-                continue
-            seen_doc_keys.add(dedup_key)
-
-            metadata = result.get("metadata", {}) or {}
-            doc_id = result.get("doc_id")
-            file_name = metadata.get("file_name") or result.get("file_name") or "未知文档"
-            section = metadata.get("section_title") or result.get("section_title") or ""
-
-            raw_page = (
-                metadata.get("page")
-                or metadata.get("page_number")
-                or metadata.get("page_num")
-                or result.get("page")
-                or result.get("page_number")
-            )
-            page: Optional[int] = None
-            if isinstance(raw_page, int):
-                page = raw_page
-            elif isinstance(raw_page, str) and raw_page.isdigit():
-                page = int(raw_page)
-
-            raw_page_end = (
-                metadata.get("page_end")
-                or result.get("page_end")
-            )
-            page_end: Optional[int] = None
-            if isinstance(raw_page_end, int):
-                page_end = raw_page_end
-            elif isinstance(raw_page_end, str) and raw_page_end.isdigit():
-                page_end = int(raw_page_end)
-
-            raw_score = result.get("weighted_score", result.get("score"))
-            score: Optional[float] = None
-            if isinstance(raw_score, (int, float)):
-                score = float(raw_score)
-
-            quote_text = text[:260] + ("..." if len(text) > 260 else "")
-            pdf_url = (
-                metadata.get("pdf_url")
-                or metadata.get("pdf_path")
-                or metadata.get("source_pdf_url")
-                or metadata.get("source_pdf_path")
-                or (f"/rag/documents/{doc_id}/pdf" if doc_id else None)
-            )
-
-            image_refs = self._extract_image_refs(text)
-            image_ref = image_refs[0] if image_refs else None
-            image_url = f"/rag/documents/{doc_id}/image?ref={quote(image_ref)}" if (doc_id and image_ref) else None
-            image_name = image_ref.split("/")[-1] if image_ref else None
-
-            # Rewrite local image paths to accessible API URLs before truncation
-            rewritten_text = self._rewrite_image_urls(text, doc_id) if doc_id else text
-            display_text = rewritten_text[:1200]
-            if len(rewritten_text) > 1200:
-                display_text += "..."
-            section_label = f" - {section}" if section else ""
-
-            doc_blocks.append(
-                f"[{idx}] 来源：{file_name}{section_label}\n{display_text}"
-            )
-
-            source_name = "vector_search" if source_type == "vector" else (
-                "keyword_search" if source_type == "keyword" else "document_search"
-            )
-
-            sources.append({
-                "type": "document",
-                "name": file_name,
-                "section": section,
-                "source": source_name,
-                "chunk_id": chunk_id or None,
-                "doc_id": doc_id,
-                "chunk_index": result.get("chunk_index"),
-                "page": page,
-                "page_end": page_end,
-                "score": score,
-                "quote": quote_text,
-                "pdf_url": pdf_url,
-                "image_url": image_url,
-                "image_name": image_name,
-            })
-            idx += 1
-
-        context = ""
-        if doc_blocks:
-            context += "## 相关文档内容\n\n"
-            context += "\n\n".join(doc_blocks)
-            context += "\n\n"
-
-        if graph_blocks:
-            context += "## 知识图谱信息\n\n"
-            context += "\n\n".join(graph_blocks)
-            context += "\n\n"
-
-        return context, sources
+    def _search_image_chunks_by_text(self, query: str, limit: int = 2) -> List[Dict[str, Any]]:
+        """Best-effort Mongo text search over chunks, restricted to has_image=True."""
+        mongo = getattr(self.retriever, "mongodb", None)
+        return rag_retrieval.search_image_chunks_by_text(mongo=mongo, query=query, limit=limit)
 
     def _build_prompt(
         self,
@@ -539,115 +355,139 @@ class RAGService:
         context: str,
         history: Optional[List[Dict[str, str]]] = None,
         retrieval_hint: Optional[str] = None,
+        source_doc_nums: Optional[List[int]] = None,
+        source_doc_required_labels: Optional[Dict[int, str]] = None,
     ) -> List[Dict[str, str]]:
         """Build prompt for LLM generation."""
-        messages: List[Dict[str, str]] = []
-
-        system_prompt = (
-            "作为数字化管控软件，基于上传片区管控资料智能问答，辅助空间优化，提供建设建议与合规核查"
+        return rag_prompting.build_prompt(
+            question=question,
+            context=context,
+            history=history,
+            retrieval_hint=retrieval_hint,
+            source_doc_nums=source_doc_nums,
+            source_doc_required_labels=source_doc_required_labels,
         )
-
-        messages.append({"role": "system", "content": system_prompt})
-
-        if history:
-            for msg in history[-8:]:
-                messages.append({
-                    "role": msg.get("role", "user"),
-                    "content": msg.get("content", ""),
-                })
-
-        user_message = ""
-
-        if retrieval_hint:
-            user_message += retrieval_hint + "\n\n"
-
-        if context:
-            user_message += f"参考资料：\n\n{context}\n\n---\n\n"
-        elif not retrieval_hint:
-            user_message += "当前未检索到直接相关的参考资料，请运用你的专业知识回答。\n\n"
-
-        user_message += f"问题：{question}"
-        messages.append({"role": "user", "content": user_message})
-
-        return messages
-
-    def _build_followup_prompt(
-        self,
-        question: str,
-        context: str,
-        draft_answer: str,
-        history: Optional[List[Dict[str, str]]] = None,
-    ) -> List[Dict[str, str]]:
-        """Build continuation prompt after retrieval is ready."""
-        messages = self._build_prompt(
-            question,
-            context,
-            history,
-            retrieval_hint=(
-                "你已先输出了一个简短开场。请在已有输出基础上继续作答，"
-                "不要重复已说过的句子，重点补充基于资料的结论与依据。"
-            ),
-        )
-
-        if draft_answer.strip():
-            messages.append({"role": "assistant", "content": draft_answer})
-            messages.append({
-                "role": "user",
-                "content": (
-                    "请继续完善答案。要求：\n"
-                    "1) 优先依据参考资料给出结论；\n"
-                    "2) 有依据时按[1][2]引用；\n"
-                    "3) 若资料不足，明确不确定性并给出审慎建议；\n"
-                    "4) 不要重复已经输出过的开场。"
-                ),
-            })
-
-        return messages
 
     @staticmethod
     def _strip_think_tags(text: str) -> str:
         """Remove <think>...</think> blocks from text (for non-streaming)."""
         return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
+    @staticmethod
+    def _normalize_top_k(top_k: int) -> int:
+        min_k = max(1, int(getattr(app_config, "QA_TOP_K_MIN", 1)))
+        max_k = max(min_k, int(getattr(app_config, "QA_TOP_K_MAX", 20)))
+        try:
+            parsed_top_k = int(top_k)
+        except (TypeError, ValueError):
+            parsed_top_k = int(getattr(app_config, "QA_DEFAULT_TOP_K", min_k))
+        return max(min_k, min(parsed_top_k, max_k))
+
+    def _generate_summary_reasons_with_llm(
+        self,
+        question: str,
+        summary_items: List[Dict[str, Any]],
+    ) -> Optional[str]:
+        """Use LLM to rewrite one overall summary line."""
+        if not app_config.SUMMARY_REASON_LLM_REWRITE:
+            return None
+        if not summary_items:
+            return None
+
+        materials = [
+            {
+                "name": item["name"],
+                "section": item["section"] or None,
+                "page": item["page"] if isinstance(item.get("page"), int) else None,
+            }
+            for item in summary_items
+        ]
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是资料综述润色助手。只能基于给定事实改写，不得新增事实，不要模板化套话。"
+                    "输出严格JSON：{\"summary\":\"...\"}。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": question,
+                        "materials": materials,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        raw = self._generate_answer(messages)
+        obj = pp_summary.extract_first_json_object(raw)
+        if obj:
+            summary = str(obj.get("summary") or "").strip().replace("\n", " ")
+            summary = re.sub(r"\s{2,}", " ", summary)[:120]
+            if summary:
+                return summary
+
+        # Fallback for providers that return plain text instead of JSON.
+        fallback = re.sub(r"^AI总结[:：]\s*", "", str(raw or "").strip())
+        fallback = re.sub(r"```(?:json)?|```", "", fallback, flags=re.IGNORECASE).strip()
+        fallback = re.sub(r"\s{2,}", " ", fallback)
+        fallback = re.sub(r"^\{[\s\S]*\"summary\"\s*:\s*\"(.*?)\"[\s\S]*\}$", r"\1", fallback)
+        fallback = fallback.strip().strip("\"' ")
+        return fallback[:120] if fallback else None
+
+    def _inject_summary_document_names_with_llm(
+        self,
+        answer: str,
+        question: str,
+        sources: List[Dict[str, Any]],
+    ) -> str:
+        if not answer:
+            return answer
+        if "涉及资料" in answer or "检索资料清单" in answer:
+            return answer
+
+        summary_items = pp_summary.collect_document_summary_items(sources)
+        if not summary_items:
+            return answer
+        llm_summary = self._generate_summary_reasons_with_llm(question, summary_items)
+        return pp_summary.inject_summary_document_names(
+            answer,
+            sources,
+            llm_summary_override=llm_summary,
+        )
+
     def _generate_answer(self, messages: List[Dict[str, str]]) -> str:
-        """
-        Generate answer using LLM.
-
-        Args:
-            messages: List of messages
-
-        Returns:
-            Generated answer
-        """
+        """Generate answer using LLM (non-streaming)."""
         endpoint = f"{self.llm_base_url}/chat/completions"
         payload = {
             "model": self.llm_model,
             "messages": messages,
-            "temperature": 0.3,
-            "max_tokens": 4096
+            "temperature": app_config.QA_LLM_TEMPERATURE,
+            "max_tokens": app_config.QA_LLM_MAX_TOKENS,
         }
 
         data = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.llm_api_key}"
+            "Authorization": f"Bearer {self.llm_api_key}",
         }
 
         req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
 
         try:
-            with urllib.request.urlopen(req, timeout=60) as response:
+            with urllib.request.urlopen(req, timeout=app_config.QA_LLM_TIMEOUT_SECONDS) as response:
                 body = response.read().decode("utf-8")
                 result = json.loads(body)
 
             answer = result["choices"][0]["message"]["content"]
-            # Strip <think> tags that reasoning models may include
+            # Strip <think> tags that reasoning models may include.
             answer = self._strip_think_tags(answer)
-            logger.info(f"Generated answer: {len(answer)} characters")
+            logger.info("Generated answer: %s characters", len(answer))
             return answer
-
         except Exception as e:
-            logger.error(f"Failed to generate answer: {e}")
+            logger.error("Failed to generate answer: %s", e)
             return f"抱歉，生成答案时出错：{str(e)}"
 
     def _stream_chat_completion(
@@ -665,13 +505,14 @@ class RAGService:
         stream = client.chat.completions.create(
             model=self.llm_model,
             messages=messages,
-            temperature=0.3,
+            temperature=app_config.QA_LLM_TEMPERATURE,
             max_tokens=max_tokens,
             stream=True,
         )
 
         in_think_tag = False
         has_reasoning_content = False
+        thinking_done_emitted = False
 
         for chunk in stream:
             choice = chunk.choices[0] if chunk.choices else None
@@ -705,8 +546,14 @@ class RAGService:
                         if idx > 0:
                             yield ("thinking", {"content": content[:idx]})
                         in_think_tag = False
+                        if not thinking_done_emitted:
+                            thinking_done_emitted = True
+                            yield ("thinking_done", {})
                         content = content[idx + 8:]
             elif content and has_reasoning_content:
+                if not thinking_done_emitted:
+                    thinking_done_emitted = True
+                    yield ("thinking_done", {})
                 yield ("answer", {"content": content})
 
     def answer_question_stream(
@@ -714,15 +561,16 @@ class RAGService:
         question: str,
         history: Optional[List[Dict[str, str]]] = None,
         use_retrieval: bool = True,
-        top_k: int = 5
+        top_k: int = app_config.QA_DEFAULT_TOP_K
     ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
         """
-        Stream answer with immediate response + parallel retrieval.
+        Stream answer with retrieval-first UX:
+        - Retrieve sources first, then stream the grounded answer.
 
         Flow:
-        1) Start a short prelude answer immediately.
-        2) Run retrieval in parallel.
-        3) Continue with retrieval-grounded completion.
+        1) Send status event so frontend knows we're working.
+        2) Run retrieval (if enabled), then emit sources/stats/graph events.
+        3) Stream one grounded answer (thinking + answer) to avoid early answer tokens.
         """
         import time
 
@@ -730,11 +578,8 @@ class RAGService:
         stream_start = time.perf_counter()
         logger.info("[TIMING] Stream started for question: %s...", question[:50])
 
-        quick_reply: Optional[str] = None
-        if self._is_brief_greeting(question):
-            quick_reply = _QUICK_GREETING_REPLY
-        elif self._is_identity_query(question):
-            quick_reply = _QUICK_IDENTITY_REPLY
+        # --- Quick replies (greetings / identity) ---
+        quick_reply = self._get_quick_reply(question)
 
         if quick_reply is not None:
             yield ("sources", {"sources": []})
@@ -746,25 +591,32 @@ class RAGService:
             })
             return
 
+        # --- Retrieval config ---
         effective_use_retrieval = bool(use_retrieval)
-        effective_top_k = max(1, min(top_k, 20))
+        effective_top_k = self._normalize_top_k(top_k)
         retrieval_query = question
 
-        retrieval_mode = (app_config.STREAM_RETRIEVAL_MODE or "vector").strip().lower()
-        if retrieval_mode not in {"vector", "vector_only", "vector_keyword", "keyword_vector", "hybrid", "all", "none", "off", "disabled"}:
-            retrieval_mode = "vector"
-
-        if retrieval_mode in {"none", "off", "disabled"}:
-            effective_use_retrieval = False
+        stream_mode_raw = (getattr(app_config, "STREAM_RETRIEVAL_MODE", "") or "").strip().lower()
+        if not stream_mode_raw:
+            stream_mode_raw = getattr(app_config, "QA_RETRIEVAL_MODE", "hybrid")
+        retrieval_selection = rag_retrieval_mode.resolve_retrieval_selection(
+            use_retrieval=effective_use_retrieval,
+            raw_mode=stream_mode_raw,
+            allowed_modes=getattr(app_config, "QA_RETRIEVAL_MODES", getattr(app_config, "STREAM_RETRIEVAL_MODES", set())),
+            default_mode="hybrid",
+            allow_keyword=False,
+        )
+        effective_use_retrieval = retrieval_selection.enabled
+        retrieval_mode = retrieval_selection.mode
 
         stream_top_k_cap = max(1, int(app_config.STREAM_RETRIEVAL_TOP_K_CAP))
         stream_top_k = max(1, min(effective_top_k, stream_top_k_cap))
 
-        use_vector = retrieval_mode in {"vector", "vector_only", "vector_keyword", "keyword_vector", "hybrid", "all"}
-        use_graph = retrieval_mode in {"hybrid", "all"}
-        # Keep _keyword_search in codebase, but disable keyword retrieval in QA flow for now.
-        use_keyword = False
+        use_vector = retrieval_selection.use_vector
+        use_graph = retrieval_selection.use_graph
+        use_keyword = retrieval_selection.use_keyword
 
+        # --- Cache check ---
         cache = get_query_cache()
         history_summary = self._build_history_summary(history)
         if effective_use_retrieval and app_config.QUERY_CACHE_ENABLED:
@@ -789,114 +641,147 @@ class RAGService:
                 })
                 return
 
-        retrieval_future: Optional[concurrent.futures.Future] = None
-        retrieval_results: Optional[Dict[str, Any]] = None
+        # --- Retrieval phase ---
         context = ""
         sources: List[Dict[str, Any]] = []
-
-        if effective_use_retrieval:
-            retrieval_kwargs = {
-                "query": retrieval_query,
-                "top_k": stream_top_k,
-                "use_vector": use_vector,
-                "use_graph": use_graph,
-                "use_keyword": use_keyword,
-                "enable_rerank": app_config.STREAM_ENABLE_RERANK,
-            }
-            retrieval_future = _STREAM_RETRIEVE_EXECUTOR.submit(self.retriever.retrieve, **retrieval_kwargs)
+        retrieval_results: Optional[Dict[str, Any]] = None
 
         full_answer_parts: List[str] = []
-        prelude_prompt = self._build_prompt(
-            question,
-            context="",
-            history=history,
-            retrieval_hint=(
-                "\u8bf7\u76f4\u63a5\u56de\u7b54\u7528\u6237\u95ee\u9898\u8981\u70b9\uff0c\u4e0d\u8981\u5bd2\u6684\uff0c\u4e0d\u8981\u53cd\u95ee\uff0c\u4e0d\u8981\u63cf\u8ff0\u68c0\u7d22\u8fc7\u7a0b\u3002"
-                ""
-                if effective_use_retrieval
-                else None
-            ),
-        )
 
         try:
-            llm_start = time.perf_counter()
-            first_token_received = False
-            for event_type, payload in self._stream_chat_completion(prelude_prompt, max_tokens=220):
-                if event_type == "answer":
-                    full_answer_parts.append(payload.get("content", ""))
-                    if not first_token_received:
-                        first_token_received = True
-                        elapsed = (time.perf_counter() - llm_start) * 1000
-                        total_elapsed = (time.perf_counter() - stream_start) * 1000
-                        logger.info(
-                            "[TIMING] First prelude token received after %.2fms (total %.2fms)",
-                            elapsed,
-                            total_elapsed,
-                        )
-                yield (event_type, payload)
+            if effective_use_retrieval:
+                yield ("status", {"stage": "understanding", "message": "正在理解你的问题..."})
+                yield ("status", {"stage": "retrieving", "message": "正在检索相关资料..."})
+                retrieval_start = time.perf_counter()
+                try:
+                    retrieval_results = self.retriever.retrieve(
+                        query=retrieval_query,
+                        top_k=stream_top_k,
+                        use_vector=use_vector,
+                        use_graph=use_graph,
+                        use_keyword=use_keyword,
+                        enable_rerank=app_config.STREAM_ENABLE_RERANK,
+                    )
+                except Exception as e:
+                    logger.error("Retrieval failed: %s", e)
+                    yield ("error", {"detail": f"Retrieval failed: {e}"})
+                    return
+
+                retrieval_elapsed = (time.perf_counter() - retrieval_start) * 1000
+                logger.info("[TIMING] Retrieval completed in %.2fms", retrieval_elapsed)
+
+                context, sources = self._build_context_and_sources(retrieval_results or {}, query=retrieval_query)
+                yield ("sources", {"sources": sources})
+
+                stats_source = retrieval_results or {}
+                yield ("retrieval_stats", {
+                    "vector_count": len(stats_source.get("vector_results", [])),
+                    "graph_count": len(stats_source.get("graph_results", [])),
+                    "keyword_count": len(stats_source.get("keyword_results", [])),
+                    "fused_count": len(stats_source.get("fused_results", [])),
+                    "reranked": bool(stats_source.get("reranked", False)),
+                    "cached": False,
+                    "weights": self.retriever._compute_weights(retrieval_query),
+                    "timed_out": False,
+                    "mode": retrieval_mode,
+                    "top_k": stream_top_k,
+                })
+
+                if retrieval_results is not None:
+                    for gr in retrieval_results.get("graph_results", []):
+                        if gr.get("type") == "subgraph" and gr.get("data"):
+                            subgraph_data = gr["data"]
+                            if subgraph_data.get("nodes"):
+                                yield ("graph", {
+                                    "nodes": subgraph_data["nodes"],
+                                    "edges": subgraph_data.get("edges", []),
+                                })
+                            break
+
+                yield ("status", {"stage": "reasoning", "message": "正在进行智能研判..."})
+                doc_nums = sorted({s["doc_num"] for s in sources if s.get("doc_num")})
+                summary_preface = pp_summary.inject_summary_document_names("", sources).strip()
+                summary_preface_attached = False
+                prompt = self._build_prompt(
+                    question,
+                    context,
+                    history,
+                    retrieval_hint=None,
+                    source_doc_nums=doc_nums,
+                    source_doc_required_labels=rag_prompting.build_doc_required_labels(sources),
+                )
+
+                llm_start = time.perf_counter()
+                first_token_received = False
+                for event_type, payload in self._stream_chat_completion(
+                    prompt,
+                    max_tokens=app_config.QA_STREAM_MAX_TOKENS,
+                ):
+                    if event_type == "answer":
+                        answer_piece = payload.get("content", "")
+                        if summary_preface and not summary_preface_attached:
+                            answer_piece = f"{summary_preface}\n\n{answer_piece}"
+                            payload = {"content": answer_piece}
+                            summary_preface_attached = True
+                        full_answer_parts.append(answer_piece)
+                        if not first_token_received and answer_piece:
+                            first_token_received = True
+                            elapsed = (time.perf_counter() - llm_start) * 1000
+                            total_elapsed = (time.perf_counter() - stream_start) * 1000
+                            logger.info(
+                                "[TIMING] First token after %.2fms (total %.2fms)",
+                                elapsed,
+                                total_elapsed,
+                            )
+                    yield (event_type, payload)
+            else:
+                # No retrieval: keep existing behavior (sources first, then answer).
+                yield ("sources", {"sources": []})
+                yield ("status", {"stage": "understanding", "message": "正在理解你的问题..."})
+                yield ("status", {"stage": "reasoning", "message": "正在进行智能研判..."})
+                prompt = self._build_prompt(question, context, history, retrieval_hint=None)
+
+                llm_start = time.perf_counter()
+                first_token_received = False
+                for event_type, payload in self._stream_chat_completion(
+                    prompt,
+                    max_tokens=app_config.QA_STREAM_MAX_TOKENS,
+                ):
+                    if event_type == "answer":
+                        answer_piece = payload.get("content", "")
+                        full_answer_parts.append(answer_piece)
+                        if not first_token_received and answer_piece:
+                            first_token_received = True
+                            elapsed = (time.perf_counter() - llm_start) * 1000
+                            total_elapsed = (time.perf_counter() - stream_start) * 1000
+                            logger.info(
+                                "[TIMING] First token after %.2fms (total %.2fms)",
+                                elapsed,
+                                total_elapsed,
+                            )
+                    yield (event_type, payload)
         except Exception as e:
-            logger.error("Prelude streaming failed: %s", e)
+            logger.error("LLM streaming failed: %s", e)
             yield ("error", {"detail": str(e)})
             return
 
-        prelude_answer = "".join(full_answer_parts)
-
-        if effective_use_retrieval and retrieval_future is not None:
-            retrieval_start = time.perf_counter()
-            try:
-                retrieval_results = retrieval_future.result()
-                retrieval_elapsed = (time.perf_counter() - retrieval_start) * 1000
-                logger.info("[TIMING] Retrieval joined in %.2fms", retrieval_elapsed)
-                if retrieval_results is not None:
-                    context, sources = self._build_context_and_sources(retrieval_results)
-            except Exception as e:
-                logger.error("Retrieval failed: %s", e)
-                yield ("error", {"detail": f"Retrieval failed: {e}"})
-                return
-
-            yield ("sources", {"sources": sources})
-            stats_source = retrieval_results or {}
-            yield ("retrieval_stats", {
-                "vector_count": len(stats_source.get("vector_results", [])),
-                "graph_count": len(stats_source.get("graph_results", [])),
-                "keyword_count": len(stats_source.get("keyword_results", [])),
-                "fused_count": len(stats_source.get("fused_results", [])),
-                "reranked": bool(stats_source.get("reranked", False)),
-                "cached": False,
-                "weights": self.retriever._compute_weights(retrieval_query),
-                "timed_out": False,
-                "mode": retrieval_mode,
-                "top_k": stream_top_k,
-            })
-
-            if retrieval_results is not None:
-                for gr in retrieval_results.get("graph_results", []):
-                    if gr.get("type") == "subgraph" and gr.get("data"):
-                        subgraph_data = gr["data"]
-                        if subgraph_data.get("nodes"):
-                            yield ("graph", {
-                                "nodes": subgraph_data["nodes"],
-                                "edges": subgraph_data.get("edges", []),
-                            })
-                        break
-
-            followup_prompt = self._build_followup_prompt(
+        # --- Post-process & emit corrected answer ---
+        full_answer = "".join(full_answer_parts)
+        processed = full_answer
+        if full_answer:
+            processed, sources = self._finalize_answer_and_sources(
+                full_answer,
+                sources,
                 question=question,
-                context=context,
-                draft_answer=prelude_answer,
-                history=history,
+                inject_summary_with_llm=False,
+                missing_image_log="Streamed answer mentions figures but no image-bearing sources survived filtering.",
             )
-            try:
-                for event_type, payload in self._stream_chat_completion(followup_prompt, max_tokens=4096):
-                    if event_type == "answer":
-                        full_answer_parts.append(payload.get("content", ""))
-                    yield (event_type, payload)
-            except Exception as e:
-                logger.error("Follow-up streaming failed: %s", e)
-                yield ("error", {"detail": str(e)})
-                return
-        else:
-            yield ("sources", {"sources": []})
+
+            if processed != full_answer:
+                # Bundle sources into answer_replaced so the frontend can
+                # atomically update both content and citation labels,
+                # avoiding race conditions between separate SSE events.
+                yield ("answer_replaced", {"content": processed, "sources": sources})
 
         yield ("done", {
             "model": self.llm_model,
@@ -904,11 +789,11 @@ class RAGService:
             "cached": False,
         })
 
+        # --- Cache result ---
         if effective_use_retrieval and app_config.QUERY_CACHE_ENABLED:
-            full_answer = "".join(full_answer_parts)
-            if full_answer:
+            if processed:
                 cache.put(question, {
-                    "answer": full_answer,
+                    "answer": processed,
                     "sources": sources,
                     "context_used": bool(context),
                     "model": self.llm_model,
@@ -916,7 +801,7 @@ class RAGService:
 
     def _extract_sources(self, retrieval_results: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Backwards-compatible wrapper for source extraction."""
-        _, sources = self._build_context_and_sources(retrieval_results)
+        _, sources = self._build_context_and_sources(retrieval_results, query="")
         return sources
 
 
@@ -931,12 +816,11 @@ def create_rag_service(retriever: MultiSourceRetriever) -> RAGService:
     Returns:
         Configured RAGService instance
     """
-    base_url = os.getenv("HDMS_BASE_URL", "https://api.apiyi.com")
-    api_key = os.getenv("HDMS_API_KEY", "")
-    model = os.getenv("HDMS_MODEL", "deepseek-v3")
+    base_url = app_config.HDMS_BASE_URL
+    api_key = app_config.HDMS_API_KEY
+    model = app_config.HDMS_QA_MODEL
 
     if not api_key:
         raise ValueError("HDMS_API_KEY environment variable is required")
 
     return RAGService(retriever, base_url, api_key, model)
-

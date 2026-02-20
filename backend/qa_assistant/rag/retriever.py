@@ -206,16 +206,31 @@ class MultiSourceRetriever:
                     })
                     seed_names.append(plot_name)
 
-        # 2. Indicator keyword search (existing logic, kept)
+        # 2. Indicator keyword search (new schema: indicators are plot properties)
+        # Map Chinese keywords to property keys on 地块 nodes
+        indicator_prop_map = {
+            "容积率": "far",
+            "建筑限高": "height_limit",
+            "建筑密度": "building_density",
+            "绿地率": "green_ratio",
+            "退线": "setback",
+            "停车": "parking_spaces",
+        }
         for indicator in INDICATOR_KEYWORDS:
             if indicator in query:
+                prop_key = indicator_prop_map.get(indicator)
+                if not prop_key:
+                    continue
                 cypher = """
-                MATCH (p:Plot)-[r:HAS_INDICATOR]->(i:Indicator {name: $indicator})
-                RETURN p.name as plot_name, r.value as value
+                MATCH (p:地块)
+                WHERE p[$prop_key] IS NOT NULL
+                OPTIONAL MATCH (p)-[:PART_OF]->(d:片区)
+                RETURN p.name as plot_name, p[$prop_key] as value,
+                       collect(distinct d.name) as districts
                 LIMIT 5
                 """
                 indicator_results = self.graph_store.query_graph(
-                    cypher, {"indicator": indicator}
+                    cypher, {"prop_key": prop_key}
                 )
                 if indicator_results:
                     results.append({
@@ -458,12 +473,36 @@ class MultiSourceRetriever:
                     seen_graph_keys.add(plot_name)
                     data = result.get("data", {}) or {}
                     lines = [f"[{idx}] 地块 {plot_name}："]
-                    indicators = data.get("indicators", []) if isinstance(data, dict) else []
-                    if indicators:
+                    # New schema: indicators are direct properties on the node
+                    props = data.get("properties", {}) if isinstance(data, dict) else {}
+                    prop_labels = {
+                        "far": "容积率",
+                        "height_limit": "建筑限高",
+                        "setback": "退线距离",
+                        "building_density": "建筑密度",
+                        "green_ratio": "绿地率",
+                        "parking_spaces": "停车位",
+                        "area": "面积",
+                        "land_use": "用地性质",
+                    }
+                    indicator_lines = []
+                    for key, label in prop_labels.items():
+                        val = props.get(key)
+                        if val is not None and val != "":
+                            indicator_lines.append(f"  - {label}: {val}")
+                    if indicator_lines:
                         lines.append("指标：")
-                        for ind in indicators[:6]:
-                            if ind.get("indicator"):
-                                lines.append(f"  - {ind['indicator']}: {ind.get('value', '未指定')}")
+                        lines.extend(indicator_lines[:8])
+                    # Districts
+                    districts = data.get("districts", [])
+                    if districts:
+                        lines.append(f"所属片区：{', '.join(str(d) for d in districts if d)}")
+                    # Related rules
+                    rules = data.get("rules", [])
+                    if rules:
+                        rule_names = [r.get("name", "") for r in rules if r and r.get("name")]
+                        if rule_names:
+                            lines.append(f"相关规则：{', '.join(rule_names[:4])}")
                     graph_blocks.append("\n".join(lines))
                     idx += 1
                     continue

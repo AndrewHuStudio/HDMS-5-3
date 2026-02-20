@@ -58,11 +58,7 @@ def _select_best_doc(candidates: list[dict[str, Any]], markdown_name: str) -> Op
 
 def _create_pipeline() -> IngestionPipeline:
     """Create ingestion pipeline with all dependencies."""
-    if not db_manager._initialized:
-        raise HTTPException(
-            status_code=503,
-            detail="Database connections not initialized"
-        )
+    _ensure_db_ready()
 
     chunker = DocumentChunker(chunk_size=800, overlap=100)
     embedder = create_embedding_service()
@@ -76,6 +72,19 @@ def _create_pipeline() -> IngestionPipeline:
         chunker=chunker,
         neo4j_client=db_manager.neo4j
     )
+
+
+def _ensure_db_ready() -> None:
+    """Best-effort lazy database init for requests that arrive before startup init is ready."""
+    if db_manager._initialized:
+        return
+    try:
+        db_manager.ensure_initialized(
+            max_retries=config.DB_INIT_MAX_RETRIES,
+            retry_delay_seconds=config.DB_INIT_RETRY_DELAY_SECONDS,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Database connections not initialized: {exc}") from exc
 
 
 @router.post("/document", response_model=IngestionResponse)
@@ -192,11 +201,7 @@ async def get_status() -> IngestionStatus:
     Returns counts of vectors and documents in the databases.
     """
     try:
-        if not db_manager._initialized:
-            raise HTTPException(
-                status_code=503,
-                detail="Database connections not initialized"
-            )
+        _ensure_db_ready()
 
         # Get Milvus stats
         milvus_stats = db_manager.milvus.get_collection_stats(
@@ -223,11 +228,7 @@ async def report_ingestion(request: IngestionReportRequest) -> IngestionReportRe
     """
     Report ingestion status for documents in an OCR output directory.
     """
-    if not db_manager._initialized:
-        raise HTTPException(
-            status_code=503,
-            detail="Database connections not initialized"
-        )
+    _ensure_db_ready()
 
     output_path = Path(request.ocr_output_dir)
     if not output_path.exists() or not output_path.is_dir():
@@ -237,6 +238,7 @@ async def report_ingestion(request: IngestionReportRequest) -> IngestionReportRe
         )
 
     # Build document directory list
+    # Support both flat (ocr_output/<doc>/) and nested (ocr_output/<category>/<doc>/) structures
     if request.category:
         cat_dir = output_path / request.category
         if not cat_dir.exists() or not cat_dir.is_dir():
@@ -247,9 +249,16 @@ async def report_ingestion(request: IngestionReportRequest) -> IngestionReportRe
         doc_dirs = [p for p in cat_dir.iterdir() if p.is_dir()]
     else:
         doc_dirs = []
-        for cat_dir in output_path.iterdir():
-            if cat_dir.is_dir():
-                doc_dirs.extend([p for p in cat_dir.iterdir() if p.is_dir()])
+        for sub_dir in output_path.iterdir():
+            if not sub_dir.is_dir():
+                continue
+            # If sub_dir contains .md files directly, it's a doc dir (flat structure)
+            has_md = any(f.suffix == ".md" for f in sub_dir.iterdir() if f.is_file())
+            if has_md:
+                doc_dirs.append(sub_dir)
+            else:
+                # Otherwise treat as category dir (nested structure)
+                doc_dirs.extend([p for p in sub_dir.iterdir() if p.is_dir()])
 
     # Load existing documents from MongoDB
     existing_docs = db_manager.mongodb.find_by_query(
@@ -304,7 +313,7 @@ async def report_ingestion(request: IngestionReportRequest) -> IngestionReportRe
             continue
         if not meta_files:
             documents.append(DocumentIngestionState(
-                file_name=md_files[0].name,
+                file_name=md_files[0].stem,
                 markdown_path=str(md_files[0].resolve()),
                 status="failed",
                 ingest_error="missing metadata file"
@@ -313,6 +322,7 @@ async def report_ingestion(request: IngestionReportRequest) -> IngestionReportRe
             continue
 
         markdown_path = str(md_files[0].resolve())
+        doc_stem = md_files[0].stem
         doc = docs_by_path.get(markdown_path)
 
         if not doc:
@@ -326,7 +336,7 @@ async def report_ingestion(request: IngestionReportRequest) -> IngestionReportRe
                 doc = _select_best_doc(docs_by_hash.get(content_hash, []), md_files[0].name)
         if not doc:
             documents.append(DocumentIngestionState(
-                file_name=md_files[0].name,
+                file_name=doc_stem,
                 markdown_path=markdown_path,
                 status="not_started"
             ))
@@ -339,7 +349,7 @@ async def report_ingestion(request: IngestionReportRequest) -> IngestionReportRe
         counts[status] = counts.get(status, 0) + 1
 
         documents.append(DocumentIngestionState(
-            file_name=doc.get("file_name") or md_files[0].name,
+            file_name=doc_stem,
             markdown_path=markdown_path,
             status=status,
             doc_id=str(doc.get("_id")),

@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import bisect
 import http.client
 import json
 import logging
@@ -59,9 +60,9 @@ def _project_root() -> Path:
     env_path = _find_env_file()
     if env_path:
         return env_path.parent.resolve()
-    # data_process/ocr_process/core.py -> data_process -> repo root
+    # data_process/ocr_process/core.py -> ocr_process -> data_process -> repo root
     try:
-        return Path(__file__).resolve().parents[3]
+        return Path(__file__).resolve().parents[2]
     except Exception:
         return Path.cwd().resolve()
 
@@ -272,6 +273,10 @@ def _inject_page_markers(md_text: str, page_texts: list[str]) -> str:
 
     Page 1 always gets a marker at the very top.
 
+    Signatures are searched **forward-only** from the last matched
+    position so that table-of-contents entries (which repeat chapter
+    titles early in the document) do not steal later page markers.
+
     If a signature cannot be located (OCR differences, tables, etc.)
     we skip that boundary; the chunker will inherit the last-known page.
     """
@@ -283,6 +288,18 @@ def _inject_page_markers(md_text: str, page_texts: list[str]) -> str:
     insert_map: dict[int, int] = {0: 1}  # page 1 at top
 
     md_norm = _normalize_for_match(md_text)
+
+    # Pre-compute cumulative normalized lengths per line for fast offset->line mapping
+    line_norm_lengths: list[int] = [len(_normalize_for_match(line)) for line in lines]
+    cum_norm: list[int] = []
+    _acc = 0
+    for _lnl in line_norm_lengths:
+        cum_norm.append(_acc)
+        _acc += _lnl
+
+    # Forward-only search: track where the previous page boundary was found
+    search_from = 0        # character offset in md_norm
+    last_matched_line = 0  # line index of last matched boundary
 
     for page_idx in range(1, len(page_texts)):
         raw = page_texts[page_idx]
@@ -296,22 +313,24 @@ def _inject_page_markers(md_text: str, page_texts: list[str]) -> str:
             sig = norm_page[:sig_len]
             if len(sig) < 10:
                 break
-            pos = md_norm.find(sig)
+            pos = md_norm.find(sig, search_from)
             if pos == -1:
                 continue
 
-            # Map character position back to line number
-            char_count = 0
-            target_line = 0
-            for li, line in enumerate(lines):
-                line_norm_len = len(_normalize_for_match(line))
-                if char_count + line_norm_len > pos:
-                    target_line = li
-                    break
-                char_count += line_norm_len
+            # Map character position back to line number (binary search on cum_norm)
+            target_line = bisect.bisect_right(cum_norm, pos) - 1
+            if target_line < 0:
+                target_line = 0
 
-            if target_line > 0 and target_line not in insert_map:
+            # Ensure monotonically increasing line numbers
+            if target_line <= last_matched_line and last_matched_line > 0:
+                target_line = last_matched_line + 1
+
+            if target_line > 0 and target_line < len(lines) and target_line not in insert_map:
                 insert_map[target_line] = page_idx + 1  # 1-based page
+                # Advance search_from past this match for the next page
+                search_from = pos + len(sig)
+                last_matched_line = target_line
             break
 
     if len(insert_map) <= 1 and len(page_texts) > 1:
@@ -965,6 +984,7 @@ def get_summary() -> dict:
                     "category": category,
                     "markdown_path": str(md),
                     "pages": pages,
+                    "images": doc_images,
                     "updated_at": meta.get("updated_at")
                     or time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(md.stat().st_mtime)),
                 }

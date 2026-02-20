@@ -28,20 +28,17 @@ class GraphQueryService:
         return self.neo4j.query(cypher, parameters)
 
     def get_plot_info(self, plot_name: str) -> Dict[str, Any]:
-        """Get comprehensive information about a plot."""
+        """Get comprehensive information about a plot (new schema: Chinese labels, properties on node)."""
         cypher = """
-        MATCH (p:Plot {name: $plot_name})
-        OPTIONAL MATCH (p)-[r:HAS_INDICATOR]->(i:Indicator)
-        OPTIONAL MATCH (p)-[:HAS_FUNCTION]->(f:Function)
-        OPTIONAL MATCH (p)-[:HAS_REQUIREMENT]->(req:Requirement)
-        OPTIONAL MATCH (p)-[:LOCATED_IN]->(loc:Location)
-        OPTIONAL MATCH (p)-[:PART_OF]->(d:District)
+        MATCH (p:地块 {name: $plot_name})
+        OPTIONAL MATCH (p)-[:PART_OF]->(d:片区)
+        OPTIONAL MATCH (p)-[:LOCATED_IN]->(loc)
+        OPTIONAL MATCH (rule)-[:APPLIES_TO]->(p)
         RETURN p,
-               collect(distinct {indicator: i.name, value: r.value}) as indicators,
-               collect(distinct f.name) as functions,
-               collect(distinct req.description) as requirements,
+               properties(p) as properties,
+               collect(distinct d.name) as districts,
                collect(distinct loc.name) as locations,
-               collect(distinct d.name) as districts
+               collect(distinct {name: rule.name, label: labels(rule)[0]}) as rules
         """
         results = self.neo4j.query(cypher, {"plot_name": plot_name})
         if results:
@@ -56,8 +53,8 @@ class GraphQueryService:
         self, query_text: str, limit: int = 8
     ) -> List[Dict[str, Any]]:
         """
-        Full-text search across concept nodes (Indicator, Standard,
-        DesignGuideline, ResearchFinding, PerformanceDimension, SpatialElement).
+        Full-text search across all 6 entity types
+        (片区, 地块, 空间要素, 法规, 标准, 导则).
 
         Returns list of matched nodes with scores.
         """
@@ -192,39 +189,51 @@ class GraphQueryService:
             return {"nodes": [], "edges": []}
 
     # ------------------------------------------------------------------
-    # Indicator network query
+    # Indicator query (new schema: indicators are plot properties)
     # ------------------------------------------------------------------
 
     def get_indicator_network(self, indicator_name: str) -> Dict[str, Any]:
         """
-        Get an indicator and all its connections for visualization.
+        Query plots that have a specific indicator property and their
+        related regulations/standards/guidelines.
 
-        Returns subgraph centered on the indicator node.
+        indicator_name should be the property key on 地块 nodes, e.g.
+        "far", "height_limit", "setback", "building_density", "green_ratio".
+
+        Returns dict with plots list and related rules.
         """
+        # Map Chinese indicator keywords to property keys
+        keyword_to_prop = {
+            "容积率": "far",
+            "建筑限高": "height_limit",
+            "限高": "height_limit",
+            "退线": "setback",
+            "退线距离": "setback",
+            "建筑密度": "building_density",
+            "绿地率": "green_ratio",
+            "停车位": "parking_spaces",
+        }
+        prop_key = keyword_to_prop.get(indicator_name, indicator_name)
+
         cypher = """
-        MATCH (i:Indicator {name: $name})
-        OPTIONAL MATCH (i)<-[r1:DEFINES]-(s:Standard)
-        OPTIONAL MATCH (i)-[r2:CATEGORIZED_UNDER]->(pd:PerformanceDimension)
-        OPTIONAL MATCH (i)<-[r3:SUPPORTS]-(rf:ResearchFinding)
-        OPTIONAL MATCH (i)-[r4:HAS_THRESHOLD]->(tv:ThresholdValue)
-        OPTIONAL MATCH (p:Plot)-[r5:HAS_INDICATOR]->(i)
-        WITH i,
-             collect(DISTINCT s) as standards,
-             collect(DISTINCT pd) as dimensions,
-             collect(DISTINCT rf) as findings,
-             collect(DISTINCT tv) as thresholds,
-             collect(DISTINCT {plot: p, rel: r5}) as plot_rels
-        RETURN i,
-               [s IN standards | {name: s.name, label: 'Standard'}] as standards,
-               [pd IN dimensions | {name: pd.name, label: 'PerformanceDimension'}] as dimensions,
-               [rf IN findings | {name: rf.name, label: 'ResearchFinding'}] as findings,
-               [tv IN thresholds | {name: tv.name, label: 'ThresholdValue'}] as thresholds,
-               [pr IN plot_rels[..5] | {name: pr.plot.name, value: pr.rel.value}] as plot_values
+        MATCH (p:地块)
+        WHERE p[$prop_key] IS NOT NULL
+        OPTIONAL MATCH (p)-[:PART_OF]->(d:片区)
+        OPTIONAL MATCH (rule)-[:APPLIES_TO]->(p)
+        RETURN p.name as plot_name,
+               p[$prop_key] as value,
+               collect(distinct d.name) as districts,
+               collect(distinct {name: rule.name, label: labels(rule)[0]}) as rules
+        ORDER BY p.name
+        LIMIT 20
         """
         try:
-            results = self.neo4j.query(cypher, {"name": indicator_name})
-            if results:
-                return results[0]
+            results = self.neo4j.query(cypher, {"prop_key": prop_key})
+            return {
+                "indicator": indicator_name,
+                "property_key": prop_key,
+                "plots": results or [],
+            }
         except Exception as e:
             logger.warning(f"Indicator network query failed: {e}")
         return {}

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(findstr /r \"keyword\\\\|setKeyword\\\\|search\\\\|highlightAll\\\\|changeHighlightAll\\\\|matchCase\\\\|wholeWords\\\\|RenderSearchProps\" node_modules@react-pdf-viewersearchlibcjssearch.js)",
+      "Bash(powershell.exe -Command \"wsl --set-default Ubuntu\")",
+      "Bash(powershell.exe -Command \"Stop-Process -Name ''Docker Desktop'' -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Write-Output ''[OK] Docker stopped''\")"
+    ]
+  }
+}

@@ -217,7 +217,8 @@ nginx -c nginx/hdms.conf
 - `CORS_ORIGINS`
 - `HDMS_BASE_URL` - OpenAI 兼容 API Base
 - `HDMS_API_KEY`
-- `HDMS_MODEL`
+- `HDMS_QA_MODEL` - QA 问答模型（默认 deepseek-r1）
+- `HDMS_KG_MODEL` - 知识图谱构建/融合用模型（默认 deepseek-v3）
 - `HDMS_VISION_MODEL`
 - `EMBEDDING_MODEL` - 向量嵌入模型（默认 text-embedding-3-large）
 - `MILVUS_HOST` / `MILVUS_PORT` - Milvus 连接

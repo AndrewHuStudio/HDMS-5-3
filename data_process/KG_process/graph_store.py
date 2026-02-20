@@ -15,28 +15,50 @@ import os
 from ..core.database.neo4j_client import Neo4jClient
 from .extraction_prompts import (
     get_extraction_prompt,
-    get_document_context_prompt,
-    classify_topic_from_path,
-    TOPIC_CONFIG,
+    get_document_analysis_prompt,
 )
+from .entity_filter import create_entity_filter, create_importance_scorer
 
 logger = logging.getLogger(__name__)
 
-# Valid entity types for the expanded schema
+# Valid entity types (Chinese labels) - 6 types
 VALID_ENTITY_TYPES = {
-    "Topic", "Standard", "PerformanceDimension", "Indicator",
-    "ThresholdValue", "EvaluationMethod", "DesignGuideline",
-    "SpatialElement", "ResearchFinding", "Plot", "District",
-    "Function", "Requirement", "Location", "Document",
+    # 空间层级类
+    "片区", "地块", "空间要素",
+
+    # 管控规则类
+    "法规", "标准", "导则",
 }
 
-# Valid relationship types
+# Entity type mapping (Chinese to English for reference)
+ENTITY_TYPE_MAPPING = {
+    "片区": "District",
+    "地块": "Plot",
+    "空间要素": "SpatialElement",
+    "法规": "Regulation",
+    "标准": "Standard",
+    "导则": "Guideline",
+}
+
+# Valid relationship types (English) - 8 types
 VALID_RELATIONSHIP_TYPES = {
-    "DEFINES", "EVALUATES", "HAS_THRESHOLD", "CATEGORIZED_UNDER",
-    "MEASURED_BY", "PRESCRIBES", "APPLIES_TO", "SUPPORTS",
-    "DERIVED_FROM", "INFLUENCES", "HAS_INDICATOR", "HAS_FUNCTION",
-    "HAS_REQUIREMENT", "LOCATED_IN", "PART_OF", "ADJACENT_TO",
-    "BELONGS_TO", "CONTAINS",
+    # 层级关系
+    "PART_OF",      # 地块属于片区
+    "CONTAINS",     # 片区包含地块
+
+    # 空间关系
+    "ADJACENT_TO",  # 地块相邻
+    "LOCATED_IN",   # 空间要素位于地块
+
+    # 管控关系
+    "APPLIES_TO",   # 法规/标准/导则适用于片区/地块
+    "REFERENCES",   # 标准引用法规、导则引用标准
+
+    # 来源关系
+    "DERIVED_FROM", # 实体来源于文档
+
+    # 属性关系（可选）
+    "HAS_PROPERTY", # 地块有属性
 }
 
 
@@ -48,19 +70,30 @@ class GraphStoreService:
         neo4j_client: Neo4jClient,
         llm_base_url: str,
         llm_api_key: str,
-        llm_model: str
+        llm_model: str,
+        enable_entity_filtering: bool = True,
+        enable_importance_scoring: bool = True,
+        min_importance_score: float = 1.0,
     ):
         self.neo4j = neo4j_client
         self.llm_base_url = llm_base_url.rstrip("/")
         self.llm_api_key = llm_api_key
         self.llm_model = llm_model
 
+        # Entity filtering
+        self.enable_entity_filtering = enable_entity_filtering
+        self.enable_importance_scoring = enable_importance_scoring
+        self.min_importance_score = min_importance_score
+
+        self.entity_filter = create_entity_filter() if enable_entity_filtering else None
+        self.importance_scorer = create_importance_scorer() if enable_importance_scoring else None
+
     # ------------------------------------------------------------------
     # LLM call helper
     # ------------------------------------------------------------------
 
     def _call_llm(self, prompt: str, max_tokens: int = 3000) -> str:
-        """Call LLM API and return the response content string."""
+        """Call LLM API with retry logic and return the response content string."""
         endpoint = f"{self.llm_base_url}/chat/completions"
         payload = {
             "model": self.llm_model,
@@ -75,101 +108,97 @@ class GraphStoreService:
             "Authorization": f"Bearer {self.llm_api_key}",
         }
 
-        req = urllib.request.Request(
-            endpoint, data=data, headers=headers, method="POST"
-        )
-
-        with urllib.request.urlopen(req, timeout=90) as response:
-            body = response.read().decode("utf-8")
-            result = json.loads(body)
-
-        return result["choices"][0]["message"]["content"]
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                req = urllib.request.Request(
+                    endpoint, data=data, headers=headers, method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=90) as response:
+                    body = response.read().decode("utf-8")
+                    result = json.loads(body)
+                return result["choices"][0]["message"]["content"]
+            except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as e:
+                wait = 2 ** attempt
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"LLM call attempt {attempt + 1}/{max_retries} failed: {e}, "
+                        f"retrying in {wait}s..."
+                    )
+                    import time
+                    time.sleep(wait)
+                else:
+                    logger.error(f"LLM call failed after {max_retries} attempts: {e}")
+                    raise
 
     def _parse_json_response(self, content: str) -> Dict[str, Any]:
-        """Extract JSON object from LLM response text."""
+        """Extract and validate JSON object from LLM response text."""
         json_match = re.search(r'\{[\s\S]*\}', content)
         if json_match:
             try:
-                return json.loads(json_match.group())
+                data = json.loads(json_match.group())
+                if not isinstance(data, dict):
+                    logger.warning("LLM response JSON is not a dict, returning empty")
+                    return {}
+                # Normalize expected keys to lists
+                if "entities" in data and not isinstance(data["entities"], list):
+                    logger.warning("LLM 'entities' is not a list, discarding")
+                    data["entities"] = []
+                if "relationships" in data and not isinstance(data["relationships"], list):
+                    logger.warning("LLM 'relationships' is not a list, discarding")
+                    data["relationships"] = []
+                return data
             except json.JSONDecodeError:
                 logger.warning("Failed to parse JSON from LLM response")
         return {}
 
     # ------------------------------------------------------------------
-    # Topic classification
+    # Document-level analysis (first pass)
     # ------------------------------------------------------------------
 
-    def _classify_topic(
+    def _analyze_document(
         self,
-        chunks: List[Dict[str, Any]],
-        doc_id: str,
-        file_name: str = ""
-    ) -> str:
-        """
-        Classify which topic a document belongs to.
-
-        Tries file path first, then falls back to content-based hints.
-        """
-        # Try path-based classification
-        for source in [file_name, doc_id]:
-            if source:
-                topic = classify_topic_from_path(source)
-                if topic != "课题5":  # non-default match
-                    return topic
-                if "课题5" in source:
-                    return "课题5"
-
-        # Content-based hints from first chunk
-        if chunks:
-            first_text = chunks[0].get("text", "")[:500]
-            topic_hints = {
-                "课题1": ["界定", "分类标准", "评估与优化指标标准", "征求意见稿"],
-                "课题2": ["热舒适", "辐射温度", "深度学习", "UTCI", "热环境"],
-                "课题3": ["设计导则", "空间形态", "功能混合", "全时利用", "近地空间"],
-                "课题4": ["安全感", "归属感", "人本性能", "眼动", "EEG", "情绪健康"],
-                "课题5": ["DU0", "地块开发", "实施手册", "超级总部", "后海"],
-            }
-            for topic_key, hints in topic_hints.items():
-                if any(h in first_text for h in hints):
-                    return topic_key
-
-        return "课题5"
-
-    # ------------------------------------------------------------------
-    # Document-level context extraction (first pass)
-    # ------------------------------------------------------------------
-
-    def _extract_document_context(
-        self,
-        first_chunks: List[Dict[str, Any]],
-        topic: str
+        first_chunks: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        First pass: extract document-level anchor entities.
+        First pass: analyze document to identify type, district, project, and core concepts.
 
-        Returns dict with doc_type, anchor_entities, main_dimensions.
+        Returns dict with document_type, district, project, anchor_entities, indicator_categories.
         """
         combined_text = " ".join(
             c.get("text", "")[:1000] for c in first_chunks[:3]
         )
         if not combined_text.strip():
-            return {"doc_type": "unknown", "anchor_entities": [], "main_dimensions": []}
+            return {
+                "document_type": "其他",
+                "district": None,
+                "project": None,
+                "anchor_entities": [],
+                "indicator_categories": []
+            }
 
-        prompt = get_document_context_prompt(combined_text)
+        prompt = get_document_analysis_prompt(combined_text)
 
         try:
-            content = self._call_llm(prompt, max_tokens=1000)
+            content = self._call_llm(prompt, max_tokens=1500)
             result = self._parse_json_response(content)
             if result:
                 logger.info(
-                    f"Document context: type={result.get('doc_type')}, "
+                    f"Document analysis: type={result.get('document_type')}, "
+                    f"district={result.get('district')}, "
                     f"anchors={len(result.get('anchor_entities', []))}"
                 )
                 return result
         except Exception as e:
-            logger.warning(f"Document context extraction failed: {e}")
+            logger.warning(f"Document analysis failed: {e}")
 
-        return {"doc_type": "unknown", "anchor_entities": [], "main_dimensions": []}
+        return {
+            "document_type": "其他",
+            "district": None,
+            "project": None,
+            "anchor_entities": [],
+            "indicator_categories": []
+        }
 
     # ------------------------------------------------------------------
     # Chunk-level entity extraction (second pass)
@@ -178,19 +207,22 @@ class GraphStoreService:
     def extract_entities_and_relations(
         self,
         text: str,
-        doc_id: str,
-        topic: str = "课题5",
+        doc_type: str = "其他",
+        district: str = "未知",
+        project: str = "未知",
         is_table: bool = False,
         doc_context: str = ""
     ) -> Dict[str, Any]:
         """
         Use LLM to extract entities and relationships from text.
 
-        Uses topic-aware prompts for better extraction quality.
+        Uses universal extraction prompt with document context.
         """
         prompt = get_extraction_prompt(
-            topic=topic,
             text=text,
+            doc_type=doc_type,
+            district=district,
+            project=project,
             is_table=is_table,
             doc_context=doc_context,
         )
@@ -212,13 +244,14 @@ class GraphStoreService:
 
         except Exception as e:
             logger.error(f"Failed to extract entities: {e}")
-            # Fall back to regex for 课题5
-            if topic == "课题5":
+            # Fall back to regex for plot-based documents
+            if "地块" in text or "DU" in text:
                 return self.extract_with_regex(text)
             return {"entities": [], "relationships": []}
 
     def _validate_extracted(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and filter extracted entities and relationships."""
+        # Step 1: Basic validation (type and name)
         valid_entities = []
         for entity in data.get("entities", []):
             etype = entity.get("type", "")
@@ -227,6 +260,18 @@ class GraphStoreService:
                 valid_entities.append(entity)
             elif etype and ename:
                 logger.debug(f"Filtered invalid entity: type={etype}, name={ename}")
+
+        # Step 2: Apply entity filter (heuristic rules)
+        if self.enable_entity_filtering and self.entity_filter:
+            valid_entities = self.entity_filter.filter_entities(valid_entities)
+
+        # Step 3: Update importance scorer frequency
+        if self.enable_importance_scoring and self.importance_scorer:
+            self.importance_scorer.update_frequency(valid_entities)
+
+        # Step 4: Filter by importance score (optional, can be done later)
+        # Note: We don't filter by importance here to allow frequency accumulation
+        # Importance filtering is better done after all documents are processed
 
         valid_rels = []
         for rel in data.get("relationships", []):
@@ -242,7 +287,8 @@ class GraphStoreService:
         """
         Use regex patterns to extract entities as fallback.
 
-        Expanded to cover more patterns beyond just plots and basic indicators.
+        Focuses on plot-based information extraction.
+        Indicator values are stored as plot node properties (not separate entities).
         """
         entities = []
         relationships = []
@@ -250,31 +296,30 @@ class GraphStoreService:
         # Plot IDs (DU01-01, DU02-03, etc.)
         plot_pattern = r'DU\d{2}-\d{2}(?:-\d+)?'
         plots = set(re.findall(plot_pattern, text))
-        for plot in plots:
-            entities.append({"type": "Plot", "name": plot, "properties": {}})
 
-        # Indicator values with numeric extraction
-        indicators = {
-            "容积率": r'容积率[：:\s]*[≤<=]*\s*([\d.]+)',
-            "建筑限高": r'(?:建筑)?限高[：:\s]*[≤<=]*\s*([\d.]+)\s*[米m]?',
-            "建筑密度": r'建筑密度[：:\s]*[≤<=]*\s*([\d.]+)\s*%?',
-            "绿地率": r'绿地率[：:\s]*[≥>=]*\s*([\d.]+)\s*%?',
-            "退线距离": r'退线[：:\s]*[≥>=]*\s*([\d.]+)\s*[米m]?',
-            "停车位": r'停车[位泊][：:\s]*[≥>=]*\s*(\d+)',
+        # Indicator regex patterns -> property key mapping
+        indicator_patterns = {
+            "far": r'容积率[：:\s]*[≤<=]*\s*([\d.]+)',
+            "height_limit": r'(?:建筑)?限高[：:\s]*[≤<=]*\s*([\d.]+)\s*[米m]?',
+            "building_density": r'建筑密度[：:\s]*[≤<=]*\s*([\d.]+)\s*%?',
+            "green_ratio": r'绿地率[：:\s]*[≥>=]*\s*([\d.]+)\s*%?',
+            "setback": r'退线[：:\s]*[≥>=]*\s*([\d.]+)\s*[米m]?',
+            "parking_spaces": r'停车[位泊][：:\s]*[≥>=]*\s*(\d+)',
         }
 
-        for indicator_name, pattern in indicators.items():
-            matches = re.findall(pattern, text)
-            if matches:
-                entities.append({"type": "Indicator", "name": indicator_name, "properties": {}})
-                for plot in plots:
-                    for value in matches:
-                        relationships.append({
-                            "from": plot, "from_type": "Plot",
-                            "to": indicator_name, "to_type": "Indicator",
-                            "type": "HAS_INDICATOR",
-                            "properties": {"value": value},
-                        })
+        # Extract indicator values and attach as plot properties
+        extracted_props: Dict[str, str] = {}
+        for prop_key, pattern in indicator_patterns.items():
+            match = re.search(pattern, text)
+            if match:
+                extracted_props[prop_key] = match.group(1)
+
+        for plot in plots:
+            entities.append({
+                "type": "地块",
+                "name": plot,
+                "properties": dict(extracted_props),
+            })
 
         # District names
         district_patterns = [
@@ -286,19 +331,13 @@ class GraphStoreService:
             match = re.search(dp, text)
             if match:
                 district_name = match.group(1)
-                entities.append({"type": "District", "name": district_name, "properties": {}})
+                entities.append({"type": "片区", "name": district_name, "properties": {}})
                 for plot in plots:
                     relationships.append({
-                        "from": plot, "from_type": "Plot",
-                        "to": district_name, "to_type": "District",
+                        "from": plot, "from_type": "地块",
+                        "to": district_name, "to_type": "片区",
                         "type": "PART_OF", "properties": {},
                     })
-
-        # Performance dimensions
-        dimensions = ["环境性能", "安全性能", "健康性能", "人本性能", "使用效能"]
-        for dim in dimensions:
-            if dim in text:
-                entities.append({"type": "PerformanceDimension", "name": dim, "properties": {}})
 
         logger.info(f"Regex extracted {len(entities)} entities and {len(relationships)} relationships")
         return {"entities": entities, "relationships": relationships}
@@ -318,122 +357,165 @@ class GraphStoreService:
         """
         Build knowledge graph from document chunks using two-pass extraction.
 
-        Pass 1: Document-level context extraction (anchor entities)
-        Pass 2: Chunk-level entity/relationship extraction with topic-aware prompts
+        Pass 1: Document-level analysis (document type, district, project, anchor entities)
+        Pass 2: Chunk-level entity/relationship extraction with universal prompts
         """
+        # Track progress in Neo4j so batch runs can resume after interruption.
+        # This is intentionally lightweight: we don't delete on retry; the build
+        # is designed to be idempotent via find/merge patterns.
+        doc_node_id: Optional[str] = None
+        try:
+            doc_node_id = self.neo4j.merge_document(
+                doc_id=doc_id,
+                file_name=file_name,
+                file_path=file_path,
+                kg_status="in_progress",
+            )
+        except Exception as e:
+            # Don't block graph building if document tracking fails.
+            logger.warning(f"Failed to create/merge Document node for {doc_id}: {e}")
+
         all_entities: Dict[str, str] = {}  # entity_key -> node_id
         all_relationships: List[Dict] = []
 
-        # --- Step 1: Classify topic ---
-        topic = self._classify_topic(chunks, doc_id, file_path or file_name)
-        logger.info(f"Document {doc_id} classified as {topic}")
+        try:
 
-        # --- Step 2: Ensure Topic node exists ---
-        topic_config = TOPIC_CONFIG.get(topic, {})
-        topic_name = topic_config.get("name", topic)
-        topic_node_id = self._ensure_node("Topic", topic_name, {"code": topic})
+            # --- Step 1: Analyze document ---
+            doc_analysis = self._analyze_document(chunks[:3]) if use_llm and chunks else {}
+            doc_type = doc_analysis.get("document_type", "其他")
+            district = doc_analysis.get("district")
+            project = doc_analysis.get("project")
 
-        # --- Step 3: Create Document node ---
-        existing_doc = self.neo4j.find_node_by_property("Document", "doc_id", doc_id)
-        if existing_doc:
-            doc_node_id = existing_doc["id"]
-        else:
-            doc_node_id = self.neo4j.create_node("Document", {
+            logger.info(
+                f"Document {doc_id} analyzed: type={doc_type}, "
+                f"district={district}, project={project}"
+            )
+
+            # --- Step 2: Create anchor entities from document analysis ---
+            doc_context_str = ""
+            if use_llm and doc_analysis:
+                doc_context_str = json.dumps(doc_analysis, ensure_ascii=False)
+
+                # Create anchor entities (片区, 地块, 法规, 标准, 导则, 空间要素)
+                for anchor in doc_analysis.get("anchor_entities", []):
+                    atype = anchor.get("type", "")
+                    aname = anchor.get("name", "")
+                    if atype in VALID_ENTITY_TYPES and aname:
+                        props = anchor.get("properties", {})
+                        # Add source tracking
+                        props["source_doc"] = file_name
+                        anchor_id = self._ensure_node(atype, aname, props)
+                        entity_key = f"{atype}:{aname}"
+                        all_entities[entity_key] = anchor_id
+
+            # --- Step 3: Second pass - chunk-level extraction ---
+            for i, chunk in enumerate(chunks):
+                text = chunk.get("text", "")
+                if not text or len(text.strip()) < 20:
+                    continue
+
+                is_table = chunk.get("has_table", False)
+
+                if use_llm:
+                    extracted = self.extract_entities_and_relations(
+                        text=text,
+                        doc_type=doc_type,
+                        district=district or "未知",
+                        project=project or "未知",
+                        is_table=is_table,
+                        doc_context=doc_context_str,
+                    )
+                else:
+                    extracted = self.extract_with_regex(text)
+
+                # Create entity nodes
+                for entity in extracted.get("entities", []):
+                    entity_key = f"{entity['type']}:{entity['name']}"
+
+                    if entity_key not in all_entities:
+                        props = entity.get("properties", {})
+                        # Add source tracking
+                        props["source_doc"] = file_name
+                        entity_id = self._ensure_node(entity["type"], entity["name"], props)
+                        all_entities[entity_key] = entity_id
+
+                # Collect relationships for batch merge
+                rel_batch: Dict[str, list] = {}  # rel_type -> list of {from_id, to_id, properties}
+                for rel in extracted.get("relationships", []):
+                    from_key = f"{rel['from_type']}:{rel['from']}"
+                    to_key = f"{rel['to_type']}:{rel['to']}"
+
+                    if from_key in all_entities and to_key in all_entities:
+                        rtype = rel["type"]
+                        rel_batch.setdefault(rtype, []).append({
+                            "from_id": all_entities[from_key],
+                            "to_id": all_entities[to_key],
+                            "properties": rel.get("properties", {}),
+                        })
+                        all_relationships.append(rel)
+
+                # Flush batch per relationship type
+                for rtype, rels in rel_batch.items():
+                    self.neo4j.batch_merge_relationships(rtype, rels)
+
+                if (i + 1) % 10 == 0:
+                    logger.info(f"Processed {i + 1}/{len(chunks)} chunks for {doc_id}")
+
+            # Link Entities -> Document so we can resume/skip and optionally delete a doc subgraph.
+            if doc_node_id and all_entities:
+                try:
+                    rel_rows = [
+                        {"from_id": eid, "to_id": doc_node_id, "properties": {}}
+                        for eid in set(all_entities.values())
+                    ]
+                    self.neo4j.batch_merge_relationships("DERIVED_FROM", rel_rows)
+                except Exception as e:
+                    logger.warning(f"Failed to link Document to entities for {doc_id}: {e}")
+
+            logger.info(
+                f"Built graph for {doc_id} (type={doc_type}, district={district}): "
+                f"{len(all_entities)} entities, {len(all_relationships)} relationships"
+            )
+
+            if doc_node_id:
+                try:
+                    self.neo4j.merge_document(
+                        doc_id=doc_id,
+                        file_name=file_name,
+                        file_path=file_path,
+                        kg_status="success",
+                        extra_props={
+                            "kg_entities_count": len(all_entities),
+                            "kg_relationships_count": len(all_relationships),
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to mark Document as success for {doc_id}: {e}")
+
+            return {
                 "doc_id": doc_id,
                 "file_name": file_name,
-                "topic": topic,
-            })
+                "document_type": doc_type,
+                "district": district,
+                "project": project,
+                "entities_count": len(all_entities),
+                "relationships_count": len(all_relationships),
+                "status": "success",
+            }
 
-        # Link Document -> Topic
-        self.neo4j.create_relationship(doc_node_id, topic_node_id, "BELONGS_TO")
-
-        # --- Step 4: First pass - document-level context ---
-        doc_context_str = ""
-        if use_llm and chunks:
-            doc_context = self._extract_document_context(chunks[:3], topic)
-            doc_context_str = json.dumps(doc_context, ensure_ascii=False)
-
-            # Create anchor entities from document context
-            for anchor in doc_context.get("anchor_entities", []):
-                atype = anchor.get("type", "")
-                aname = anchor.get("name", "")
-                if atype in VALID_ENTITY_TYPES and aname:
-                    props = anchor.get("properties", {})
-                    anchor_id = self._ensure_node(atype, aname, props)
-                    entity_key = f"{atype}:{aname}"
-                    all_entities[entity_key] = anchor_id
-                    self.neo4j.create_relationship(doc_node_id, anchor_id, "CONTAINS")
-
-            # Create PerformanceDimension nodes from main_dimensions
-            for dim_name in doc_context.get("main_dimensions", []):
-                if dim_name:
-                    dim_id = self._ensure_node("PerformanceDimension", dim_name)
-                    entity_key = f"PerformanceDimension:{dim_name}"
-                    all_entities[entity_key] = dim_id
-
-        # --- Step 5: Second pass - chunk-level extraction ---
-        for i, chunk in enumerate(chunks):
-            text = chunk.get("text", "")
-            if not text or len(text.strip()) < 20:
-                continue
-
-            is_table = chunk.get("has_table", False)
-
-            if use_llm:
-                extracted = self.extract_entities_and_relations(
-                    text=text,
-                    doc_id=doc_id,
-                    topic=topic,
-                    is_table=is_table,
-                    doc_context=doc_context_str,
-                )
-            else:
-                extracted = self.extract_with_regex(text)
-
-            # Create entity nodes
-            for entity in extracted.get("entities", []):
-                entity_key = f"{entity['type']}:{entity['name']}"
-
-                if entity_key not in all_entities:
-                    props = entity.get("properties", {})
-                    entity_id = self._ensure_node(entity["type"], entity["name"], props)
-                    all_entities[entity_key] = entity_id
-
-                    # Link to document
-                    self.neo4j.create_relationship(
-                        doc_node_id, entity_id, "CONTAINS"
+        except Exception as e:
+            if doc_node_id:
+                try:
+                    self.neo4j.merge_document(
+                        doc_id=doc_id,
+                        file_name=file_name,
+                        file_path=file_path,
+                        kg_status="failed",
+                        extra_props={"kg_error": str(e)},
                     )
-
-            # Create relationships
-            for rel in extracted.get("relationships", []):
-                from_key = f"{rel['from_type']}:{rel['from']}"
-                to_key = f"{rel['to_type']}:{rel['to']}"
-
-                if from_key in all_entities and to_key in all_entities:
-                    self.neo4j.create_relationship(
-                        all_entities[from_key],
-                        all_entities[to_key],
-                        rel["type"],
-                        rel.get("properties", {}),
-                    )
-                    all_relationships.append(rel)
-
-            if (i + 1) % 10 == 0:
-                logger.info(f"Processed {i + 1}/{len(chunks)} chunks for {doc_id}")
-
-        logger.info(
-            f"Built graph for {doc_id} ({topic}): "
-            f"{len(all_entities)} entities, {len(all_relationships)} relationships"
-        )
-
-        return {
-            "doc_id": doc_id,
-            "file_name": file_name,
-            "topic": topic,
-            "entities_count": len(all_entities),
-            "relationships_count": len(all_relationships),
-            "status": "success",
-        }
+                except Exception as ee:
+                    logger.warning(f"Failed to mark Document as failed for {doc_id}: {ee}")
+            raise
 
     # ------------------------------------------------------------------
     # Node helpers
@@ -445,10 +527,32 @@ class GraphStoreService:
         name: str,
         properties: Optional[Dict[str, Any]] = None
     ) -> str:
-        """Find existing node by name or create a new one. Returns node ID."""
+        """Find existing node by name or create a new one. Returns node ID.
+
+        If the node already exists, merge new non-empty properties into it
+        so that attributes discovered in later chunks are not lost.
+        """
         existing = self.neo4j.find_node_by_property(label, "name", name)
         if existing:
-            return existing["id"]
+            node_id = existing["id"]
+            existing_props = existing.get("properties", {})
+            # Merge new properties into existing node (skip empty values)
+            new_props = {
+                k: v for k, v in (properties or {}).items()
+                if v and k not in {"name", "source_doc"}
+            }
+            # Keep first source_doc stable; only backfill when missing.
+            if properties and properties.get("source_doc") and not existing_props.get("source_doc"):
+                new_props["source_doc"] = properties["source_doc"]
+            if new_props:
+                try:
+                    self.neo4j.query(
+                        "MATCH (n) WHERE elementId(n) = $nid SET n += $props",
+                        {"nid": node_id, "props": new_props},
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to merge properties for {label}:{name}: {e}")
+            return node_id
 
         props = dict(properties or {})
         props["name"] = name
@@ -467,20 +571,17 @@ class GraphStoreService:
         return self.neo4j.query(cypher, parameters)
 
     def get_plot_info(self, plot_name: str) -> Dict[str, Any]:
-        """Get comprehensive information about a plot."""
+        """Get comprehensive information about a plot (new schema: Chinese labels)."""
         cypher = """
-        MATCH (p:Plot {name: $plot_name})
-        OPTIONAL MATCH (p)-[r:HAS_INDICATOR]->(i:Indicator)
-        OPTIONAL MATCH (p)-[:HAS_FUNCTION]->(f:Function)
-        OPTIONAL MATCH (p)-[:HAS_REQUIREMENT]->(req:Requirement)
-        OPTIONAL MATCH (p)-[:LOCATED_IN]->(loc:Location)
-        OPTIONAL MATCH (p)-[:PART_OF]->(d:District)
+        MATCH (p:地块 {name: $plot_name})
+        OPTIONAL MATCH (p)-[:PART_OF]->(d:片区)
+        OPTIONAL MATCH (p)-[:LOCATED_IN]->(loc)
+        OPTIONAL MATCH (rule)-[:APPLIES_TO]->(p)
         RETURN p,
-               collect(distinct {indicator: i.name, value: r.value}) as indicators,
-               collect(distinct f.name) as functions,
-               collect(distinct req.description) as requirements,
+               properties(p) as properties,
+               collect(distinct d.name) as districts,
                collect(distinct loc.name) as locations,
-               collect(distinct d.name) as districts
+               collect(distinct {name: rule.name, label: labels(rule)[0]}) as rules
         """
         results = self.neo4j.query(cypher, {"plot_name": plot_name})
         if results:
@@ -488,13 +589,36 @@ class GraphStoreService:
         return {}
 
 
-def create_graph_store_service(neo4j_client: Neo4jClient) -> GraphStoreService:
-    """Create graph store service from environment variables."""
+def create_graph_store_service(
+    neo4j_client: Neo4jClient,
+    enable_entity_filtering: bool = True,
+    enable_importance_scoring: bool = True,
+    min_importance_score: float = 1.0,
+) -> GraphStoreService:
+    """Create graph store service from environment variables.
+
+    Args:
+        neo4j_client: Neo4j client instance
+        enable_entity_filtering: Enable heuristic entity filtering (default: True)
+        enable_importance_scoring: Enable entity importance scoring (default: True)
+        min_importance_score: Minimum importance score threshold (default: 1.0)
+
+    Returns:
+        Configured GraphStoreService instance
+    """
     base_url = os.getenv("HDMS_BASE_URL", "https://api.apiyi.com")
     api_key = os.getenv("HDMS_API_KEY", "")
-    model = os.getenv("HDMS_MODEL", "deepseek-v3")
+    model = os.getenv("HDMS_KG_MODEL", "deepseek-v3")
 
     if not api_key:
         raise ValueError("HDMS_API_KEY environment variable is required")
 
-    return GraphStoreService(neo4j_client, base_url, api_key, model)
+    return GraphStoreService(
+        neo4j_client,
+        base_url,
+        api_key,
+        model,
+        enable_entity_filtering=enable_entity_filtering,
+        enable_importance_scoring=enable_importance_scoring,
+        min_importance_score=min_importance_score,
+    )
