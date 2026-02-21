@@ -26,13 +26,13 @@ export function buildThinkingSteps(input: {
   const steps: ThinkingStep[] = [
     {
       key: "understanding",
-      label: "理解问题",
+      label: "分析问题",
       state: "pending",
-      detail: "正在解析问题意图...",
+      detail: "正在分析问题意图...",
     },
     {
       key: "retrieving",
-      label: "检索资料",
+      label: "检索结果",
       state: "pending",
     },
     {
@@ -55,7 +55,7 @@ export function buildThinkingSteps(input: {
     steps[2].detail = input.statusMessage || "正在进行智能研判...";
   } else {
     steps[0].state = "active";
-    steps[0].detail = input.statusMessage || "正在理解你的问题...";
+    steps[0].detail = input.statusMessage || "正在分析你的问题...";
   }
 
   if (!steps[1].detail && retrievalSummary) {

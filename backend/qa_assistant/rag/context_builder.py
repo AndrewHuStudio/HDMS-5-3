@@ -40,7 +40,8 @@ def build_context_and_sources(
         ]
 
     if query and not ranked_results_contain_relevant_images(ranked_results, query):
-        boosted = search_image_chunks_by_text(query, 2)
+        boost_limit = max(1, int(getattr(app_config, "QA_IMAGE_BOOST_LIMIT", 4)))
+        boosted = search_image_chunks_by_text(query, boost_limit)
         if boosted:
             ranked_results = [*ranked_results, *boosted]
 
@@ -224,7 +225,17 @@ def build_context_and_sources(
             or (f"/rag/documents/{doc_id}/pdf" if doc_id else None)
         )
 
-        image_refs = extract_image_refs(text)
+        image_ref_text = text
+        image_refs = extract_image_refs(image_ref_text)
+        if not image_refs and isinstance(chunk_doc, dict):
+            # Retrieval text can lose markdown image tokens after rerank/packing;
+            # fall back to the persisted chunk body in Mongo to recover refs.
+            fallback_text = str(chunk_doc.get("text") or chunk_doc.get("enhanced_text") or "").strip()
+            if fallback_text:
+                fallback_refs = extract_image_refs(fallback_text)
+                if fallback_refs:
+                    image_ref_text = fallback_text
+                    image_refs = fallback_refs
         image_urls: List[str] = []
         image_names: List[str] = []
         image_figures: List[str] = []
@@ -237,7 +248,7 @@ def build_context_and_sources(
         image_name = image_names[0] if image_names else None
 
         if image_refs:
-            figs, caps = extract_image_figure_meta(text)
+            figs, caps = extract_image_figure_meta(image_ref_text)
             image_figures = figs[: len(image_refs)]
             image_captions = caps[: len(image_refs)]
 

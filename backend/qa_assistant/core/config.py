@@ -179,6 +179,12 @@ QA_DEFAULT_TOP_K = _parse_int(
     min_value=QA_TOP_K_MIN,
     max_value=QA_TOP_K_MAX,
 )
+QA_IMAGE_BOOST_LIMIT = _parse_int(
+    os.getenv("QA_IMAGE_BOOST_LIMIT", "4"),
+    4,
+    min_value=1,
+    max_value=QA_TOP_K_MAX,
+)
 QA_HISTORY_WINDOW = _parse_int(os.getenv("QA_HISTORY_WINDOW", "8"), 8, min_value=1, max_value=100)
 QA_FEEDBACK_ANSWER_MAX_CHARS = _parse_int(
     os.getenv("QA_FEEDBACK_ANSWER_MAX_CHARS", "2000"),

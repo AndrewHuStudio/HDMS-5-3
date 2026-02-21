@@ -1026,5 +1026,11 @@ export function normalizeAnswerMarkdownArtifacts(
   // strikethrough and code snippets.
   out = normalizeNumericRangeDelimiters(out);
 
+  if (!streaming) {
+    // Final pass: recover malformed `$...$` spans that would otherwise leak raw
+    // LaTeX commands into the UI instead of rendering or readable fallback text.
+    out = normalizeBrokenInlineMath(out);
+  }
+
   return out;
 }

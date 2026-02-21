@@ -77,12 +77,61 @@ interface QAPanelState {
 }
 
 interface QAViewState {
+  conversations: QAViewConversation[];
+  activeConversationId: string;
+  createConversation: () => void;
+  switchConversation: (id: string) => void;
+  renameConversation: (id: string, title: string) => void;
+  deleteConversation: (id: string) => void;
+  togglePinConversation: (id: string) => void;
   messages: ChatMessage[];
   setMessages: (messages: ChatMessage[]) => void;
   appendMessage: (message: ChatMessage) => void;
   updateMessage: (id: string, updater: (msg: ChatMessage) => ChatMessage) => void;
   resetMessages: () => void;
 }
+
+export interface QAViewConversation {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  updatedAt: number;
+  pinned?: boolean;
+}
+
+const VIEW_DEFAULT_TITLE_PREFIX = "新对话";
+
+const createViewConversationId = () =>
+  `qa-view-conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createViewConversationTitle = (index: number) =>
+  `${VIEW_DEFAULT_TITLE_PREFIX} ${index}`;
+
+const createViewConversation = (index: number): QAViewConversation => ({
+  id: createViewConversationId(),
+  title: createViewConversationTitle(index),
+  messages: [createViewWelcomeMessage()],
+  updatedAt: Date.now(),
+  pinned: false,
+});
+
+const sortViewConversations = (conversations: QAViewConversation[]) =>
+  [...conversations].sort((a, b) => {
+    const aPinned = Boolean(a.pinned);
+    const bPinned = Boolean(b.pinned);
+    if (aPinned !== bPinned) {
+      return aPinned ? -1 : 1;
+    }
+    return b.updatedAt - a.updatedAt;
+  });
+
+const getViewConversationTitleFromMessage = (message: ChatMessage) => {
+  const trimmed = (message.content || "").trim();
+  if (!trimmed) return "";
+  return trimmed.length > 18 ? `${trimmed.slice(0, 18)}...` : trimmed;
+};
+
+const initialViewConversation = createViewConversation(1);
 
 const getConversationTitleFromMessage = (message: QAPanelMessage) => {
   const trimmed = message.content.trim();
@@ -182,17 +231,165 @@ export const useQAPanelStore = create<QAPanelState>((set) => ({
 }));
 
 export const useQAViewStore = create<QAViewState>((set) => ({
-  messages: [createViewWelcomeMessage()],
-  setMessages: (messages) => set({ messages }),
+  conversations: [initialViewConversation],
+  activeConversationId: initialViewConversation.id,
+  createConversation: () =>
+    set((state) => {
+      const nextIndex = state.conversations.length + 1;
+      const nextConversation = createViewConversation(nextIndex);
+      return {
+        conversations: sortViewConversations([nextConversation, ...state.conversations]),
+        activeConversationId: nextConversation.id,
+        messages: nextConversation.messages,
+      };
+    }),
+  switchConversation: (id) =>
+    set((state) => {
+      const target = state.conversations.find((conversation) => conversation.id === id);
+      if (!target) return {};
+      return {
+        activeConversationId: target.id,
+        messages: target.messages,
+      };
+    }),
+  renameConversation: (id, title) =>
+    set((state) => {
+      const trimmedTitle = title.trim();
+      if (!trimmedTitle) return {};
+      return {
+        conversations: state.conversations.map((conversation) =>
+          conversation.id === id
+            ? { ...conversation, title: trimmedTitle, updatedAt: Date.now() }
+            : conversation
+        ),
+      };
+    }),
+  deleteConversation: (id) =>
+    set((state) => {
+      const idx = state.conversations.findIndex((conversation) => conversation.id === id);
+      if (idx < 0) return {};
+
+      if (state.conversations.length === 1) {
+        const resetConversation = {
+          ...state.conversations[0],
+          title: createViewConversationTitle(1),
+          messages: [createViewWelcomeMessage()],
+          updatedAt: Date.now(),
+          pinned: false,
+        };
+        return {
+          conversations: [resetConversation],
+          activeConversationId: resetConversation.id,
+          messages: resetConversation.messages,
+        };
+      }
+
+      const remaining = sortViewConversations(
+        state.conversations.filter((conversation) => conversation.id !== id)
+      );
+      const fallbackActive = remaining[0];
+      const nextActiveId =
+        state.activeConversationId === id ? fallbackActive.id : state.activeConversationId;
+      const nextActive =
+        remaining.find((conversation) => conversation.id === nextActiveId) ?? fallbackActive;
+      return {
+        conversations: remaining,
+        activeConversationId: nextActive.id,
+        messages: nextActive.messages,
+      };
+    }),
+  togglePinConversation: (id) =>
+    set((state) => {
+      const nextConversations = sortViewConversations(
+        state.conversations.map((conversation) =>
+          conversation.id === id
+            ? {
+                ...conversation,
+                pinned: !conversation.pinned,
+                updatedAt: Date.now(),
+              }
+            : conversation
+        )
+      );
+      return {
+        conversations: nextConversations,
+      };
+    }),
+  messages: initialViewConversation.messages,
+  setMessages: (messages) =>
+    set((state) => {
+      const nextConversations = sortViewConversations(
+        state.conversations.map((conversation) =>
+          conversation.id === state.activeConversationId
+            ? { ...conversation, messages, updatedAt: Date.now() }
+            : conversation
+        )
+      );
+      return {
+        messages,
+        conversations: nextConversations,
+      };
+    }),
   appendMessage: (message) =>
-    set((state) => ({
-      messages: [...state.messages, message],
-    })),
+    set((state) => {
+      const nextMessages = [...state.messages, message];
+      const now = Date.now();
+      const nextConversations = sortViewConversations(
+        state.conversations.map((conversation) => {
+          if (conversation.id !== state.activeConversationId) return conversation;
+          let nextTitle = conversation.title;
+          if (
+            message.role === "user" &&
+            conversation.title.startsWith(VIEW_DEFAULT_TITLE_PREFIX)
+          ) {
+            const derivedTitle = getViewConversationTitleFromMessage(message);
+            if (derivedTitle) {
+              nextTitle = derivedTitle;
+            }
+          }
+          return {
+            ...conversation,
+            title: nextTitle,
+            messages: nextMessages,
+            updatedAt: now,
+          };
+        })
+      );
+      return {
+        messages: nextMessages,
+        conversations: nextConversations,
+      };
+    }),
   updateMessage: (id, updater) =>
-    set((state) => ({
-      messages: state.messages.map((msg) =>
+    set((state) => {
+      const nextMessages = state.messages.map((msg) =>
         msg.id === id ? updater(msg) : msg
-      ),
-    })),
-  resetMessages: () => set({ messages: [createViewWelcomeMessage()] }),
+      );
+      const nextConversations = sortViewConversations(
+        state.conversations.map((conversation) =>
+          conversation.id === state.activeConversationId
+            ? { ...conversation, messages: nextMessages, updatedAt: Date.now() }
+            : conversation
+        )
+      );
+      return {
+        messages: nextMessages,
+        conversations: nextConversations,
+      };
+    }),
+  resetMessages: () =>
+    set((state) => {
+      const resetMessages = [createViewWelcomeMessage()];
+      const nextConversations = sortViewConversations(
+        state.conversations.map((conversation) =>
+          conversation.id === state.activeConversationId
+            ? { ...conversation, messages: resetMessages, updatedAt: Date.now() }
+            : conversation
+        )
+      );
+      return {
+        messages: resetMessages,
+        conversations: nextConversations,
+      };
+    }),
 }));

@@ -1,18 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { QAShell } from "@/components/qa-new";
 import { useQAViewStore } from "@/lib/stores/qa-store";
 import { sendQuestion, sendQuestionStream } from "./api";
 import type { ChatHistoryMessage, ChatMessage } from "./types";
 import { mergeStreamingSources } from "@/lib/stream-source-utils";
 
-const quickQuestions = [
-  "高强度片区的核心管控指标有哪些",
-  "请总结课题知识库中的主要结论",
-  "DU01-01地块的容积率与限高要求是什么",
-  "城市设计管控方案评估的关键依据有哪些",
-];
+const quickQuestions: string[] = [];
 
 const createMessage = (
   role: ChatMessage["role"],
@@ -36,16 +31,25 @@ const buildHistory = (messages: ChatMessage[]): ChatHistoryMessage[] => {
     .map((message) => ({ role: message.role, content: message.content }));
 };
 
-export function QAView() {
+interface QAViewProps {
+  embedded?: boolean;
+}
+
+export function QAView({ embedded = false }: QAViewProps = {}) {
   const messages = useQAViewStore((state) => state.messages);
   const appendMessage = useQAViewStore((state) => state.appendMessage);
   const updateMessage = useQAViewStore((state) => state.updateMessage);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
 
   const handleFeedback = (messageId: string, feedback: "useful" | "not_useful") => {
     updateMessage(messageId, (msg) => ({ ...msg, feedback }));
   };
+
+  const handleStop = useCallback(() => {
+    activeAbortControllerRef.current?.abort();
+  }, []);
 
   const handleSend = async (presetQuestion?: string) => {
     const question = (presetQuestion ?? input).trim();
@@ -56,6 +60,8 @@ export function QAView() {
     appendMessage(userMessage);
     setInput("");
     setIsSending(true);
+    const streamAbortController = new AbortController();
+    activeAbortControllerRef.current = streamAbortController;
 
     // Create placeholder assistant message for streaming
     const assistantMsg = createMessage("assistant", "", {
@@ -131,8 +137,22 @@ export function QAView() {
             statusMessage: undefined,
           }));
         },
-      });
-    } catch {
+      }, streamAbortController.signal);
+    } catch (error) {
+      const aborted =
+        (error instanceof DOMException && error.name === "AbortError") ||
+        (error instanceof Error && error.name === "AbortError");
+      if (aborted) {
+        updateMessage(assistantId, (msg) => ({
+          ...msg,
+          isStreaming: false,
+          thinkingDone: true,
+          statusStage: undefined,
+          statusMessage: undefined,
+        }));
+        return;
+      }
+
       // Fallback to non-streaming if SSE fails
       try {
         const response = await sendQuestion(question, history);
@@ -152,18 +172,23 @@ export function QAView() {
         }));
       }
     } finally {
+      if (activeAbortControllerRef.current === streamAbortController) {
+        activeAbortControllerRef.current = null;
+      }
       setIsSending(false);
     }
   };
 
   return (
     <QAShell
+      embedded={embedded}
       messages={messages}
       input={input}
       isSending={isSending}
       quickQuestions={quickQuestions}
       onInputChange={setInput}
       onSend={handleSend}
+      onStop={handleStop}
       onFeedback={handleFeedback}
     />
   );

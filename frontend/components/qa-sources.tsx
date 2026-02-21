@@ -34,6 +34,10 @@ interface QASourcesProps {
   layout?: "inline" | "sidebar";
 }
 
+const SOURCE_META_TITLE_WIDTH_CH = 18;
+const SOURCE_META_PAGE_WIDTH_CH = 10;
+const SOURCE_META_VISUAL_WIDTH_CH = 7;
+
 
 const resolveAssetLink = (rawUrl?: string | null) => {
   if (!rawUrl) return null;
@@ -273,7 +277,6 @@ function SourceCard({
   const [isOpen, setIsOpen] = useState(false);
   const [previews, setPreviews] = useState<SourcePreview[]>(cachedPreviews ?? []);
   const [loading, setLoading] = useState(false);
-  const cardRef = useRef<HTMLDivElement | null>(null);
 
   // Use chunk_ids (grouped) if available, otherwise fall back to single chunk_id
   const allChunkIds = source.chunk_ids?.length ? source.chunk_ids : (source.chunk_id ? [source.chunk_id] : []);
@@ -311,15 +314,6 @@ function SourceCard({
       setLoading(false);
     }
   }, [allChunkIds, loading, onCachePreviews, previews.length, query]);
-
-  useEffect(() => {
-    if (!isActive || loading) return;
-    // Defer scroll to next frame so layout has settled after content load
-    const raf = requestAnimationFrame(() => {
-      cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [isActive, loading]);
 
   const handleToggle = (open: boolean) => {
     setIsOpen(open);
@@ -362,11 +356,11 @@ function SourceCard({
   const typeLabel = source.source === "knowledge_graph" ? "知识图谱" : "文档检索";
   const fallbackPdfUrl = source.doc_id ? `/rag/documents/${source.doc_id}/pdf` : null;
   const hasDocumentLink = Boolean(source.pdf_url || firstPreview?.document.pdf_url || fallbackPdfUrl);
+  const hasVisualAsset = meta.hasImage || Boolean(firstPreview?.has_table);
 
   return (
     <Collapsible open={isOpen} onOpenChange={handleToggle}>
       <div
-        ref={cardRef}
       >
         <CollapsibleTrigger
           asChild
@@ -377,7 +371,7 @@ function SourceCard({
             tabIndex={0}
             className={cn(
               "flex w-full items-start gap-2 rounded-md border border-border/50 bg-card px-3 py-2 text-left text-xs transition-colors",
-              "cursor-pointer hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              "cursor-pointer hover:bg-amber-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-amber-500/10",
               isOpen && "rounded-b-none border-b-0"
             )}
             onFocus={() => onHover?.(label)}
@@ -408,28 +402,44 @@ function SourceCard({
                   {source.name || "未知来源"}
                 </span>
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+              <div
+                className="mt-1 -ml-0.5 grid items-center gap-x-1 text-[10px] text-muted-foreground"
+                style={{
+                  gridTemplateColumns: `minmax(0, ${SOURCE_META_TITLE_WIDTH_CH}ch) minmax(0, ${SOURCE_META_PAGE_WIDTH_CH}ch) minmax(0, ${SOURCE_META_VISUAL_WIDTH_CH}ch) minmax(0,1fr) auto`,
+                }}
+              >
                 {meta.title ? (
-                  <span className="max-w-full truncate rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary/90">
+                  <span
+                    title={meta.title}
+                    className="inline-flex h-5 min-w-0 items-center truncate rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary/90"
+                  >
                     {meta.title}
                   </span>
                 ) : (
-                  <span className="rounded bg-muted px-1.5 py-0.5">{typeLabel}</span>
+                  <span className="inline-flex h-5 min-w-0 items-center truncate rounded bg-muted px-1.5 py-0.5">{typeLabel}</span>
                 )}
-                {meta.pageLabel && (
-                  <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-blue-600">
+                {meta.pageLabel ? (
+                  <span
+                    title={meta.pageLabel}
+                    className="inline-flex h-5 min-w-0 items-center truncate rounded bg-blue-500/10 px-1.5 py-0.5 text-blue-600"
+                  >
                     {meta.pageLabel}
                   </span>
+                ) : (
+                  <span aria-hidden className="inline-flex h-5" />
                 )}
-                {meta.hasImage && (
-                  <span className="rounded bg-purple-500/10 px-1.5 py-0.5 text-purple-600">
-                    含图片
+                {hasVisualAsset ? (
+                  <span className="inline-flex h-5 min-w-0 items-center truncate rounded bg-purple-500/10 px-1.5 py-0.5 text-purple-600">
+                    含图表
                   </span>
+                ) : (
+                  <span aria-hidden className="inline-flex h-5" />
                 )}
+                <span aria-hidden />
                 {hasDocumentLink && (
                   <button
                     type="button"
-                    className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-primary/70 transition-colors hover:bg-primary/10 hover:text-primary"
+                    className="ml-auto inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-primary/70 transition-colors hover:bg-primary/10 hover:text-primary"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -437,7 +447,7 @@ function SourceCard({
                     }}
                   >
                     <FileSearch className="h-2.5 w-2.5" />
-                    查看 PDF
+                    查看PDF
                   </button>
                 )}
               </div>
@@ -447,7 +457,7 @@ function SourceCard({
       </div>
       {allChunkIds.length > 0 && (
         <CollapsibleContent>
-          <div className="rounded-b-md border border-t-0 border-border/50 bg-muted/10">
+          <div className="rounded-b-md border border-t-0 border-border/50 bg-white/80 dark:bg-background/70">
             <div className="py-2 space-y-0">
               {loading ? (
                 <div className="space-y-2 py-2">
@@ -466,7 +476,7 @@ function SourceCard({
                       className={cn("py-0", pvIdx > 0 && "border-t border-border/40")}
                     >
                       {previews.length > 1 && (
-                        <div className="flex flex-wrap items-center gap-1.5 bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
+                        <div className="flex flex-wrap items-center gap-1.5 bg-white/90 px-2 py-1 text-[11px] text-muted-foreground dark:bg-background/80">
                           <span className="font-semibold text-primary">{circledNum}</span>
                           {pv.section_title && <span className="truncate">{pv.section_title}</span>}
                           {pv.page_hint && pv.page_hint > 0 && (
@@ -582,15 +592,15 @@ function ChunkMarkdown({
             return <p className="mb-1.5 last:mb-0">{children}</p>;
           },
           table: ({ children }) => (
-            <div className="my-1 overflow-x-auto">
-              <table className="min-w-full border-collapse text-[10px]">{children}</table>
+            <div className="my-1 overflow-x-hidden">
+              <table className="w-full table-fixed border-collapse text-[10px]">{children}</table>
             </div>
           ),
           th: ({ children }) => (
-            <th className="border border-border bg-muted px-1.5 py-0.5 text-left font-semibold">{children}</th>
+            <th className="border border-border bg-muted px-1.5 py-0.5 text-left font-semibold break-words">{children}</th>
           ),
           td: ({ children }) => (
-            <td className="border border-border px-1.5 py-0.5">{children}</td>
+            <td className="border border-border px-1.5 py-0.5 break-words">{children}</td>
           ),
           img: ({ src, alt }) => {
             const imgSrc = typeof src === "string" ? src : "";

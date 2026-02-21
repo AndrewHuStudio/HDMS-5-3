@@ -45,7 +45,7 @@ export function ThinkingProcess({
   }, [displayStage]);
 
   useEffect(() => {
-    if (!isStreaming || hasThinking) {
+    if (!isStreaming) {
       if (stageTimerRef.current) {
         clearTimeout(stageTimerRef.current);
         stageTimerRef.current = null;
@@ -71,7 +71,7 @@ export function ThinkingProcess({
     }
 
     setDisplayStage(targetStage);
-  }, [displayStage, hasThinking, isStreaming, statusStage]);
+  }, [displayStage, isStreaming, statusStage]);
 
   useEffect(() => {
     return () => {
@@ -81,18 +81,36 @@ export function ThinkingProcess({
     };
   }, []);
 
-  const showStepTimeline = isStreaming && !hasThinking;
   const steps = buildThinkingSteps({
     stage: displayStage,
     statusMessage,
     retrievalStats,
   });
+
+  const getStageRank = (stage?: string) => {
+    switch ((stage || "").trim().toLowerCase()) {
+      case "understanding":
+        return 1;
+      case "retrieving":
+        return 2;
+      case "reasoning":
+      case "generating":
+        return 3;
+      default:
+        return 0;
+    }
+  };
+
+  const reachedReasoningStage = getStageRank(displayStage) >= 3;
+  const shouldDelayThinkingText = isStreaming && hasThinking && !thinkingDone && !reachedReasoningStage;
+  const showStepTimelineBeforeThinking = isStreaming && (!hasThinking || shouldDelayThinkingText);
   const activeIndex = steps.findIndex((step) => step.state === "active");
   const visibleCount = Math.max(1, activeIndex + 1);
   const visibleSteps = steps.slice(0, visibleCount);
+  const showThinkingText = hasThinking && !shouldDelayThinkingText;
 
-  // Thinking is actively in progress only when streaming and not yet done.
-  const isThinkingActive = isStreaming && !thinkingDone;
+  // Show "思考中" only when thought tokens are actually rendered.
+  const isThinkingActive = isStreaming && !thinkingDone && showThinkingText;
 
   // Auto-collapse when thinking completes (either via thinkingDone signal or stream end).
   useEffect(() => {
@@ -118,8 +136,8 @@ export function ThinkingProcess({
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1 ml-5 border-l border-border/70 pl-3">
-          {showStepTimeline ? (
+        <div className="mt-1 ml-2.5 border-l border-border/70 pl-3">
+          {showStepTimelineBeforeThinking ? (
             <ol className="qa-thinking-step-list py-0.5">
               {visibleSteps.map((step, index) => (
                 <li
@@ -150,18 +168,20 @@ export function ThinkingProcess({
                 </li>
               ))}
             </ol>
-          ) : hasThinking ? (
+          ) : null}
+
+          {showThinkingText ? (
             <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground break-words [overflow-wrap:anywhere]">
               {thinking}
             </p>
-          ) : (
+          ) : !showStepTimelineBeforeThinking ? (
             <div className="flex items-center gap-2 py-0.5">
               <span className="qa-thinking-bar" />
               {statusMessage && (
                 <span className="text-xs text-muted-foreground">{statusMessage}</span>
               )}
             </div>
-          )}
+          ) : null}
         </div>
       </CollapsibleContent>
     </Collapsible>

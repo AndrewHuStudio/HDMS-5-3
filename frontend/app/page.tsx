@@ -17,6 +17,8 @@ import { mainNavigation } from "@/lib/navigation-config";
 import type { ActiveView } from "@/lib/navigation-types";
 import { toolRegistry, useToolSceneProps } from "@/lib/registries/tool-registry";
 import { useModelStore } from "@/lib/stores/model-store";
+import { useQAViewStore } from "@/lib/stores/qa-store";
+import { cn } from "@/lib/utils";
 import {
   Building2,
   Clock,
@@ -24,15 +26,24 @@ import {
   AlertCircle,
   CheckCircle2,
   Sparkles,
+  PanelRight,
+  SquarePen,
+  MoreHorizontal,
+  Pin,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 export default function CityControlSystem() {
+  const QA_HISTORY_PANEL_WIDTH = 288;
   const [selectedElement, setSelectedElement] = useState<CityElement | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>("data-upload");
   const [selectedImportedMesh, setSelectedImportedMesh] = useState<ImportedMeshInfo | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("perspective");
   const [rightPanelWidth, setRightPanelWidth] = useState(360);
   const [isResizing, setIsResizing] = useState(false);
+  const [isQAHistoryOpen, setIsQAHistoryOpen] = useState(false);
+  const [historyMenuConversationId, setHistoryMenuConversationId] = useState<string | null>(null);
 
   const externalModelUrl = useModelStore((state) => state.externalModelUrl);
   const externalModelType = useModelStore((state) => state.externalModelType);
@@ -48,6 +59,13 @@ export default function CityControlSystem() {
   const setModelBuildings = useModelStore((state) => state.setModelBuildings);
   const setModelError = useModelStore((state) => state.setModelError);
   const resetModel = useModelStore((state) => state.resetModel);
+  const qaConversations = useQAViewStore((state) => state.conversations);
+  const qaActiveConversationId = useQAViewStore((state) => state.activeConversationId);
+  const createQAConversation = useQAViewStore((state) => state.createConversation);
+  const switchQAConversation = useQAViewStore((state) => state.switchConversation);
+  const renameQAConversation = useQAViewStore((state) => state.renameConversation);
+  const deleteQAConversation = useQAViewStore((state) => state.deleteConversation);
+  const togglePinQAConversation = useQAViewStore((state) => state.togglePinConversation);
 
   const tools = toolRegistry.getAll();
   const toolSceneProps = useToolSceneProps();
@@ -120,6 +138,8 @@ export default function CityControlSystem() {
 
   const activeTool = toolRegistry.get(activeView);
   const isQAPanel = activeView === "qa-assistant";
+  const isQAHistoryDocked = isQAPanel && isQAHistoryOpen;
+  const effectiveRightPanelWidth = rightPanelWidth + (isQAHistoryDocked ? QA_HISTORY_PANEL_WIDTH : 0);
   const isDataUploadView = activeView === "data-upload";
   const previousViewRef = useRef<ActiveView>(activeView);
   const toolIdSet = useMemo(() => new Set(tools.map((tool) => tool.id)), [tools]);
@@ -132,6 +152,30 @@ export default function CityControlSystem() {
     previousViewRef.current = activeView;
   }, [activeView, toolIdSet]);
 
+  useEffect(() => {
+    if (!isQAPanel) {
+      setIsQAHistoryOpen(false);
+      setHistoryMenuConversationId(null);
+    }
+  }, [isQAPanel]);
+
+  useEffect(() => {
+    if (!isQAHistoryOpen) {
+      setHistoryMenuConversationId(null);
+    }
+  }, [isQAHistoryOpen]);
+
+  useEffect(() => {
+    const handleDocPointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest("[data-qa-history-menu]")) return;
+      setHistoryMenuConversationId(null);
+    };
+    document.addEventListener("mousedown", handleDocPointerDown);
+    return () => document.removeEventListener("mousedown", handleDocPointerDown);
+  }, []);
+
   // 获取当前面板标题
   const getActivePanelTitle = () => {
     if (activeTool) return activeTool.name;
@@ -142,6 +186,14 @@ export default function CityControlSystem() {
       "approval-checklist": "管控审批清单",
     };
     return titles[activeView] || "未知面板";
+  };
+
+  const getConversationPreview = (messages: { content: string }[]) => {
+    const latest = [...messages]
+      .reverse()
+      .find((message) => message.content && message.content.trim().length > 0);
+    if (!latest) return "暂无对话内容";
+    return latest.content.replace(/\s+/g, " ").trim();
   };
 
   // 处理右侧面板宽度调整
@@ -404,7 +456,7 @@ export default function CityControlSystem() {
       {/* 右侧详情面板 */}
       <aside
         className="border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden relative"
-        style={{ width: `${rightPanelWidth}px` }}
+        style={{ width: `${effectiveRightPanelWidth}px` }}
       >
         {/* 可拖拽的分隔条 */}
         <div
@@ -413,23 +465,169 @@ export default function CityControlSystem() {
           title="拖动调整宽度"
         />
 
-        <div className="h-12 border-b border-border flex items-center px-4 flex-shrink-0">
+        <div className="h-12 border-b border-border flex items-center justify-between px-4 flex-shrink-0">
           <div className="flex items-center gap-2">
             {isQAPanel && <Sparkles className="h-4 w-4 text-blue-500" />}
             <h2 className="font-medium">{getActivePanelTitle()}</h2>
           </div>
+          {isQAPanel && (
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-sm text-muted-foreground"
+                title="新建对话"
+                onClick={() => {
+                  createQAConversation();
+                  setIsQAHistoryOpen(false);
+                }}
+              >
+                <SquarePen className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-sm text-muted-foreground"
+                title="历史对话"
+                onClick={() => setIsQAHistoryOpen((prev) => !prev)}
+              >
+                <PanelRight className={`h-4 w-4 ${isQAHistoryOpen ? "text-foreground" : ""}`} />
+              </Button>
+            </div>
+          )}
         </div>
 
-        <div className={`flex-1 min-h-0 overflow-auto${activeTool ? " p-4" : ""}`}>
-          {activeView === "qa-assistant" && (
-            <QAPanel selectedElement={selectedElement} />
+        <div
+          className={cn(
+            "relative flex-1 min-h-0",
+            activeTool ? "overflow-auto p-4" : isQAPanel ? "overflow-hidden" : "overflow-auto"
           )}
-          {activeView === "approval-checklist" && <ReviewPanel />}
+        >
+          {isQAPanel ? (
+              <div className="flex h-full min-h-0">
+              <div className="h-full min-w-0 flex flex-1 flex-col overflow-hidden">
+                <QAPanel selectedElement={selectedElement} />
+              </div>
 
-          {activeTool && (
-            <ToolPanelWrapper tool={activeTool}>
-              {activeTool.Panel ? <activeTool.Panel /> : null}
-            </ToolPanelWrapper>
+              <aside
+                className={cn(
+                  "shrink-0 border-l border-border bg-card/95 backdrop-blur transition-[width,opacity] duration-200",
+                  isQAHistoryOpen ? "w-72 opacity-100" : "w-0 border-l-0 opacity-0 pointer-events-none"
+                )}
+              >
+                <div className="qa-scrollbar qa-scrollbar--no-gutter h-full space-y-1 overflow-y-auto py-2 pl-2 pr-1">
+                  {qaConversations.map((conversation) => (
+                    <div key={conversation.id} className="group relative w-full" data-qa-history-menu>
+                      <button
+                        type="button"
+                        className={cn(
+                          "w-full rounded-md border px-2 py-1.5 text-left transition-colors",
+                          conversation.id === qaActiveConversationId
+                            ? "border-primary/40 bg-primary/10"
+                            : "border-border/60 bg-background/80 hover:bg-muted/40"
+                        )}
+                        onClick={() => {
+                          switchQAConversation(conversation.id);
+                          setIsQAHistoryOpen(false);
+                        }}
+                        title={conversation.title}
+                      >
+                        <div className="flex items-center gap-1">
+                          {conversation.pinned && <Pin className="h-3 w-3 shrink-0 text-primary" />}
+                          <p className="truncate text-xs font-medium text-foreground">{conversation.title}</p>
+                        </div>
+                        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                          {getConversationPreview(conversation.messages)}
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        className={cn(
+                          "absolute right-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:bg-muted",
+                          historyMenuConversationId === conversation.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                        )}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setHistoryMenuConversationId((prev) =>
+                            prev === conversation.id ? null : conversation.id
+                          );
+                        }}
+                        aria-label="更多操作"
+                        data-qa-history-menu
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+
+                      {historyMenuConversationId === conversation.id && (
+                        <div
+                          className="absolute right-1 top-7 z-20 min-w-[120px] rounded-md border border-border bg-popover p-1 shadow-lg"
+                          data-qa-history-menu
+                        >
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-xs text-popover-foreground hover:bg-muted"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              togglePinQAConversation(conversation.id);
+                              setHistoryMenuConversationId(null);
+                            }}
+                          >
+                            <Pin className="h-3.5 w-3.5" />
+                            {conversation.pinned ? "取消置顶" : "置顶对话"}
+                          </button>
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-xs text-popover-foreground hover:bg-muted"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              const renamed = window.prompt("重命名对话", conversation.title);
+                              if (renamed && renamed.trim()) {
+                                renameQAConversation(conversation.id, renamed.trim());
+                              }
+                              setHistoryMenuConversationId(null);
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            重命名
+                          </button>
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              const confirmed = window.confirm(`确认删除“${conversation.title}”？`);
+                              if (confirmed) {
+                                deleteQAConversation(conversation.id);
+                              }
+                              setHistoryMenuConversationId(null);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            删除对话
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </aside>
+            </div>
+          ) : (
+            <div className="h-full min-h-0 overflow-auto">
+              {activeView === "approval-checklist" && <ReviewPanel />}
+              {activeTool && (
+                <ToolPanelWrapper tool={activeTool}>
+                  {activeTool.Panel ? <activeTool.Panel /> : null}
+                </ToolPanelWrapper>
+              )}
+            </div>
           )}
         </div>
       </aside>

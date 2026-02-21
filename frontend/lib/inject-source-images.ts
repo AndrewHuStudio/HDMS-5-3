@@ -21,6 +21,7 @@ const INLINE_SEE_FIGURE_GLOBAL_RE =
   /[（(]?\s*见图\s*\d+(?:[.\-]\d+){0,3}(?:[^)）]{0,20})?\s*[)）]?/gu;
 const IMAGE_PLACEHOLDER_RE =
   /\[([^\]]{2,80})\][（(][^)\n]*?(此处应插入|未见附图)[^)\n]*[)）]?/;
+const MARKDOWN_IMAGE_DEST_RE = /!\[[^\]]*\]\(([^)\n]+)\)/g;
 
 function normalizeCaptionText(text: string): string {
   const t = String(text || "").trim();
@@ -40,6 +41,57 @@ function normalizeCaptionText(text: string): string {
     .trim();
 
   return out;
+}
+
+function parseMarkdownImageDest(raw: string): string {
+  let cleaned = String(raw || "").trim();
+  if (!cleaned) return "";
+  if (cleaned.startsWith("<") && cleaned.endsWith(">")) {
+    cleaned = cleaned.slice(1, -1).trim();
+  } else {
+    const titleMatch = cleaned.match(/^(.*?)(?:\s+["'][^"']*["'])\s*$/);
+    if (titleMatch?.[1]) cleaned = titleMatch[1].trim();
+  }
+  cleaned = cleaned.replace(/\\ /g, " ").replace(/\\\\/g, "\\").trim();
+  return cleaned;
+}
+
+function extractQuoteImageUrls(quote: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const match of quote.matchAll(MARKDOWN_IMAGE_DEST_RE)) {
+    const url = parseMarkdownImageDest(match[1] || "");
+    if (!url) continue;
+    if (
+      !url.startsWith("/rag/") &&
+      !url.startsWith("/api/") &&
+      !url.startsWith("http://") &&
+      !url.startsWith("https://") &&
+      !url.startsWith("data:")
+    ) {
+      continue;
+    }
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+  return out;
+}
+
+function deriveImageNameFromUrl(url: string, index: number): string {
+  const fallback = `参考图片${index + 1}`;
+  try {
+    const parsed = new URL(url, "http://localhost");
+    const ref = parsed.searchParams.get("ref");
+    const byRef = (ref || "").split(/[\\/]/).pop();
+    if (byRef) return byRef;
+    const byPath = (parsed.pathname || "").split("/").pop();
+    if (byPath) return byPath;
+    return fallback;
+  } catch {
+    const byPath = String(url || "").split(/[\\/]/).pop();
+    return byPath || fallback;
+  }
 }
 
 function looksLikeOpaqueFilename(text: string): boolean {
@@ -138,9 +190,11 @@ function parseFigureTokens(text: string): string[] {
 }
 
 function buildCandidates(src: SourceInfo): CandidateImage[] {
-  const urls = Array.isArray(src.image_urls)
+  const urlsFromMetadata = Array.isArray(src.image_urls)
     ? src.image_urls.filter(Boolean)
     : (src.image_url ? [src.image_url] : []);
+  const urlsFromQuote = extractQuoteImageUrls(String(src.quote || ""));
+  const urls = urlsFromMetadata.length > 0 ? urlsFromMetadata : urlsFromQuote;
   const names = Array.isArray(src.image_names)
     ? src.image_names
     : (src.image_name ? [src.image_name] : []);
@@ -150,7 +204,7 @@ function buildCandidates(src: SourceInfo): CandidateImage[] {
   return urls.map((url, idx) => {
     const figure = String(figures[idx] || "").trim();
     const caption = String(captions[idx] || "").trim();
-    const name = String(names[idx] || `参考图片${idx + 1}`).trim();
+    const name = String(names[idx] || deriveImageNameFromUrl(url, idx)).trim();
     return { url, name, figure, caption };
   });
 }

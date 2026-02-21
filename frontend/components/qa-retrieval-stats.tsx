@@ -23,7 +23,7 @@ export function QARetrievalStats({ stats, isStreaming }: QARetrievalStatsProps) 
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mb-2">
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted/50 transition-colors">
+      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40">
         <ChevronRight
           className={`h-3 w-3 shrink-0 transition-transform duration-200 ${
             isOpen ? "rotate-90" : ""
