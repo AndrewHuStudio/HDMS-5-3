@@ -580,6 +580,7 @@ def check_fire_ladder_pure_python(
     min_distance: float = 5.0,
     max_distance: float = 10.0,
     length_ratio: float = 0.25,
+    allow_outside_redline: bool = False,
 ) -> Dict:
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
@@ -622,6 +623,9 @@ def check_fire_ladder_pure_python(
                 "object_id": str(object_id) if object_id else None,
             }
         )
+
+    def _building_key(building: Dict[str, Any]) -> str:
+        return building.get("object_id") or f"idx-{building['index']}"
 
     plot_entries = []
     for idx, (obj, geometry) in enumerate(plot_objects):
@@ -718,6 +722,22 @@ def check_fire_ladder_pure_python(
             }
         )
 
+    for ladder in ladders:
+        matched_building = None
+        matched_distance = float("inf")
+        for building in buildings:
+            dist = _min_distance_to_segments(
+                (ladder["center"].X, ladder["center"].Y), building["segments"]
+            )
+            if dist < matched_distance:
+                matched_distance = dist
+                matched_building = building
+        if matched_building is None:
+            continue
+        ladder["matched_building"] = matched_building
+        ladder["matched_distance"] = matched_distance
+        ladder["building_key"] = _building_key(matched_building)
+
     results = []
     warnings: List[str] = []
     total_passed = 0
@@ -727,7 +747,18 @@ def check_fire_ladder_pure_python(
     for redline in redlines:
         curve = redline["curve"]
         redline_buildings = [b for b in buildings if _point_in_curve_2d(b["center"], curve)]
-        redline_ladders = [l for l in ladders if _point_in_curve_2d(l["center"], curve)]
+        redline_building_keys = {_building_key(b) for b in redline_buildings}
+        if allow_outside_redline:
+            redline_ladders = [
+                l for l in ladders if l.get("building_key") in redline_building_keys
+            ]
+        else:
+            redline_ladders = [
+                l
+                for l in ladders
+                if l.get("building_key") in redline_building_keys
+                and _point_in_curve_2d(l["center"], curve)
+            ]
 
         result = {
             "redline_index": redline["index"],
@@ -771,16 +802,8 @@ def check_fire_ladder_pure_python(
         primary_distance = float("inf")
 
         for ladder in redline_ladders:
-            matched_building = None
-            matched_distance = float("inf")
-            for building in redline_buildings:
-                dist = _min_distance_to_segments(
-                    (ladder["center"].X, ladder["center"].Y), building["segments"]
-                )
-                if dist < matched_distance:
-                    matched_distance = dist
-                    matched_building = building
-
+            matched_building = ladder.get("matched_building")
+            matched_distance = ladder.get("matched_distance", float("inf"))
             if matched_building is None:
                 continue
 
@@ -814,7 +837,7 @@ def check_fire_ladder_pure_python(
             eps = 1e-3
             if near_distance < (min_distance - eps) or near_distance > (max_distance + eps):
                 distance_ok = False
-            if not ladder_inside:
+            if not allow_outside_redline and not ladder_inside:
                 inside_ok = False
 
         if primary_building is None:
