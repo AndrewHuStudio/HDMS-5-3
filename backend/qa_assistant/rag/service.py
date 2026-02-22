@@ -61,6 +61,59 @@ def _infer_page_range_from_text(text: str) -> Tuple[Optional[int], Optional[int]
 
 
 _PAGE_RANGE_RE = re.compile(r"(\d{1,5})\s*(?:[-~—–至]\s*(\d{1,5}))?")
+_MARKDOWN_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*]\([^)]+\)")
+
+
+def _inspect_markdown_shape(markdown: str) -> Dict[str, int]:
+    text = str(markdown or "")
+    lines = text.split("\n")
+    gfm_table_blocks = 0
+    pipe_heavy_lines = 0
+
+    for i, line in enumerate(lines):
+        if line.count("|") >= 2:
+            pipe_heavy_lines += 1
+        header_like = bool(re.match(r"^\s*\|.+\|\s*$", line.strip()))
+        sep_like = bool(
+            _MARKDOWN_TABLE_SEPARATOR_RE.match((lines[i + 1] if i + 1 < len(lines) else "").strip())
+        )
+        if header_like and sep_like:
+            gfm_table_blocks += 1
+
+    return {
+        "gfm_table_blocks": gfm_table_blocks,
+        "pipe_heavy_lines": pipe_heavy_lines,
+        "markdown_image_count": len(_MARKDOWN_IMAGE_RE.findall(text)),
+        "length": len(text.strip()),
+    }
+
+
+def _should_emit_answer_replacement(current: str, replacement: str) -> Tuple[bool, Optional[str]]:
+    current_text = str(current or "")
+    next_text = str(replacement or "")
+    if not next_text.strip():
+        return False, "empty-replacement"
+    if not current_text.strip():
+        return True, None
+
+    cur = _inspect_markdown_shape(current_text)
+    nxt = _inspect_markdown_shape(next_text)
+
+    # Preserve streamed table layout: if the stream had GFM tables, don't let
+    # post-processing collapse them away in the final replacement.
+    if cur["gfm_table_blocks"] > 0 and nxt["gfm_table_blocks"] == 0:
+        return False, "table-block-lost"
+
+    # Preserve image markdown that was visible during streaming.
+    if cur["markdown_image_count"] > 0 and nxt["markdown_image_count"] == 0:
+        return False, "image-lost"
+
+    # Guard accidental truncation caused by downstream cleanup.
+    if cur["length"] > 120 and nxt["length"] < int(cur["length"] * 0.55):
+        return False, "severe-truncation"
+
+    return True, None
 
 
 def _parse_page_like(value: object) -> Tuple[Optional[int], Optional[int]]:
@@ -763,19 +816,34 @@ class RAGService:
         full_answer = "".join(full_answer_parts)
         processed = full_answer
         if full_answer:
-            processed, sources = self._finalize_answer_and_sources(
+            streamed_sources = sources
+            finalized_answer, finalized_sources = self._finalize_answer_and_sources(
                 full_answer,
                 sources,
                 question=question,
                 inject_summary_with_llm=False,
                 missing_image_log="Streamed answer mentions figures but no image-bearing sources survived filtering.",
             )
+            processed = finalized_answer
+            sources = finalized_sources
 
-            if processed != full_answer:
-                # Bundle sources into answer_replaced so the frontend can
-                # atomically update both content and citation labels,
-                # avoiding race conditions between separate SSE events.
-                yield ("answer_replaced", {"content": processed, "sources": sources})
+            if finalized_answer != full_answer:
+                can_replace, reject_reason = _should_emit_answer_replacement(full_answer, finalized_answer)
+                if can_replace:
+                    # Bundle sources into answer_replaced so the frontend can
+                    # atomically update both content and citation labels,
+                    # avoiding race conditions between separate SSE events.
+                    yield ("answer_replaced", {"content": finalized_answer, "sources": finalized_sources})
+                else:
+                    logger.warning(
+                        "Skip answer_replaced due to degraded markdown shape: %s (current=%s, replacement=%s)",
+                        reject_reason,
+                        _inspect_markdown_shape(full_answer),
+                        _inspect_markdown_shape(finalized_answer),
+                    )
+                    # Keep stream/final state consistent with what the user already saw.
+                    processed = full_answer
+                    sources = streamed_sources
 
         yield ("done", {
             "model": self.llm_model,

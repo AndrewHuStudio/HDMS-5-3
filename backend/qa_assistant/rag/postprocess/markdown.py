@@ -10,7 +10,8 @@ _CITE_WITH_SECTION_RE = re.compile(r"\[(\d+-\d+)/(?:\d+(?:\.\d+){1,})\]")
 # Strip leaked reasoning tags from the answer.
 _THINK_TAG_RE = re.compile(r"</?think>", re.IGNORECASE)
 # Ensure a blank line before list items that follow a non-blank line.
-_LIST_NEEDS_BLANK_RE = re.compile(r"(\S[^\n]*)\n([ \t]*[-*\d]+[.)]\s)")
+# Capture full list line so we can skip table-like rows containing "|".
+_LIST_NEEDS_BLANK_RE = re.compile(r"(\S[^\n]*)\n([ \t]*(?:[-*+]\s+[^\n]*|\d+[.)]\s+[^\n]*))")
 # Heading level normalization: top-level `#` → `##` (reserve h1 for page title).
 _H1_RE = re.compile(r"^#\s", re.MULTILINE)
 # Known top-level section titles that should stay as level-2 headings.
@@ -187,6 +188,25 @@ def _normalize_related_concepts_body(text: str) -> str:
     return "\n".join(lines)
 
 
+def _insert_blank_line_before_lists(text: str) -> str:
+    """Insert markdown-required blank lines before list items.
+
+    Do not touch lines containing "|" because loose table rows may start with
+    numbering tokens like "1." and would be corrupted by list spacing rewrites.
+    """
+    if not text:
+        return text
+
+    def _repl(match: re.Match) -> str:
+        prev = match.group(1) or ""
+        list_line = match.group(2) or ""
+        if "|" in list_line:
+            return match.group(0)
+        return f"{prev}\n\n{list_line}"
+
+    return _LIST_NEEDS_BLANK_RE.sub(_repl, text)
+
+
 def sanitize_answer(text: str) -> str:
     """Structural cleanup of LLM output before citation/math processing."""
     if not text:
@@ -208,7 +228,7 @@ def sanitize_answer(text: str) -> str:
     text = _normalize_related_concepts_body(text)
 
     # Ensure blank line before list items (markdown requires it for proper parsing).
-    text = _LIST_NEEDS_BLANK_RE.sub(r"\1\n\n\2", text)
+    text = _insert_blank_line_before_lists(text)
 
     return text
 
@@ -271,7 +291,7 @@ def strip_disallowed_markdown_images(text: str) -> str:
             u = u[1:-1].strip()
         # Strip optional title after whitespace.
         u = u.split(None, 1)[0].strip()
-        return u.startswith(("/rag/documents/", "http://", "https://", "data:"))
+        return u.startswith(("/rag/", "/api/rag/", "http://", "https://", "data:"))
 
     def _repl(m: re.Match) -> str:
         alt = (m.group(1) or "").strip()

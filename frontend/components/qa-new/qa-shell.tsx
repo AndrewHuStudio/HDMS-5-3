@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
+import type { ChangeEvent, KeyboardEvent, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { QARetrievalStats } from "@/components/qa-retrieval-stats";
 import { QAFeedback } from "@/components/qa-feedback";
 import { QAExportButton } from "@/components/qa-export-button";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
-import type { ChatMessage, SourceInfo } from "@/features/qa/types";
+import type { ChatMessage } from "@/features/qa/types";
 import { cn } from "@/lib/utils";
 import { API_BASE, QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
 import { injectSourceImages } from "@/lib/inject-source-images";
@@ -21,11 +21,13 @@ import { injectSourceTables } from "@/lib/inject-source-tables";
 import { normalizeAnswerTables } from "@/lib/normalize-answer-tables";
 import { normalizeAnswerMarkdownArtifacts } from "@/lib/normalize-answer-markdown-artifacts";
 import { QA_REMARK_PLUGINS } from "@/lib/qa-markdown-plugins";
-import { sanitizeAnswerCitations } from "@/lib/sanitize-answer-citations";
 import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
-import { stripInlineCitationLabels } from "@/lib/strip-inline-citation-labels";
-import { convertCitationsToAnchors } from "@/lib/convert-citations-to-anchors";
 import { collapseFigureMentions } from "@/lib/stream-source-utils";
+import {
+  buildCitationLabelIndexMap,
+  CitationLink,
+  processAnswerCitations,
+} from "@/features/qa/citations";
 
 interface QAShellProps {
   title?: string;
@@ -83,55 +85,6 @@ function highlightRetrievalDocNames(node: ReactNode, keyPrefix = "doc"): ReactNo
     return node.map((child, idx) => highlightRetrievalDocNames(child, `${keyPrefix}-${idx}`));
   }
   return node;
-}
-
-/**
- * Build a map from citation_label (e.g. "1-1") to source array index.
- */
-function buildLabelIndexMap(sources: SourceInfo[] | undefined): Map<string, number> {
-  const map = new Map<string, number>();
-  if (!sources) return map;
-  for (let i = 0; i < sources.length; i++) {
-    const label = sources[i].citation_label;
-    if (label) map.set(label, i);
-  }
-  return map;
-}
-
-/**
- * Post-process LLM output to normalize citation placement (N-M format):
- * 1. Move citations before punctuation: "内容。[1-1]" → "内容[1-1]。"
- * 2. Strip citations inside markdown table rows
- * 3. If sources exist but no citations found, append a summary line
- */
-function normalizeCitations(text: string, sources: SourceInfo[]): string {
-  if (!text) return text;
-
-  let result = text;
-  const validLabels = new Set(sources.map((s) => s.citation_label).filter((v): v is string => Boolean(v)));
-
-  result = result.replace(
-    /([。！？.!?])(\s*(?:\[\d{1,2}-\d{1,2}\])+)/g,
-    (_, punct, cites) => `${cites.trim()}${punct}`
-  );
-
-  result = result.replace(
-    /^(\|.+)$/gm,
-    (line) => line.replace(/\[\d{1,2}-\d{1,2}\]/g, "")
-  );
-
-  result = sanitizeAnswerCitations({ text: result, validLabels });
-
-  return result;
-}
-
-/**
- * Parse href like #source-1-2 and return the citation label "1-2".
- */
-function parseCitationLabel(href?: string): string | null {
-  if (!href) return null;
-  const match = href.match(/^#source-(\d{1,2}-\d{1,2})$/);
-  return match ? match[1] : null;
 }
 
 /** Extract recommended questions from <!--RECOMMENDED_QUESTIONS ... --> block */
@@ -617,7 +570,7 @@ function AssistantContent({
   onFillInput?: (value: string) => void;
   onImageClick?: (src: string) => void;
 }) {
-  const { content, thinking, sources, retrievalStats, feedback, isStreaming, thinkingDone } = message;
+  const { content, thinking, sources, retrievalStats, feedback, isStreaming, thinkingDone, finalizedByServer } = message;
   const [activeCitationLabel, setActiveCitationLabel] = useState<string | null>(null);
   const markdownRef = useRef<HTMLDivElement>(null);
 
@@ -636,7 +589,7 @@ function AssistantContent({
   }, [content, isStreaming]);
 
   const sourcesNormalized = useMemo(() => normalizeCitationSources(sources ?? []), [sources]);
-  const labelIndexMap = useMemo(() => buildLabelIndexMap(sourcesNormalized), [sourcesNormalized]);
+  const labelIndexMap = useMemo(() => buildCitationLabelIndexMap(sourcesNormalized), [sourcesNormalized]);
 
   const { cleanContent, questions: recommendedQuestions } = useMemo(
     () => (isStreaming ? { cleanContent: content, questions: [] } : extractRecommendedQuestions(content)),
@@ -648,20 +601,31 @@ function AssistantContent({
     const withArtifacts = normalizeAnswerMarkdownArtifacts(withTables, {
       streaming: isStreaming,
     });
-    const normalized = isStreaming ? withArtifacts : normalizeCitations(withArtifacts, sourcesNormalized);
-    const validLabels = new Set(
-      sourcesNormalized.map((s) => s.citation_label).filter((v): v is string => Boolean(v))
-    );
-    const withAnchors = isStreaming ? normalized : convertCitationsToAnchors(normalized, validLabels);
-    const withoutInlineCitations = stripInlineCitationLabels(withAnchors);
+    const withoutInlineCitations = processAnswerCitations({
+      text: withArtifacts,
+      sources: sourcesNormalized,
+      isStreaming,
+    });
     if (isStreaming) {
       // Keep streaming text stable; inject images only after the answer is complete.
       return collapseFigureMentions(withoutInlineCitations);
     }
-    const withImages = injectSourceImages(withoutInlineCitations, sourcesNormalized, precedingQuestion);
-    const withTablesAndImages = injectSourceTables(withImages, sourcesNormalized);
+    const hasMarkdownImage = /!\[[^\]]*]\([^)]+\)/.test(withoutInlineCitations);
+    const hasGfmTable = /\|.+\|\n\s*\|?\s*:?-{3,}:?/m.test(withoutInlineCitations);
+
+    // If backend already emitted a finalized answer_replaced payload, avoid
+    // aggressive reinjection that can diverge from the server-final structure.
+    const shouldInjectImages = !finalizedByServer || !hasMarkdownImage;
+    const shouldInjectTables = !finalizedByServer || !hasGfmTable;
+
+    const withImages = shouldInjectImages
+      ? injectSourceImages(withoutInlineCitations, sourcesNormalized, precedingQuestion)
+      : withoutInlineCitations;
+    const withTablesAndImages = shouldInjectTables
+      ? injectSourceTables(withImages, sourcesNormalized)
+      : withImages;
     return collapseFigureMentions(withTablesAndImages);
-  }, [cleanContent, sourcesNormalized, isStreaming, precedingQuestion]);
+  }, [cleanContent, sourcesNormalized, isStreaming, precedingQuestion, finalizedByServer]);
 
   useEffect(() => {
     setActiveCitationLabel(null);
@@ -835,32 +799,17 @@ function AssistantContent({
                   );
                 },
                 a: ({ href, children }) => {
-                  const citationLabel = parseCitationLabel(href);
-                  if (citationLabel !== null) {
-                    const sourceIdx = labelIndexMap.get(citationLabel);
-                    const source = sourceIdx !== undefined ? sources?.[sourceIdx] : undefined;
-                    return (
-                      <CitationPill
-                        label={citationLabel}
-                        source={source}
-                        isActive={activeCitationLabel === citationLabel}
-                        onHover={setActiveCitationLabel}
-                        onSelect={handleCitationSelect}
-                      >
-                        {children}
-                      </CitationPill>
-                    );
-                  }
-
                   return (
-                    <a
+                    <CitationLink
                       href={href}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-primary underline"
+                      sources={sourcesNormalized}
+                      labelIndexMap={labelIndexMap}
+                      activeCitationLabel={activeCitationLabel}
+                      onCitationHover={setActiveCitationLabel}
+                      onCitationSelect={handleCitationSelect}
                     >
                       {children}
-                    </a>
+                    </CitationLink>
                   );
                 },
               }}
@@ -919,95 +868,5 @@ function AssistantContent({
       )}
 
     </div>
-  );
-}
-
-function CitationPill({
-  label,
-  source,
-  isActive,
-  onHover,
-  onSelect,
-  children,
-}: {
-  label: string;
-  source?: SourceInfo;
-  isActive: boolean;
-  onHover: (label: string | null) => void;
-  onSelect: (label: string) => void;
-  children: React.ReactNode;
-}) {
-  const typeLabel = source?.source === "knowledge_graph" ? "知识图谱" : "文档检索";
-  const hoverExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearHoverExitTimer = useCallback(() => {
-    if (hoverExitTimerRef.current) {
-      clearTimeout(hoverExitTimerRef.current);
-      hoverExitTimerRef.current = null;
-    }
-  }, []);
-
-  const showCitationHover = useCallback(() => {
-    clearHoverExitTimer();
-    onHover(label);
-  }, [clearHoverExitTimer, label, onHover]);
-
-  const hideCitationHover = useCallback(() => {
-    clearHoverExitTimer();
-    hoverExitTimerRef.current = setTimeout(() => {
-      onHover(null);
-      hoverExitTimerRef.current = null;
-    }, 120);
-  }, [clearHoverExitTimer, onHover]);
-
-  useEffect(() => {
-    return () => {
-      clearHoverExitTimer();
-    };
-  }, [clearHoverExitTimer]);
-
-  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault();
-    onSelect(label);
-  };
-
-  const displayLabel = label;
-
-  return (
-    <span
-      className="relative inline-flex align-middle"
-      onMouseEnter={showCitationHover}
-      onMouseLeave={hideCitationHover}
-    >
-      <a
-        href={`#source-${label}`}
-        title={source?.name || `引用 [${label}]`}
-        className={cn(
-          "inline-flex h-5 items-center justify-center rounded-full border px-1.5 text-[10px] font-medium no-underline transition-colors",
-          "cursor-pointer",
-          isActive
-            ? "border-red-600 bg-red-600 text-white"
-            : "border-red-400 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-500/50 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
-        )}
-        onFocus={showCitationHover}
-        onBlur={hideCitationHover}
-        onClick={handleClick}
-      >
-        {displayLabel}
-      </a>
-
-      {isActive && source && (
-        <span className="pointer-events-auto absolute left-1/2 top-full z-20 mt-1 w-64 -translate-x-1/2 rounded-md border border-border bg-popover p-2 text-[11px] text-popover-foreground shadow-md">
-          <span className="line-clamp-1 block font-medium">{source.name || "未知来源"}</span>
-          {source.section && (
-            <span className="mt-0.5 line-clamp-1 block text-muted-foreground">{source.section}</span>
-          )}
-          <span className="mt-1 block text-muted-foreground">
-            {typeLabel}
-            {typeof source.page === "number" && source.page > 0 ? ` · 第 ${source.page} 页` : ""}
-          </span>
-        </span>
-      )}
-    </span>
   );
 }

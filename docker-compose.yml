@@ -30,8 +30,8 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: hdms2024
       MONGO_INITDB_DATABASE: hdms
     volumes:
-      - F:/HDMS_data/mongodb:/data/db
-      - F:/HDMS_data/mongodb_config:/data/configdb
+      - mongodb_data:/data/db
+      - mongodb_config_data:/data/configdb
     networks:
       - hdms-network
 
@@ -45,7 +45,7 @@ services:
       ETCD_QUOTA_BACKEND_BYTES: "8589934592"
       ETCD_SNAPSHOT_COUNT: "50000"
     volumes:
-      - F:/HDMS_data/etcd:/etcd
+      - etcd_data:/etcd   # 修改点：改为命名卷
     command: >
       etcd -advertise-client-urls=http://127.0.0.1:2381
            -listen-client-urls http://0.0.0.0:2381
@@ -64,7 +64,7 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
       MINIO_BROWSER: "off"
     volumes:
-      - F:/HDMS_data/minio:/minio_data
+      - minio_data:/minio_data   # 修改点：改为命名卷
     command: minio server /minio_data --console-address ":9001"
     ports:
       - "9004:9000"
@@ -93,7 +93,7 @@ services:
       DATA_COORD_SEGMENT_MAX_SIZE: "512"
       LOG_LEVEL: info
     volumes:
-      - F:/HDMS_data/milvus:/var/lib/milvus
+      - milvus_data:/var/lib/milvus
     ports:
       - "19532:19530"
       - "9093:9091"    
@@ -128,3 +128,8 @@ volumes:
   hdms-postgres-data:
   hdms-neo4j-data:
   hdms-neo4j-logs:
+  mongodb_data:
+  mongodb_config_data:
+  milvus_data:
+  etcd_data:  
+  minio_data:  

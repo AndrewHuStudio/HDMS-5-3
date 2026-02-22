@@ -191,6 +191,68 @@ def test_stream_emits_summary_preface_before_model_answer(monkeypatch):
         assert first_answer_idx < first_replaced_idx
 
 
+def test_stream_skips_answer_replaced_when_table_shape_degrades(monkeypatch):
+    monkeypatch.setattr(service_module.openai, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(app_config, "QUERY_CACHE_ENABLED", False)
+
+    FakeOpenAI.scripted_outputs = [
+        "| 指标 | 值 |\n| --- | --- |\n| A | 1 |\n",
+    ]
+
+    service = RAGService(
+        retriever=DummyRetriever(delay_seconds=0),
+        llm_base_url="https://example.com/v1",
+        llm_api_key="test-key",
+        llm_model="deepseek-r1",
+    )
+
+    def fake_finalize(answer, sources, **_kwargs):
+        return ("表格后处理异常：仅剩一行文字", sources)
+
+    monkeypatch.setattr(service, "_finalize_answer_and_sources", fake_finalize)
+
+    events = list(service.answer_question_stream(
+        question="test",
+        history=[],
+        use_retrieval=True,
+        top_k=5,
+    ))
+
+    assert any(event == "answer" for event, _ in events)
+    assert all(event != "answer_replaced" for event, _ in events)
+
+
+def test_stream_skips_answer_replaced_when_images_disappear(monkeypatch):
+    monkeypatch.setattr(service_module.openai, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(app_config, "QUERY_CACHE_ENABLED", False)
+
+    FakeOpenAI.scripted_outputs = [
+        "这是图片说明：![示意图](/rag/documents/demo.png)\n",
+    ]
+
+    service = RAGService(
+        retriever=DummyRetriever(delay_seconds=0),
+        llm_base_url="https://example.com/v1",
+        llm_api_key="test-key",
+        llm_model="deepseek-r1",
+    )
+
+    def fake_finalize(answer, sources, **_kwargs):
+        return ("这是图片说明：图见附件。", sources)
+
+    monkeypatch.setattr(service, "_finalize_answer_and_sources", fake_finalize)
+
+    events = list(service.answer_question_stream(
+        question="test",
+        history=[],
+        use_retrieval=True,
+        top_k=5,
+    ))
+
+    assert any(event == "answer" for event, _ in events)
+    assert all(event != "answer_replaced" for event, _ in events)
+
+
 def test_stream_keeps_keyword_disabled_even_in_vector_keyword_mode(monkeypatch):
     monkeypatch.setattr(service_module.openai, "OpenAI", FakeOpenAI)
     monkeypatch.setattr(app_config, "QUERY_CACHE_ENABLED", False)

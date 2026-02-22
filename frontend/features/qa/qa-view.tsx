@@ -31,6 +31,66 @@ const buildHistory = (messages: ChatMessage[]): ChatHistoryMessage[] => {
     .map((message) => ({ role: message.role, content: message.content }));
 };
 
+type MarkdownShapeMetrics = {
+  gfmTableBlocks: number;
+  pipeHeavyLines: number;
+  markdownImageCount: number;
+  length: number;
+};
+
+function inspectMarkdownShape(markdown: string): MarkdownShapeMetrics {
+  const text = String(markdown || "");
+  const lines = text.split("\n");
+  let gfmTableBlocks = 0;
+  let pipeHeavyLines = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const pipeCount = (line.match(/\|/g) || []).length;
+    if (pipeCount >= 2) pipeHeavyLines += 1;
+
+    const headerLike = /^\s*\|.+\|\s*$/.test(line.trim());
+    const sepLike = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(
+      (lines[i + 1] || "").trim(),
+    );
+    if (headerLike && sepLike) gfmTableBlocks += 1;
+  }
+
+  const markdownImageCount = (text.match(/!\[[^\]]*]\([^)]+\)/g) || []).length;
+
+  return {
+    gfmTableBlocks,
+    pipeHeavyLines,
+    markdownImageCount,
+    length: text.trim().length,
+  };
+}
+
+function shouldAcceptAnswerReplacement(current: string, replacement: string): boolean {
+  const currentText = String(current || "");
+  const nextText = String(replacement || "");
+  if (!nextText.trim()) return false;
+  if (!currentText.trim()) return true;
+
+  const cur = inspectMarkdownShape(currentText);
+  const next = inspectMarkdownShape(nextText);
+
+  // Reject obvious degradation: valid table block disappears and turns into raw pipe lines.
+  const tableDowngradedToPipes =
+    cur.gfmTableBlocks > 0 &&
+    next.gfmTableBlocks === 0 &&
+    next.pipeHeavyLines >= Math.max(2, cur.pipeHeavyLines);
+  if (tableDowngradedToPipes) return false;
+
+  // Reject when images disappear completely after replacement.
+  if (cur.markdownImageCount > 0 && next.markdownImageCount === 0) return false;
+
+  // Guard against accidental severe truncation.
+  if (cur.length > 120 && next.length < cur.length * 0.55) return false;
+
+  return true;
+}
+
 interface QAViewProps {
   embedded?: boolean;
 }
@@ -113,8 +173,11 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
         onAnswerReplaced: (fullAnswer, replacedSources) => {
           updateMessage(assistantId, (msg) => ({
             ...msg,
-            content: fullAnswer,
+            content: shouldAcceptAnswerReplacement(msg.content, fullAnswer)
+              ? fullAnswer
+              : msg.content,
             isStreaming: false,
+            finalizedByServer: true,
             ...(replacedSources
               ? { sources: mergeStreamingSources(msg.sources, replacedSources) }
               : {}),

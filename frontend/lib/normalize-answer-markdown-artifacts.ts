@@ -5,6 +5,13 @@
  * qa-panel.tsx and qa-shell.tsx.
  */
 
+import {
+  classifyHeadingCandidate,
+  parseMarkdownBlocks,
+  serializeMarkdownBlocks,
+  splitInlineHeadingAndBody,
+} from "@/features/qa/formatting";
+
 const INLINE_OR_FENCED_CODE_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
 
 export interface NormalizeAnswerMarkdownArtifactsOptions {
@@ -18,13 +25,90 @@ export interface NormalizeAnswerMarkdownArtifactsOptions {
    * we explicitly want to rewrite inline figure refs.
    */
   preserveInlineFigureRefs?: boolean;
+  /**
+   * Emit normalization diagnostics in development for tuning classifier/table rules.
+   */
+  debugDiagnostics?: boolean;
 }
 
 /**
  * Regex that matches LaTeX delimiters ($...$, $$...$$) AND code blocks.
  * Used to split text so that destructive normalizations skip protected regions.
  */
-const PROTECTED_REGION_RE = /(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$|```[\s\S]*?```|`[^`\n]*`)/g;
+const PROTECTED_REGION_RE =
+  /(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|```[\s\S]*?```|`[^`\n]*`|!\[[^\]\n]*\]\([^)\n]*\)|\[[^\]\n]+\]\([^)\n]*\))/g;
+
+type NormalizationDiagnostics = {
+  enabled: boolean;
+  counters: Record<string, number>;
+  heading: {
+    heading: number;
+    paragraph: number;
+    reasons: Record<string, number>;
+  };
+};
+
+function createDiagnostics(enabled: boolean): NormalizationDiagnostics {
+  return {
+    enabled,
+    counters: {},
+    heading: {
+      heading: 0,
+      paragraph: 0,
+      reasons: {},
+    },
+  };
+}
+
+function bumpCounter(diag: NormalizationDiagnostics, key: string, by = 1): void {
+  if (!diag.enabled) return;
+  diag.counters[key] = (diag.counters[key] || 0) + by;
+}
+
+function bumpIfChanged(
+  diag: NormalizationDiagnostics,
+  key: string,
+  before: string,
+  after: string,
+): void {
+  if (!diag.enabled) return;
+  if (before !== after) bumpCounter(diag, key);
+}
+
+function recordHeadingDecision(
+  diag: NormalizationDiagnostics,
+  decision: "heading" | "paragraph",
+  reasons: string[],
+): void {
+  if (!diag.enabled) return;
+  if (decision === "heading") diag.heading.heading += 1;
+  else diag.heading.paragraph += 1;
+  for (const reason of reasons) {
+    diag.heading.reasons[reason] = (diag.heading.reasons[reason] || 0) + 1;
+  }
+}
+
+function runBlockParserStage(text: string, diagnostics?: NormalizationDiagnostics): string {
+  const blocks = parseMarkdownBlocks(text);
+  if (diagnostics?.enabled) {
+    bumpCounter(diagnostics, "block-total", blocks.length);
+    for (const block of blocks) {
+      bumpCounter(diagnostics, `block-${block.type}`);
+    }
+  }
+  return serializeMarkdownBlocks(blocks);
+}
+
+function collectHeadingCandidateLineIndexes(text: string): Set<number> {
+  const blocks = parseMarkdownBlocks(text);
+  const indexes = new Set<number>();
+  for (const block of blocks) {
+    if (block.type !== "heading_candidate") continue;
+    if (block.startLine !== block.endLine) continue;
+    indexes.add(block.startLine);
+  }
+  return indexes;
+}
 
 /**
  * Apply a transform function only to unprotected segments of text,
@@ -161,87 +245,191 @@ function splitRunOnNumberedItems(text: string): string {
   });
 }
 
-function splitHeadingAndInlineNumberedSubitem(text: string): string {
+function splitHeadingAndInlineNumberedSubitem(text: string, diagnostics?: NormalizationDiagnostics): string {
   return transformUnprotected(text, (seg) => {
     const lines = seg.split("\n");
     return lines
       .map((line) => {
-        const markdownHeadingMatch = line.match(/^(#{2,4}\s+[^\n#]*?)(\d{1,2}[.．](?=[^\s\d]).*)$/);
-        const chineseHeadingMatch = line.match(/^(\s*[一二三四五六七八九十]+[、.．]\s*[^\n]*?)(\d{1,2}[.．](?=[^\s\d]).*)$/);
-        const m = markdownHeadingMatch || chineseHeadingMatch;
-        if (!m) return line;
-
-        const headingPart = (m[1] || "").trimEnd();
-        const subitemPart = (m[2] || "").trimStart();
-        const headingTail = headingPart.slice(-1);
-
-        // Avoid splitting cases where heading naturally ends with a digit (e.g. version numbers).
-        if (/\d/.test(headingTail)) return line;
-        if (!/[\u4e00-\u9fffA-Za-z）)]/.test(headingTail)) return line;
-
-        const normalizedSubitem = subitemPart.replace(/^(\d{1,2}[.．])(?=[^\s\d])/, "$1 ");
-        return `${headingPart}\n${normalizedSubitem}`;
+        const nextLine = splitInlineHeadingAndBody(line);
+        if (diagnostics && nextLine !== line) bumpCounter(diagnostics, "split-inline-heading-body");
+        return nextLine;
       })
       .join("\n");
   });
 }
 
-function normalizeLoosePipeTables(text: string): string {
-  return transformUnprotected(text, (seg) => {
-    const lines = seg.split("\n");
-    return lines
-      .map((line) => {
-        if (!line.includes("|")) return line;
-        if (/^\s*\|.+\|\s*$/.test(line.trim())) return line;
+const TABLE_BOUNDARY_NOTE_RE = /^(?:注|备注|说明|注释|提示|注意)\s*[：:]/;
 
-        const tokens = line
-          .split("|")
-          .map((t) => t.trim())
-          .filter(Boolean);
-        if (tokens.length < 6) return line;
+interface NormalizeLoosePipeTableOptions {
+  diagnostics?: NormalizationDiagnostics;
+  streaming?: boolean;
+}
 
-        const sepStart = tokens.findIndex((t) => /^[-:]{3,}$/.test(t));
-        if (sepStart < 2) return line;
+function normalizeLoosePipeTables(
+  text: string,
+  options: NormalizeLoosePipeTableOptions = {},
+): string {
+  const { diagnostics, streaming = false } = options;
+  if (!text || streaming) return text;
 
-        const cols = sepStart;
-        const sepTokens = tokens.slice(sepStart, sepStart + cols);
-        if (sepTokens.length !== cols || sepTokens.some((t) => !/^[-:]{3,}$/.test(t))) {
-          return line;
-        }
+  const parsePipeCells = (line: string): string[] | null => {
+    if (!line.includes("|")) return null;
+    const trimmed = line.trim();
+    if (!trimmed) return null;
 
-        const body = tokens.slice(sepStart + cols);
-        if (body.length < cols) return line;
+    const cells = trimmed
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim());
+    if (cells.length < 2) return null;
+    if (!cells.some((cell) => cell.length > 0)) return null;
+    return cells;
+  };
 
-        const rows: string[] = [];
-        for (let i = 0; i < body.length; i += cols) {
-          const row = body.slice(i, i + cols);
-          if (row.length !== cols) break;
-          rows.push(`| ${row.join(" | ")} |`);
-        }
-        if (rows.length === 0) return line;
+  const isSeparatorRow = (cells: string[]): boolean =>
+    cells.length > 0 && cells.every((cell) => !cell || /^:?-{3,}:?$/.test(cell));
 
-        return [
-          `| ${tokens.slice(0, cols).join(" | ")} |`,
-          `| ${Array.from({ length: cols }, () => "---").join(" | ")} |`,
-          ...rows,
-        ].join("\n");
-      })
-      .join("\n");
+  const padOrTrimRow = (cells: string[], cols: number): string[] => {
+    const next = cells.slice(0, cols);
+    while (next.length < cols) next.push("");
+    return next;
+  };
+
+  const resolveColCount = (rows: string[][]): number => {
+    const counts = new Map<number, number>();
+    rows.forEach((row) => counts.set(row.length, (counts.get(row.length) || 0) + 1));
+    let bestCols = rows[0]?.length || 3;
+    let bestFreq = -1;
+    counts.forEach((freq, cols) => {
+      if (freq > bestFreq || (freq === bestFreq && cols > bestCols)) {
+        bestCols = cols;
+        bestFreq = freq;
+      }
+    });
+    return Math.max(2, Math.min(8, bestCols));
+  };
+
+  const isBoundaryNoteRow = (cells: string[]): boolean => {
+    const first = stripInlineMdWrappers(cells[0] || "").trim();
+    if (!first || !TABLE_BOUNDARY_NOTE_RE.test(first)) return false;
+    return cells.slice(1).every((cell) => !cell.trim());
+  };
+
+  const collapseNoteRow = (cells: string[]): string => {
+    return cells
+      .map((cell) => cell.trim())
+      .filter(Boolean)
+      .join(" ")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
+  };
+
+  const normalizeTableBlock = (
+    lines: string[],
+  ): { lines: string[]; changed: boolean; detachedNotes: number } => {
+    const parsedRows = lines.map((line) => {
+      const cells = parsePipeCells(line);
+      if (!cells) return null;
+      return { cells, separator: isSeparatorRow(cells) };
+    });
+
+    if (parsedRows.some((row) => row === null)) {
+      return { lines, changed: false, detachedNotes: 0 };
+    }
+
+    const typedRows = parsedRows as Array<{ cells: string[]; separator: boolean }>;
+    if (typedRows.length === 0) return { lines, changed: false, detachedNotes: 0 };
+
+    if (typedRows.length === 1 && typedRows[0].cells.length < 4) {
+      // Avoid converting incidental single-line prose with pipes.
+      return { lines, changed: false, detachedNotes: 0 };
+    }
+
+    const nonSeparatorRows = typedRows.filter((row) => !row.separator).map((row) => row.cells);
+    if (nonSeparatorRows.length < 2) return { lines, changed: false, detachedNotes: 0 };
+
+    const colCount = resolveColCount(nonSeparatorRows);
+    const normalizedRows = typedRows.map((row) => padOrTrimRow(row.cells, colCount));
+    const header = normalizedRows[0];
+    let bodyStart = 1;
+    if (typedRows.length > 1 && typedRows[1].separator) {
+      bodyStart = 2;
+    }
+
+    const bodyRows = normalizedRows.slice(bodyStart);
+    if (bodyRows.length === 0) return { lines, changed: false, detachedNotes: 0 };
+
+    const noteLines: string[] = [];
+    while (bodyRows.length > 0 && isBoundaryNoteRow(bodyRows[bodyRows.length - 1])) {
+      const detached = collapseNoteRow(bodyRows.pop() || []);
+      if (detached) noteLines.unshift(detached);
+    }
+
+    if (bodyRows.length === 0) {
+      return { lines, changed: false, detachedNotes: 0 };
+    }
+
+    const out: string[] = [];
+    out.push(`| ${header.join(" | ")} |`);
+    out.push(`| ${Array.from({ length: colCount }, () => "---").join(" | ")} |`);
+    bodyRows.forEach((row) => out.push(`| ${row.join(" | ")} |`));
+
+    if (noteLines.length > 0) {
+      out.push("", ...noteLines);
+    }
+
+    return { lines: out, changed: out.join("\n") !== lines.join("\n"), detachedNotes: noteLines.length };
+  };
+
+  const blocks = parseMarkdownBlocks(text);
+  let changed = false;
+  let detachedNoteCount = 0;
+  const normalizedChunks = blocks.map((block) => {
+    if (block.type !== "table") return block.content;
+
+    const normalized = normalizeTableBlock(block.lines);
+    if (!normalized.changed) return block.content;
+
+    changed = true;
+    detachedNoteCount += normalized.detachedNotes;
+    if (diagnostics) bumpCounter(diagnostics, "normalize-loose-pipe-table");
+    return normalized.lines.join("\n");
   });
+
+  if (diagnostics && detachedNoteCount > 0) {
+    bumpCounter(diagnostics, "detached-table-note-lines", detachedNoteCount);
+  }
+
+  return changed ? normalizedChunks.join("\n") : text;
 }
 
 const HEADING_LINE_RE = /^(#{1,6})\s*(.*?)\s*$/;
-const HEADING_CN_SECTION_RE = /^[一二三四五六七八九十]+[、.．]\s*/;
-const HEADING_CN_SUBSECTION_RE = /^[（(][一二三四五六七八九十]+[)）]\s*/;
-const HEADING_NUM_SECTION_RE = /^\d{1,2}[.、．]\s*/;
-const HEADING_NUM_SUBSECTION_RE = /^(?:\d+[)）]|[\u2460-\u2469])\s*/;
-const HEADING_CAPTION_RE = /^(?:图|表)\s*\d+(?:\.\d+)*\s*[：:]/;
 
-function normalizeMarkdownHeadingHierarchy(text: string): string {
+function normalizeMarkdownHeadingHierarchy(text: string, diagnostics?: NormalizationDiagnostics): string {
   const lines = text.split("\n");
-  const normalized = lines.map((line) => {
+  const headingCandidates = collectHeadingCandidateLineIndexes(text);
+  if (headingCandidates.size === 0) return text;
+  const findPreviousNonEmptyLine = (idx: number): string => {
+    for (let i = idx - 1; i >= 0; i--) {
+      const candidate = lines[i]?.trim();
+      if (candidate) return candidate;
+    }
+    return "";
+  };
+
+  const findNextNonEmptyLine = (idx: number): string => {
+    for (let i = idx + 1; i < lines.length; i++) {
+      const candidate = lines[i]?.trim();
+      if (candidate) return candidate;
+    }
+    return "";
+  };
+
+  const normalized = lines.map((line, idx) => {
     const trimmed = line.trim();
     if (!trimmed) return line;
+    if (!headingCandidates.has(idx)) return line;
 
     const match = trimmed.match(HEADING_LINE_RE);
     if (!match) return line;
@@ -251,34 +439,17 @@ function normalizeMarkdownHeadingHierarchy(text: string): string {
     const semanticTitle = normalizeHeadingTitle(rawTitle);
     if (!semanticTitle) return "";
 
-    const semanticHeading =
-      MAJOR_SECTION_TITLE_RE.test(semanticTitle) ||
-      HEADING_CN_SECTION_RE.test(semanticTitle) ||
-      HEADING_CN_SUBSECTION_RE.test(semanticTitle) ||
-      HEADING_NUM_SECTION_RE.test(semanticTitle) ||
-      HEADING_NUM_SUBSECTION_RE.test(semanticTitle);
-
-    // Demote headings that are clearly full sentences or figure/table captions.
-    const startsLikeStructuredHeading =
-      HEADING_CN_SECTION_RE.test(semanticTitle) ||
-      HEADING_CN_SUBSECTION_RE.test(semanticTitle) ||
-      HEADING_NUM_SECTION_RE.test(semanticTitle) ||
-      HEADING_NUM_SUBSECTION_RE.test(semanticTitle);
-
-    // Keep heading normalization conservative:
-    // - always demote figure/table captions;
-    // - demote very long punctuation-heavy sentence-like pseudo headings;
-    // - keep numbered/structured headings intact.
-    const looksLikeBodySentence =
-      HEADING_CAPTION_RE.test(semanticTitle) ||
-      (!startsLikeStructuredHeading &&
-        semanticTitle.length >= 32 &&
-        /[，,:：；。！？]/.test(semanticTitle));
-
-    // Demote sentence-like pseudo-headings so content/body no longer renders as title.
-    if (!semanticHeading && looksLikeBodySentence) {
-      return semanticTitle;
+    const classification = classifyHeadingCandidate(semanticTitle, {
+      previousNonEmptyLine: findPreviousNonEmptyLine(idx),
+      nextNonEmptyLine: findNextNonEmptyLine(idx),
+      lineIndex: idx,
+      totalLines: lines.length,
+    });
+    if (diagnostics) {
+      recordHeadingDecision(diagnostics, classification.decision, classification.reasons);
     }
+
+    if (classification.decision !== "heading") return semanticTitle;
 
     let level = originalLevel;
     if (MAJOR_SECTION_TITLE_RE.test(semanticTitle)) level = 2;
@@ -289,7 +460,12 @@ function normalizeMarkdownHeadingHierarchy(text: string): string {
 
   const out: string[] = [];
   let prevHeadingLevel = 0;
-  for (const line of normalized) {
+  for (let idx = 0; idx < normalized.length; idx++) {
+    const line = normalized[idx] ?? "";
+    if (!headingCandidates.has(idx)) {
+      out.push(line);
+      continue;
+    }
     const trimmed = line.trim();
     const match = trimmed.match(/^(#{1,6})\s+(.+?)\s*$/);
     if (!match) {
@@ -364,6 +540,121 @@ function sanitizeBrokenLatexFragment(fragment: string): string {
     .replace(/\bG\s*B\s*\/\s*T\b/gi, "GB/T");
 
   return out;
+}
+
+const CODE_OR_DOLLAR_MATH_RE = /(```[\s\S]*?```|`[^`\n]*`|\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/g;
+const FORMULA_LATEX_TOKEN_RE =
+  /\\(?:frac|sum|sqrt|times|cdot|geq|leq|approx|neq|text|max|min|int|prod|left|right|operatorname)\b/i;
+const FORMULA_SENTENCE_PUNCT_RE = /[。！？；]/;
+const FORMULA_OPERATOR_RE = /(?:=|>=|<=|>|<|≥|≤|\\geq|\\leq|\\approx|\\neq|[+\-*/×÷^])/;
+
+function transformOutsideCodeAndDollarMath(text: string, fn: (segment: string) => string): string {
+  const segments = text.split(CODE_OR_DOLLAR_MATH_RE);
+  return segments
+    .map((segment, index) => (index % 2 === 1 ? segment : fn(segment)))
+    .join("");
+}
+
+/**
+ * Frontend fallback for math delimiters:
+ * - \[...\] -> $$...$$
+ * - \(...\) -> $...$
+ * - \$...\$ / \$\$...\$\$ -> $...$ / $$...$$
+ */
+function normalizeMathDelimitersForRenderer(text: string): string {
+  if (!text) return text;
+
+  return transformOutsideCodeAndDollarMath(text, (segment) => {
+    let out = segment;
+
+    // Normalize double-escaped bracket delimiters first.
+    out = out
+      .replace(/\\\\\[/g, "\\[")
+      .replace(/\\\\\]/g, "\\]")
+      .replace(/\\\\\(/g, "\\(")
+      .replace(/\\\\\)/g, "\\)");
+
+    out = out.replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_m, inner: string) => `$$\n${inner.trim()}\n$$`);
+    out = out.replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (_m, inner: string) => `$${inner.trim()}$`);
+
+    // Unescape dollar delimiters emitted by some model outputs.
+    out = out.replace(/\\\$\$([\s\S]*?)\\\$\$/g, (_m, inner: string) => `$$${inner}$$`);
+    out = out.replace(/\\\$([\s\S]+?)\\\$/g, (_m, inner: string) => `$${inner}$`);
+
+    return out;
+  });
+}
+
+function looksLikeBareFormulaExpression(value: string): boolean {
+  const text = (value || "").trim();
+  if (!text) return false;
+  if (text.length < 6 || text.length > 220) return false;
+  if (text.includes("|")) return false;
+  if (FORMULA_SENTENCE_PUNCT_RE.test(text)) return false;
+  if (/^\d+[.)]\s+/.test(text) || /^[-*+]\s+/.test(text) || /^#{1,6}\s+/.test(text)) return false;
+  if (/\[\d{1,2}-\d{1,2}\]/.test(text)) return false;
+
+  const hasLatex = FORMULA_LATEX_TOKEN_RE.test(text);
+  const hasOperator = FORMULA_OPERATOR_RE.test(text);
+  if (hasLatex && hasOperator) return true;
+
+  // Fallback for non-LaTeX formula text like "A = B/C × 100%".
+  const hasEquation = /[A-Za-z\u4e00-\u9fff]\s*=\s*[^\s]/.test(text);
+  const hasArithmetic = /[+\-*/×÷]/.test(text);
+  return hasEquation && hasArithmetic;
+}
+
+function promoteBareFormulaParagraphs(text: string, diagnostics?: NormalizationDiagnostics): string {
+  if (!text) return text;
+
+  const blocks = parseMarkdownBlocks(text);
+  let changed = false;
+
+  const mapped = blocks.map((block) => {
+    if (block.type !== "paragraph") return block.content;
+
+    const lines = block.lines;
+    const next: string[] = [];
+    let blockChanged = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        next.push(line);
+        continue;
+      }
+
+      if (/^\$\$/.test(trimmed) || /^\$[^$]+?\$$/.test(trimmed)) {
+        next.push(line);
+        continue;
+      }
+
+      const inlineSplit = trimmed.match(/^(.{1,28}[：:])\s*(.+)$/);
+      if (inlineSplit && looksLikeBareFormulaExpression(inlineSplit[2])) {
+        next.push(inlineSplit[1], "", "$$", inlineSplit[2].trim(), "$$");
+        blockChanged = true;
+        continue;
+      }
+
+      if (looksLikeBareFormulaExpression(trimmed)) {
+        next.push("$$", trimmed, "$$");
+        blockChanged = true;
+        continue;
+      }
+
+      next.push(line);
+    }
+
+    if (blockChanged) {
+      changed = true;
+      if (diagnostics) bumpCounter(diagnostics, "promote-bare-formula-paragraph");
+      return next.join("\n");
+    }
+
+    return block.content;
+  });
+
+  return changed ? mapped.join("\n") : text;
 }
 
 /**
@@ -472,13 +763,6 @@ const normalizeNumericRangeDelimiters = (text: string): string => {
 // 1. Chinese heading → Markdown heading conversion
 // ---------------------------------------------------------------------------
 
-// Chinese numeral map for heading detection
-const CN_NUMERALS: Record<string, number> = {
-  "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
-  "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
-  "十一": 11, "十二": 12, "十三": 13, "十四": 14, "十五": 15,
-};
-
 // Level-1: "一、标题" or "**一、标题**" (standalone line)
 const CN_H1_RE = /^(?:\*{2})?\s*([一二三四五六七八九十]+)[、.．]\s*(.+?)(?:\*{2})?\s*$/;
 // Level-2: "（一）标题" or "(一) 标题" or "**（一）标题**"
@@ -487,10 +771,6 @@ const CN_H2_RE = /^(?:\*{2})?\s*[（(]\s*([一二三四五六七八九十]+)\s*[
 // (only when it doesn't look like part of an ordered list)
 const NUM_H2_RE = /^\s*(\d{1,2})[.、．]\s*(.+?)\s*$/;
 // Level-3: "1) 标题" or "①标题"
-const CIRCLED_DIGITS: Record<string, number> = {
-  "\u2460": 1, "\u2461": 2, "\u2462": 3, "\u2463": 4, "\u2464": 5,
-  "\u2465": 6, "\u2466": 7, "\u2467": 8, "\u2468": 9, "\u2469": 10,
-};
 const CN_H3_RE = /^(?:\*{2})?\s*(\d+)[)）]\s*(.+?)(?:\*{2})?\s*$/;
 const CIRCLED_H3_RE = /^(?:\*{2})?\s*([\u2460-\u2469])\s*(.+?)(?:\*{2})?\s*$/;
 
@@ -498,8 +778,9 @@ const CIRCLED_H3_RE = /^(?:\*{2})?\s*([\u2460-\u2469])\s*(.+?)(?:\*{2})?\s*$/;
  * Convert Chinese-style headings to Markdown headings.
  * Processes line-by-line; only converts lines that look like standalone headings.
  */
-function normalizeChineseHeadings(text: string): string {
+function normalizeChineseHeadings(text: string, diagnostics?: NormalizationDiagnostics): string {
   const lines = text.split("\n");
+  const headingCandidates = collectHeadingCandidateLineIndexes(text);
   const result: string[] = [];
 
   const prevNonEmptyLine = (idx: number): string | null => {
@@ -528,9 +809,28 @@ function normalizeChineseHeadings(text: string): string {
       continue;
     }
 
+    if (!headingCandidates.has(idx)) {
+      result.push(line);
+      continue;
+    }
+
     // Level-1: 一、标题
     let match = trimmed.match(CN_H1_RE);
-    if (match && match[2].length <= 60) {
+    if (match) {
+      const candidate = `${match[1]}、${match[2].trim()}`;
+      const classification = classifyHeadingCandidate(candidate, {
+        previousNonEmptyLine: prevNonEmptyLine(idx) || "",
+        nextNonEmptyLine: nextNonEmptyLine(idx) || "",
+        lineIndex: idx,
+        totalLines: lines.length,
+      });
+      if (diagnostics) {
+        recordHeadingDecision(diagnostics, classification.decision, classification.reasons);
+      }
+      if (classification.decision !== "heading") {
+        result.push(line);
+        continue;
+      }
       // Preserve numbering for better reading guidance (e.g., "一、...").
       result.push(`## ${match[1]}、${match[2].trim()}`);
       continue;
@@ -538,7 +838,21 @@ function normalizeChineseHeadings(text: string): string {
 
     // Level-2: （一）标题
     match = trimmed.match(CN_H2_RE);
-    if (match && match[2].length <= 60) {
+    if (match) {
+      const candidate = `（${match[1]}）${match[2].trim()}`;
+      const classification = classifyHeadingCandidate(candidate, {
+        previousNonEmptyLine: prevNonEmptyLine(idx) || "",
+        nextNonEmptyLine: nextNonEmptyLine(idx) || "",
+        lineIndex: idx,
+        totalLines: lines.length,
+      });
+      if (diagnostics) {
+        recordHeadingDecision(diagnostics, classification.decision, classification.reasons);
+      }
+      if (classification.decision !== "heading") {
+        result.push(line);
+        continue;
+      }
       result.push(`### （${match[1]}）${match[2].trim()}`);
       continue;
     }
@@ -547,25 +861,17 @@ function normalizeChineseHeadings(text: string): string {
     match = trimmed.match(NUM_H2_RE);
     if (match) {
       const title = match[2].trim();
-      const prev = prevNonEmptyLine(idx);
-      const next = nextNonEmptyLine(idx);
+      const classification = classifyHeadingCandidate(`${match[1]}. ${title}`, {
+        previousNonEmptyLine: prevNonEmptyLine(idx) || "",
+        nextNonEmptyLine: nextNonEmptyLine(idx) || "",
+        lineIndex: idx,
+        totalLines: lines.length,
+      });
+      if (diagnostics) {
+        recordHeadingDecision(diagnostics, classification.decision, classification.reasons);
+      }
 
-      const looksLikeListNeighbor =
-        (prev ? NUM_H2_RE.test(prev) : false) || (next ? NUM_H2_RE.test(next) : false);
-
-      const nextLooksLikeBody =
-        next
-          ? /^[-*+•]\s+/.test(next) ||
-            /^\d+[.)]\s+/.test(next) ||
-            /^\s{2,}[-*+•]\s+/.test(next)
-          : false;
-
-      const looksLikeHeadingText =
-        title.length > 0 &&
-        title.length <= 80 &&
-        !/[。！？；]$/.test(title);
-
-      if (!looksLikeListNeighbor && looksLikeHeadingText && (nextLooksLikeBody || Boolean(next))) {
+      if (classification.decision === "heading") {
         result.push(`### ${match[1]}. ${title}`);
         continue;
       }
@@ -573,13 +879,41 @@ function normalizeChineseHeadings(text: string): string {
 
     // Level-3: 1) 标题 or ① 标题
     match = trimmed.match(CN_H3_RE);
-    if (match && match[2].length <= 80 && !/[。！？；]$/.test(match[2])) {
+    if (match) {
+      const candidate = `${match[1]}) ${match[2].trim()}`;
+      const classification = classifyHeadingCandidate(candidate, {
+        previousNonEmptyLine: prevNonEmptyLine(idx) || "",
+        nextNonEmptyLine: nextNonEmptyLine(idx) || "",
+        lineIndex: idx,
+        totalLines: lines.length,
+      });
+      if (diagnostics) {
+        recordHeadingDecision(diagnostics, classification.decision, classification.reasons);
+      }
+      if (classification.decision !== "heading") {
+        result.push(line);
+        continue;
+      }
       result.push(`#### ${match[1]}) ${match[2].trim()}`);
       continue;
     }
 
     match = trimmed.match(CIRCLED_H3_RE);
-    if (match && match[2].length <= 80 && !/[。！？；]$/.test(match[2])) {
+    if (match) {
+      const candidate = `${match[1]} ${match[2].trim()}`;
+      const classification = classifyHeadingCandidate(candidate, {
+        previousNonEmptyLine: prevNonEmptyLine(idx) || "",
+        nextNonEmptyLine: nextNonEmptyLine(idx) || "",
+        lineIndex: idx,
+        totalLines: lines.length,
+      });
+      if (diagnostics) {
+        recordHeadingDecision(diagnostics, classification.decision, classification.reasons);
+      }
+      if (classification.decision !== "heading") {
+        result.push(line);
+        continue;
+      }
       result.push(`#### ${match[1]} ${match[2].trim()}`);
       continue;
     }
@@ -599,70 +933,103 @@ function normalizeChineseHeadings(text: string): string {
  * sequentially numbered (1. 2. 3.) instead of all being "1.".
  */
 export function normalizeMarkdownLists(content: string): string {
-  const lines = content.split(/\r?\n/);
-  let activeIndent = "";
-  let orderedCounter = 0;
+  if (!content) return content;
 
-  return lines
-    .map((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return line;
+  const normalizeListBlockContent = (blockContent: string): string => {
+    const lines = blockContent.split(/\r?\n/);
+    let activeIndent = "";
+    let orderedCounter = 0;
+    const isOrderedListInterludeLine = (trimmed: string): boolean => {
+      const pipeCount = (trimmed.match(/\|/g) || []).length;
+      return (
+        /^[:：]\s*/.test(trimmed) ||
+        /^!\[[^\]]*]\([^)]*\)/.test(trimmed) ||
+        /^<img\b/i.test(trimmed) ||
+        /^FIGCAPTION\b/i.test(trimmed) ||
+        /^(?:相关示意图|示意图|附图|见图|图\d+)/.test(trimmed) ||
+        /^\|.*\|$/.test(trimmed) ||
+        pipeCount >= 2 ||
+        /^>\s*/.test(trimmed)
+      );
+    };
 
-      // Reset counter on section breaks (headings, horizontal rules, bold-only lines)
-      const sectionBreak =
-        /^#{1,6}\s+/.test(trimmed) ||
-        /^[-*_]{3,}$/.test(trimmed) ||
-        /^\*\*.+\*\*$/.test(trimmed);
-      if (sectionBreak) {
-        orderedCounter = 0;
-        activeIndent = "";
-      }
+    return lines
+      .map((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return line;
 
-      // Match ordered list items: "  1. text"
-      const orderedMatch = line.match(/^(\s*)\d+\.\s+(.*)$/);
-      if (orderedMatch) {
-        const indent = orderedMatch[1] ?? "";
-        const body = orderedMatch[2] ?? "";
-        const originalNum = parseInt(line.match(/^\s*(\d+)\./)?.[1] ?? "1", 10);
-
-        if (indent === activeIndent && orderedCounter > 0) {
-          orderedCounter += 1;
-        } else {
-          orderedCounter = 1;
-          activeIndent = indent;
+        // Reset counter on section breaks (headings, horizontal rules, bold-only lines)
+        const sectionBreak =
+          /^#{1,6}\s+/.test(trimmed) ||
+          /^[-*_]{3,}$/.test(trimmed) ||
+          /^\*\*.+\*\*$/.test(trimmed);
+        if (sectionBreak) {
+          orderedCounter = 0;
+          activeIndent = "";
         }
 
-        // Preserve original numbering when it diverges significantly from
-        // sequential order — likely a clause/section reference (e.g. "3.", "4.")
-        // rather than a misnumbered list.
-        if (originalNum > 1 && Math.abs(originalNum - orderedCounter) > 2) {
-          orderedCounter = originalNum;
+        // Match ordered list items: "  1. text"
+        const orderedMatch = line.match(/^(\s*)\d+\.\s+(.*)$/);
+        if (orderedMatch) {
+          const indent = orderedMatch[1] ?? "";
+          const body = orderedMatch[2] ?? "";
+          const originalNum = parseInt(line.match(/^\s*(\d+)\./)?.[1] ?? "1", 10);
+
+          if (indent === activeIndent && orderedCounter > 0) {
+            orderedCounter += 1;
+          } else {
+            orderedCounter = 1;
+            activeIndent = indent;
+          }
+
+          // Preserve original numbering when it diverges significantly from
+          // sequential order — likely a clause/section reference (e.g. "3.", "4.")
+          // rather than a misnumbered list.
+          if (originalNum > 1 && Math.abs(originalNum - orderedCounter) > 2) {
+            orderedCounter = originalNum;
+            return line;
+          }
+
+          return `${indent}${orderedCounter}. ${body}`;
+        }
+
+        // Nested bullet under an ordered list
+        const bulletMatch = line.match(/^(\s*)[-*+]\s+/);
+        if (bulletMatch) {
+          const bulletIndent = bulletMatch[1] ?? "";
+          if (orderedCounter > 0 && bulletIndent.length <= activeIndent.length) {
+            const normalized = line.trimStart();
+            return `${activeIndent}  ${normalized}`;
+          }
           return line;
         }
 
-        return `${indent}${orderedCounter}. ${body}`;
-      }
-
-      // Nested bullet under an ordered list
-      const bulletMatch = line.match(/^(\s*)[-*+]\s+/);
-      if (bulletMatch) {
-        const bulletIndent = bulletMatch[1] ?? "";
-        if (orderedCounter > 0 && bulletIndent.length <= activeIndent.length) {
-          const normalized = line.trimStart();
-          return `${activeIndent}  ${normalized}`;
+        // Non-list, non-blank line at root level resets counter
+        if (orderedCounter > 0 && isOrderedListInterludeLine(trimmed)) {
+          return line;
         }
+
+        // Non-list, non-blank line at root level resets counter
+        if (/^\S/.test(line)) {
+          orderedCounter = 0;
+          activeIndent = "";
+        }
+
         return line;
-      }
+      })
+      .join("\n");
+  };
 
-      // Non-list, non-blank line at root level resets counter
-      if (/^\S/.test(line)) {
-        orderedCounter = 0;
-        activeIndent = "";
-      }
+  const blocks = parseMarkdownBlocks(content);
+  let changed = false;
+  const out = blocks.map((block) => {
+    if (block.type !== "list") return block.content;
+    const normalized = normalizeListBlockContent(block.content);
+    if (normalized !== block.content) changed = true;
+    return normalized;
+  });
 
-      return line;
-    })
-    .join("\n");
+  return changed ? out.join("\n") : content;
 }
 
 // ---------------------------------------------------------------------------
@@ -773,12 +1140,24 @@ function normalizeTableReferences(text: string): string {
  * reduce readability but carry no user-facing meaning.
  */
 function stripSectionNumberArtifacts(text: string): string {
+  const SECTION_ARTIFACT_RE =
+    /[（(]\s*\d+(?:\.\d+){1,4}(?:\s*(?:说明|详见|详述|条款|条|节|项|第\s*\d+\s*[条款节项]))?\s*[)）]/g;
+  const LEGAL_CONTEXT_RE =
+    /(GB\/T|GB\s*\/\s*T|CJJ|JGJ|规范|标准|条文|条款|第\s*\d+\s*[条款节项]|见第\s*\d+\s*[条款节项])/i;
+
+  const shouldPreserveArtifact = (segment: string, start: number, end: number): boolean => {
+    const context = segment.slice(Math.max(0, start - 20), Math.min(segment.length, end + 20));
+    return LEGAL_CONTEXT_RE.test(context);
+  };
+
   return transformUnprotected(text, (seg) =>
     seg
-      .replace(
-        /[（(]\s*\d+(?:\.\d+){1,4}(?:\s*(?:说明|详见|详述|条款|条|节|项|第\s*\d+\s*[条款节项]))?\s*[)）]/g,
-        ""
-      )
+      .replace(SECTION_ARTIFACT_RE, (match, offset: number) => {
+        const start = Number(offset || 0);
+        const end = start + match.length;
+        if (shouldPreserveArtifact(seg, start, end)) return match;
+        return "";
+      })
       // Remove empty/noise parentheses left by aggressive section cleanup,
       // e.g. "（，）", "(,)", "（；）".
       .replace(/[（(]\s*[，,、；;:：。.\-]*\s*[)）]/g, "")
@@ -838,6 +1217,7 @@ function normalizeSectionScaffold(text: string): string {
  */
 function normalizeNumberedHeadingSequence(text: string): string {
   const lines = text.split("\n");
+  const headingCandidates = collectHeadingCandidateLineIndexes(text);
   let changed = false;
   let blockStart = -1;
   let blockMatches: Array<{ index: number; title: string; number: number }> = [];
@@ -868,6 +1248,7 @@ function normalizeNumberedHeadingSequence(text: string): string {
 
     const m = trimmed.match(/^###\s+(\d{1,2})[.、．]\s+(.+?)\s*$/);
     if (!m) continue;
+    if (!headingCandidates.has(i)) continue;
 
     // Keep numbering state within each major section. If no H2 exists before,
     // treat the whole answer as one block.
@@ -940,6 +1321,7 @@ export function normalizeAnswerMarkdownArtifacts(
 
   const streaming = Boolean(options.streaming);
   const preserveInlineFigureRefs = options.preserveInlineFigureRefs !== false;
+  const diagnostics = createDiagnostics(Boolean(options.debugDiagnostics));
 
   let out = text;
 
@@ -948,6 +1330,17 @@ export function normalizeAnswerMarkdownArtifacts(
 
   // Zero-width spaces/joiners (often introduced by copy/paste or model tokenization).
   out = out.replace(/[\u200B-\u200D\uFEFF]/g, "");
+
+  // Parse into structural blocks early so later passes can migrate to block-scoped
+  // logic without changing this public API entry point.
+  const beforeBlockParser = out;
+  out = runBlockParserStage(out, diagnostics);
+  bumpIfChanged(diagnostics, "block-parser-roundtrip", beforeBlockParser, out);
+
+  // Normalize escaped/non-dollar LaTeX delimiters into remark-math friendly forms.
+  const beforeMathDelimiters = out;
+  out = normalizeMathDelimitersForRenderer(out);
+  bumpIfChanged(diagnostics, "normalize-math-delimiters", beforeMathDelimiters, out);
 
   // Fullwidth / lookalike asterisks that users visually read as "**".
   // Protect LaTeX regions so that ∗ inside formulas is not replaced.
@@ -958,25 +1351,39 @@ export function normalizeAnswerMarkdownArtifacts(
   out = transformUnprotected(out, (seg) =>
     seg.replace(/\*\*\s+([^\n*]+?)\s+\*\*/g, "**$1**")
   );
+  bumpIfChanged(diagnostics, "tighten-bold-whitespace", text, out);
   // Replace markdown star-run placeholders like "****" with readable fallback text.
+  const beforeStars = out;
   out = normalizeStarRunPlaceholders(out);
+  bumpIfChanged(diagnostics, "normalize-star-run-placeholders", beforeStars, out);
   // Split "1.xxx2.yyy3.zzz" run-on items into list-friendly lines.
+  const beforeNumberedItems = out;
   out = splitRunOnNumberedItems(out);
+  bumpIfChanged(diagnostics, "split-run-on-numbered-items", beforeNumberedItems, out);
   // Split malformed heading lines like "## 二、核心指标测算1.避难容量".
-  out = splitHeadingAndInlineNumberedSubitem(out);
+  const beforeInlineHeadingSplit = out;
+  out = splitHeadingAndInlineNumberedSubitem(out, diagnostics);
+  bumpIfChanged(diagnostics, "split-inline-heading", beforeInlineHeadingSplit, out);
 
-  if (!streaming) {
-    // Upgrade loose pipe-delimited table text into valid multi-line GFM table blocks.
-    out = normalizeLoosePipeTables(out);
-  }
+  // Upgrade loose pipe-delimited table text into valid multi-line GFM table
+  // blocks; keep streaming mode conservative (no heavy rewrites).
+  const beforeLooseTables = out;
+  out = normalizeLoosePipeTables(out, { diagnostics, streaming });
+  bumpIfChanged(diagnostics, "normalize-loose-pipe-tables", beforeLooseTables, out);
 
   // Convert Chinese-style headings to Markdown headings (must run before list fix).
-  out = normalizeChineseHeadings(out);
+  const beforeChineseHeadings = out;
+  out = normalizeChineseHeadings(out, diagnostics);
+  bumpIfChanged(diagnostics, "normalize-chinese-headings", beforeChineseHeadings, out);
   if (!streaming) {
     // Demote heading-like first line under "相关概念" to paragraph/body text.
+    const beforeRelatedConcepts = out;
     out = normalizeRelatedConceptsBody(out);
+    bumpIfChanged(diagnostics, "normalize-related-concepts-body", beforeRelatedConcepts, out);
     // Normalize markdown heading spacing/levels and demote sentence-like pseudo-headings.
-    out = normalizeMarkdownHeadingHierarchy(out);
+    const beforeHeadingHierarchy = out;
+    out = normalizeMarkdownHeadingHierarchy(out, diagnostics);
+    bumpIfChanged(diagnostics, "normalize-heading-hierarchy", beforeHeadingHierarchy, out);
   }
 
   // Normalize unicode bullets that users visually read as lists but markdown won't parse.
@@ -997,39 +1404,67 @@ export function normalizeAnswerMarkdownArtifacts(
 
   // Fix ordered list numbering (1. 1. 1. → 1. 2. 3.).
   out = normalizeMarkdownLists(out);
+  bumpCounter(diagnostics, "normalize-markdown-lists");
 
   // Optional: normalize figure references only when explicitly requested.
   if (!preserveInlineFigureRefs) {
+    const beforeFigureRefs = out;
     out = normalizeFigureReferences(out);
+    bumpIfChanged(diagnostics, "normalize-figure-references", beforeFigureRefs, out);
   }
   // Normalize table references: "表3.2.6" / "见表3.2.6" → trailing "(见表1)".
   if (!streaming) {
+    const beforeTableRefs = out;
     out = normalizeTableReferences(out);
+    bumpIfChanged(diagnostics, "normalize-table-references", beforeTableRefs, out);
     // Remove dangling section-id noise like "(3.2.6)".
+    const beforeSectionArtifacts = out;
     out = stripSectionNumberArtifacts(out);
+    bumpIfChanged(diagnostics, "strip-section-number-artifacts", beforeSectionArtifacts, out);
   }
 
   // Ensure a stable heading scaffold when only detailed sub-headings are present.
   if (!streaming) {
+    const beforeScaffold = out;
     out = normalizeSectionScaffold(out);
+    bumpIfChanged(diagnostics, "normalize-section-scaffold", beforeScaffold, out);
   }
 
   // Fix repeated "1." (or non-sequential) numbering in section headings.
   out = normalizeNumberedHeadingSequence(out);
+  bumpCounter(diagnostics, "normalize-numbered-heading-sequence");
+
+  if (!streaming) {
+    // Promote obvious bare formula lines to display-math blocks so they render
+    // with dedicated KaTeX styles instead of raw LaTeX/plain text.
+    const beforeFormulaPromotion = out;
+    out = promoteBareFormulaParagraphs(out, diagnostics);
+    bumpIfChanged(diagnostics, "promote-bare-formula-paragraphs", beforeFormulaPromotion, out);
+  }
 
   // Promote "核心结论：" marker into top-level heading (if needed).
   if (!streaming) {
+    const beforeConclusion = out;
     out = normalizeConclusionHeading(out);
+    bumpIfChanged(diagnostics, "normalize-conclusion-heading", beforeConclusion, out);
   }
 
   // Normalize "~~" used as a numeric range delimiter while preserving real markdown
   // strikethrough and code snippets.
   out = normalizeNumericRangeDelimiters(out);
+  bumpCounter(diagnostics, "normalize-numeric-range-delimiters");
 
   if (!streaming) {
     // Final pass: recover malformed `$...$` spans that would otherwise leak raw
     // LaTeX commands into the UI instead of rendering or readable fallback text.
+    const beforeBrokenMath = out;
     out = normalizeBrokenInlineMath(out);
+    bumpIfChanged(diagnostics, "normalize-broken-inline-math", beforeBrokenMath, out);
+  }
+
+  if (diagnostics.enabled) {
+    // eslint-disable-next-line no-console
+    console.debug("[qa.normalizeAnswerMarkdownArtifacts]", diagnostics);
   }
 
   return out;

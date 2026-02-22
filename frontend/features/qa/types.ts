@@ -71,6 +71,7 @@ export interface ChatMessage {
   thinkingDone?: boolean;
   statusMessage?: string;
   statusStage?: string;
+  finalizedByServer?: boolean;
 }
 
 export interface ChatHistoryMessage {
