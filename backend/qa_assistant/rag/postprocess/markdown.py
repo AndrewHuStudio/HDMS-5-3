@@ -264,6 +264,92 @@ def extract_first_markdown_table(text: str):
 
 
 _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
+_RAG_IMAGE_ROUTE_RE = re.compile(r"^/(?:api/)?rag/documents/[^/?#]+/image$", re.IGNORECASE)
+
+
+def _normalize_rag_image_query_url(raw: str) -> str:
+    """Best-effort normalization for rag image URLs that were math-corrupted."""
+    url = (raw or "").strip()
+    if not url:
+        return url
+
+    # Some older answers accidentally wrapped URL with inline math dollars.
+    if len(url) >= 2 and url.startswith("$") and url.endswith("$"):
+        url = url[1:-1].strip()
+
+    wrapped_in_angles = url.startswith("<") and url.endswith(">")
+    if wrapped_in_angles:
+        url = url[1:-1].strip()
+
+    hash_part = ""
+    if "#" in url:
+        url, hash_part = url.split("#", 1)
+        hash_part = "#" + hash_part
+
+    if "?" not in url:
+        rebuilt = f"{url}{hash_part}"
+        return f"<{rebuilt}>" if wrapped_in_angles else rebuilt
+
+    path, query = url.split("?", 1)
+    if not _RAG_IMAGE_ROUTE_RE.match(path):
+        rebuilt = f"{path}?{query}{hash_part}"
+        return f"<{rebuilt}>" if wrapped_in_angles else rebuilt
+
+    normalized_parts: list[str] = []
+    for part in query.split("&"):
+        if not part:
+            normalized_parts.append(part)
+            continue
+        if "=" in part:
+            key, value = part.split("=", 1)
+        else:
+            key, value = part, ""
+
+        if key == "$ref":
+            key = "ref"
+        if key == "ref":
+            value = value.replace("$", "")
+
+        normalized_parts.append(f"{key}={value}" if "=" in part else key)
+
+    rebuilt = f"{path}?{'&'.join(normalized_parts)}{hash_part}"
+    return f"<{rebuilt}>" if wrapped_in_angles else rebuilt
+
+
+def normalize_markdown_image_syntax(text: str) -> str:
+    """Normalize markdown image syntax before image filtering/citation cleanup."""
+    if not text:
+        return text
+
+    parts = re.split(r"(```[\s\S]*?```|`[^`\n]*`)", text)
+    out: list[str] = []
+
+    for i, seg in enumerate(parts):
+        if i % 2 == 1:
+            out.append(seg)
+            continue
+
+        # Unwrap accidental math delimiters around a standalone image token.
+        seg = re.sub(
+            r"(?<!\\)\$\s*(!\[[^\]\n]*\]\([^)\n]+\))\s*\$(?!\$)",
+            r"\1",
+            seg,
+        )
+        seg = re.sub(
+            r"(?<!\\)\$\$\s*(!\[[^\]\n]*\]\([^)\n]+\))\s*\$\$",
+            r"\1",
+            seg,
+        )
+
+        def _normalize_image_url(m: re.Match) -> str:
+            alt = (m.group(1) or "").strip()
+            raw = (m.group(2) or "").strip()
+            normalized = _normalize_rag_image_query_url(raw)
+            return f"![{alt}]({normalized})"
+
+        out.append(_MD_IMAGE_RE.sub(_normalize_image_url, seg))
+
+    return "".join(out)
 
 
 def strip_disallowed_markdown_images(text: str) -> str:
@@ -287,6 +373,7 @@ def strip_disallowed_markdown_images(text: str) -> str:
         u = (url or "").strip()
         if not u:
             return False
+        u = _normalize_rag_image_query_url(u)
         if u.startswith("<") and u.endswith(">"):
             u = u[1:-1].strip()
         # Strip optional title after whitespace.
@@ -296,8 +383,9 @@ def strip_disallowed_markdown_images(text: str) -> str:
     def _repl(m: re.Match) -> str:
         alt = (m.group(1) or "").strip()
         raw = (m.group(2) or "").strip()
-        if _allowed(raw):
-            return m.group(0)
+        normalized = _normalize_rag_image_query_url(raw)
+        if _allowed(normalized):
+            return f"![{alt}]({normalized})"
         # Replace broken image with plain alt text (no broken icon).
         return alt if alt else ""
 

@@ -11,6 +11,7 @@ from collections import OrderedDict
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+_CACHE_SCHEMA_VERSION = "v2-image-postprocess"
 
 
 class QueryCache:
@@ -31,7 +32,7 @@ class QueryCache:
 
     @staticmethod
     def _make_key(query: str, history_summary: str = "") -> str:
-        normalized = query.strip().lower()
+        normalized = f"{_CACHE_SCHEMA_VERSION}||{query.strip().lower()}"
         if history_summary:
             normalized = f"{normalized}||{history_summary}"
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()

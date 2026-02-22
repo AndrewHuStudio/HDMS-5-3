@@ -22,6 +22,7 @@ def convert_formulas_to_latex(text: str) -> str:
 def postprocess_answer(text: str, valid_labels: Optional[set] = None) -> Tuple[str, Dict[str, str]]:
     """Apply all post-processing steps to an LLM answer."""
     text = sanitize_answer(text)
+    text = pp_markdown.normalize_markdown_image_syntax(text)
     text = pp_markdown.strip_disallowed_markdown_images(text)
     text = pp_math.unescape_dollar_delimiters(text)
     text, remap = pp_citations.normalize_citations(text, valid_labels)

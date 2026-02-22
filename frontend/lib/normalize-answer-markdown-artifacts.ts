@@ -121,6 +121,104 @@ function transformUnprotected(text: string, fn: (segment: string) => string): st
     .join("");
 }
 
+const RAG_IMAGE_ROUTE_RE = /^\/(?:api\/)?rag\/documents\/[^/?#]+\/image$/i;
+const INLINE_MATH_IMAGE_WRAPPER_RE =
+  /(?<!\\)\$\s*(!\[[^\]\n]*\]\([^)\n]+\)|<img\b[^>]*>)\s*\$(?!\$)/gi;
+const DISPLAY_MATH_IMAGE_WRAPPER_RE =
+  /(?<!\\)\$\$\s*(!\[[^\]\n]*\]\([^)\n]+\)|<img\b[^>]*>)\s*\$\$/gi;
+const MARKDOWN_OR_HTML_IMAGE_RE = /(?:!\[[^\]\n]*\]\([^)\n]+\)|<img\b[^>]*>)/i;
+
+function normalizeRagImageQueryUrl(rawUrl: string): string {
+  let url = String(rawUrl || "").trim();
+  if (!url) return rawUrl;
+
+  const wrappedInAngles = url.startsWith("<") && url.endsWith(">");
+  if (wrappedInAngles) url = url.slice(1, -1).trim();
+
+  const hashIndex = url.indexOf("#");
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : "";
+  const withoutHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const queryIndex = withoutHash.indexOf("?");
+  if (queryIndex < 0) return rawUrl;
+
+  const path = withoutHash.slice(0, queryIndex);
+  const query = withoutHash.slice(queryIndex + 1);
+  if (!RAG_IMAGE_ROUTE_RE.test(path) || !query) return rawUrl;
+
+  let changed = false;
+  const normalizedQuery = query
+    .split("&")
+    .map((part) => {
+      if (!part) return part;
+      const eqIndex = part.indexOf("=");
+      const rawKey = eqIndex >= 0 ? part.slice(0, eqIndex) : part;
+      let value = eqIndex >= 0 ? part.slice(eqIndex + 1) : "";
+      let key = rawKey;
+
+      if (key === "$ref") {
+        key = "ref";
+        changed = true;
+      }
+
+      if (key === "ref") {
+        const cleanedValue = value.replace(/\$/g, "");
+        if (cleanedValue !== value) {
+          value = cleanedValue;
+          changed = true;
+        }
+      }
+
+      if (eqIndex < 0) return key;
+      return `${key}=${value}`;
+    })
+    .join("&");
+
+  if (!changed) return rawUrl;
+
+  const rebuilt = `${path}?${normalizedQuery}${hash}`;
+  return wrappedInAngles ? `<${rebuilt}>` : rebuilt;
+}
+
+function normalizeBrokenRagImageRefs(text: string): string {
+  if (!text) return text;
+
+  const normalizeUrl = (value: string): string => normalizeRagImageQueryUrl(value);
+
+  let out = text.replace(
+    /!\[([^\]\n]*)\]\(([^)\n]+)\)/g,
+    (_match, alt: string, rawUrl: string) => `![${alt}](${normalizeUrl(rawUrl)})`,
+  );
+
+  out = out.replace(
+    /(<img\b[^>]*\bsrc=)(['"])([^'"]+)\2/gi,
+    (_match, prefix: string, quote: string, rawUrl: string) =>
+      `${prefix}${quote}${normalizeUrl(rawUrl)}${quote}`,
+  );
+
+  // Safety-net for plain-text URLs that were previously corrupted by backend
+  // math post-processing and escaped markdown rendering.
+  out = out.replace(
+    /\/(?:api\/)?rag\/documents\/[^/?#\s)]+\/image\?[^\s)]+/g,
+    (rawUrl) => normalizeUrl(rawUrl),
+  );
+
+  return out;
+}
+
+function unwrapMathWrappedImages(text: string): string {
+  if (!text) return text;
+
+  const segments = text.split(INLINE_OR_FENCED_CODE_RE);
+  return segments
+    .map((segment, index) => {
+      if (index % 2 === 1) return segment;
+      return segment
+        .replace(DISPLAY_MATH_IMAGE_WRAPPER_RE, "$1")
+        .replace(INLINE_MATH_IMAGE_WRAPPER_RE, "$1");
+    })
+    .join("");
+}
+
 const MAJOR_SECTION_TITLE_RE =
   /^(?:检索综述|详细解析|相关概念|核心结论|结论|总结|小结)(?:\s*[:：].*)?$/;
 
@@ -215,8 +313,10 @@ function splitRunOnNumberedItems(text: string): string {
 
     return lines
       .map((line) => {
-        // Avoid touching table rows.
-        if (line.includes("|")) return line;
+        // Keep table content intact, but still normalize leading list marker spacing.
+        if (line.includes("|")) {
+          return line.replace(/^([ \t]*\d{1,2}[.．])(?=[^\s\d])/, "$1 ");
+        }
 
         // Ensure "1.文本" -> "1. 文本" at line start.
         let normalized = line.replace(/^([ \t]*\d{1,2}[.．])(?=[^\s\d])/, "$1 ");
@@ -325,10 +425,60 @@ function normalizeLoosePipeTables(
       .trim();
   };
 
+  const expandInlineRunOnRows = (lines: string[]): { lines: string[]; changed: boolean } => {
+    const out: string[] = [];
+    let changed = false;
+
+    const separatorRowRe = /^:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)+$/;
+
+    for (const rawLine of lines) {
+      const trimmed = (rawLine || "").trim();
+      if (!trimmed.includes("||")) {
+        out.push(rawLine);
+        continue;
+      }
+
+      const totalPipeCount = (trimmed.match(/\|/g) || []).length;
+      if (totalPipeCount < 5) {
+        out.push(rawLine);
+        continue;
+      }
+
+      const parts = trimmed
+        .split(/\|\|+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (parts.length < 2) {
+        out.push(rawLine);
+        continue;
+      }
+
+      const rowLikeCount = parts.filter((part) => part.includes("|")).length;
+      const hasSeparator = parts.some((part) =>
+        separatorRowRe.test(
+          part
+            .replace(/^\|/, "")
+            .replace(/\|$/, "")
+            .trim(),
+        ),
+      );
+      if (rowLikeCount < 2 || (!hasSeparator && parts.length < 3)) {
+        out.push(rawLine);
+        continue;
+      }
+
+      out.push(...parts);
+      changed = true;
+    }
+
+    return { lines: out, changed };
+  };
+
   const normalizeTableBlock = (
     lines: string[],
   ): { lines: string[]; changed: boolean; detachedNotes: number } => {
-    const parsedRows = lines.map((line) => {
+    const expanded = expandInlineRunOnRows(lines);
+    const parsedRows = expanded.lines.map((line) => {
       const cells = parsePipeCells(line);
       if (!cells) return null;
       return { cells, separator: isSeparatorRow(cells) };
@@ -379,7 +529,8 @@ function normalizeLoosePipeTables(
       out.push("", ...noteLines);
     }
 
-    return { lines: out, changed: out.join("\n") !== lines.join("\n"), detachedNotes: noteLines.length };
+    const changed = expanded.changed || out.join("\n") !== lines.join("\n");
+    return { lines: out, changed, detachedNotes: noteLines.length };
   };
 
   const blocks = parseMarkdownBlocks(text);
@@ -588,6 +739,7 @@ function normalizeMathDelimitersForRenderer(text: string): string {
 function looksLikeBareFormulaExpression(value: string): boolean {
   const text = (value || "").trim();
   if (!text) return false;
+  if (MARKDOWN_OR_HTML_IMAGE_RE.test(text)) return false;
   if (text.length < 6 || text.length > 220) return false;
   if (text.includes("|")) return false;
   if (FORMULA_SENTENCE_PUNCT_RE.test(text)) return false;
@@ -773,6 +925,9 @@ const NUM_H2_RE = /^\s*(\d{1,2})[.、．]\s*(.+?)\s*$/;
 // Level-3: "1) 标题" or "①标题"
 const CN_H3_RE = /^(?:\*{2})?\s*(\d+)[)）]\s*(.+?)(?:\*{2})?\s*$/;
 const CIRCLED_H3_RE = /^(?:\*{2})?\s*([\u2460-\u2469])\s*(.+?)(?:\*{2})?\s*$/;
+// Decimal section heading variants: ".0.3标题" / "0.3 标题" / "2.1.4 标题"
+const DECIMAL_SECTION_RE =
+  /^(?:\*{2})?\s*[.。]?\s*(\d{1,2}(?:\.\d{1,2}){1,3})\s*(.+?)(?:\*{2})?\s*$/;
 
 /**
  * Convert Chinese-style headings to Markdown headings.
@@ -916,6 +1071,29 @@ function normalizeChineseHeadings(text: string, diagnostics?: NormalizationDiagn
       }
       result.push(`#### ${match[1]} ${match[2].trim()}`);
       continue;
+    }
+
+    match = trimmed.match(DECIMAL_SECTION_RE);
+    if (match) {
+      const sectionNumber = match[1].trim();
+      const title = match[2].trim();
+      if (title && !title.includes("|") && /[\u4e00-\u9fffA-Za-z]/.test(title)) {
+        const classification = classifyHeadingCandidate(`${sectionNumber} ${title}`, {
+          previousNonEmptyLine: prevNonEmptyLine(idx) || "",
+          nextNonEmptyLine: nextNonEmptyLine(idx) || "",
+          lineIndex: idx,
+          totalLines: lines.length,
+        });
+        if (diagnostics) {
+          recordHeadingDecision(diagnostics, classification.decision, classification.reasons);
+        }
+        if (classification.decision === "heading") {
+          const depth = sectionNumber.split(".").length;
+          const level = Math.min(6, Math.max(3, depth + 1));
+          result.push(`${"#".repeat(level)} ${sectionNumber} ${title}`);
+          continue;
+        }
+      }
     }
 
     result.push(line);
@@ -1331,6 +1509,12 @@ export function normalizeAnswerMarkdownArtifacts(
   // Zero-width spaces/joiners (often introduced by copy/paste or model tokenization).
   out = out.replace(/[\u200B-\u200D\uFEFF]/g, "");
 
+  // Recover known malformed RAG image URLs (e.g. "?$ref=images$/...") so
+  // markdown image nodes remain renderable after server-side finalization.
+  const beforeRagImageRefFix = out;
+  out = normalizeBrokenRagImageRefs(out);
+  bumpIfChanged(diagnostics, "normalize-rag-image-ref-urls", beforeRagImageRefFix, out);
+
   // Parse into structural blocks early so later passes can migrate to block-scoped
   // logic without changing this public API entry point.
   const beforeBlockParser = out;
@@ -1341,6 +1525,12 @@ export function normalizeAnswerMarkdownArtifacts(
   const beforeMathDelimiters = out;
   out = normalizeMathDelimitersForRenderer(out);
   bumpIfChanged(diagnostics, "normalize-math-delimiters", beforeMathDelimiters, out);
+
+  // Image markdown/HTML should never stay wrapped in $...$ / $$...$$ or it
+  // gets routed into remark-math instead of <img>.
+  const beforeImageMathUnwrap = out;
+  out = unwrapMathWrappedImages(out);
+  bumpIfChanged(diagnostics, "unwrap-image-math-wrappers", beforeImageMathUnwrap, out);
 
   // Fullwidth / lookalike asterisks that users visually read as "**".
   // Protect LaTeX regions so that ∗ inside formulas is not replaced.

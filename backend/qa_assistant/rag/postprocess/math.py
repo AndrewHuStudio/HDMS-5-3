@@ -1,25 +1,31 @@
 import re
 
+_PROTECTED_NON_MATH_RE = re.compile(
+    r"(```[\s\S]*?```|`[^`\n]*`|!\[[^\]\n]*\]\([^)\n]*\)|\[[^\]\n]+\]\([^)\n]*\)|<img\b[^>]*>)",
+    flags=re.IGNORECASE,
+)
+_EXISTING_DOLLAR_MATH_RE = re.compile(
+    r"((?<!\\)\$\$[\s\S]*?(?<!\\)\$\$|(?<!\\)\$[^$]+?(?<!\\)\$)"
+)
+
 
 def _split_protected_segments(text: str) -> list[str]:
     """
-    Split by protected segments (fenced code blocks, inline code, existing $/$$ math).
+    Split by protected segments:
+    - fenced/inline code
+    - markdown links/images and HTML img tags
+    - existing $/$$ math
+
     The returned list alternates between unprotected and protected segments.
     """
-    # First protect code (fences + inline).
-    parts = re.split(r"(```[\s\S]*?```|`[^`\n]*`)", text or "")
+    parts = _PROTECTED_NON_MATH_RE.split(text or "")
     out: list[str] = []
     for i, p in enumerate(parts):
         if i % 2 == 1:
             out.append(p)
         else:
             # Inside non-code, protect existing math segments.
-            out.extend(
-                re.split(
-                    r"((?<!\\)\$\$[\s\S]*?(?<!\\)\$\$|(?<!\\)\$[^$]+?(?<!\\)\$)",
-                    p,
-                )
-            )
+            out.extend(_EXISTING_DOLLAR_MATH_RE.split(p))
     return out
 
 
@@ -242,12 +248,16 @@ _TEXT_PAREN_RE = re.compile(r"\\text\s*[（(]\s*([^（）()]+?)\s*[）)]")
 _LATEX_ATOM_RE = (
     r"(?:\\text\{[^{}]+\}|\\mathrm\{[^{}]+\}|\\operatorname\{[^{}]+\}|"
     r"\\frac\{[^{}]+\}\{[^{}]+\}|"
+    r"[\u4e00-\u9fff]{1,12}|"
     r"[A-Za-z][A-Za-z0-9_]*|"
     r"\d+(?:\.\d+)?(?:[%％])?)"
 )
-_LATEX_REL_OP_RE = r"(?:\\geq|\\leq|\\gt|\\lt|\\neq|\\approx|>=|<=|=|>|<)"
+_LATEX_REL_OP_RE = r"(?:\\geq|\\leq|\\gt|\\lt|\\neq|\\approx|>=|<=|=|>|<|≥|≤)"
 _BARE_LATEX_RELATION_RE = re.compile(
     rf"(?<![$\\])({_LATEX_ATOM_RE}(?:\s*{_LATEX_REL_OP_RE}\s*{_LATEX_ATOM_RE})+)"
+)
+_BARE_LATEX_TRIGGER_RE = re.compile(
+    r"\\(?:text|mathrm|operatorname|frac|geq|leq|gt|lt|neq|approx)\b"
 )
 
 
@@ -263,6 +273,10 @@ def normalize_bare_latex_math(text: str) -> str:
     """
     if not text:
         return text
+    # Keep this pass cheap and explicit: only run when the answer contains
+    # obvious LaTeX command signals.
+    if not _BARE_LATEX_TRIGGER_RE.search(text):
+        return text
 
     parts = _split_protected_segments(text)
     out: list[str] = []
@@ -275,7 +289,24 @@ def normalize_bare_latex_math(text: str) -> str:
         # Some model outputs use \text(...) which KaTeX doesn't parse.
         seg = _TEXT_PAREN_RE.sub(r"\\text{\1}", seg)
         # Wrap bare LaTeX inequalities/equalities so remark-math can parse them.
-        seg = _BARE_LATEX_RELATION_RE.sub(lambda m: f"${m.group(1).strip()}$", seg)
+        # Only wrap when there's at least one LaTeX command signal, avoiding
+        # accidental matches on non-math `a=b` text.
+        def _wrap_bare_relation(match: re.Match) -> str:
+            expr = (match.group(1) or "").strip()
+            expr = expr.replace("≥", "\\geq").replace("≤", "\\leq")
+            has_latex_command = "\\" in expr
+            has_cjk_context = bool(re.search(r"[\u4e00-\u9fff]", expr))
+            if not has_latex_command and not has_cjk_context:
+                return expr
+            if has_cjk_context:
+                expr = re.sub(
+                    r"(?<!\\text\{)(?<!\{)([\u4e00-\u9fff]{1,12})(?!\})",
+                    r"\\text{\1}",
+                    expr,
+                )
+            return f"${expr}$"
+
+        seg = _BARE_LATEX_RELATION_RE.sub(_wrap_bare_relation, seg)
         out.append(seg)
 
     return "".join(out)

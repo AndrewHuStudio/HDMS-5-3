@@ -17,13 +17,15 @@ export interface HeadingClassification {
 const SENTENCE_PUNCT_RE = /[，,:：；。！？.!?]/g;
 const SENTENCE_END_RE = /[。！？.!?；;:]$/;
 const STRUCTURED_HEADING_PREFIX_RE =
-  /^(?:#{1,6}\s+|[一二三四五六七八九十]+[、.．]\s*|[（(][一二三四五六七八九十]+[)）]\s*|\d{1,2}[.、．]\s+)/;
-const INLINE_HEADING_SPLIT_RE = /^(#{1,6}\s+|[一二三四五六七八九十]+[、.．]\s*|[（(][一二三四五六七八九十]+[)）]\s*|\d{1,2}[.、．]\s*)/;
+  /^(?:#{1,6}\s+|[一二三四五六七八九十]+[、.．]\s*|[（(][一二三四五六七八九十]+[)）]\s*|\d{1,2}[.、．]\s+|[.。]?\d{1,2}(?:\.\d{1,2}){1,3}\s*)/;
+const INLINE_HEADING_SPLIT_RE =
+  /^(#{1,6}\s+|[一二三四五六七八九十]+[、.．]\s*|[（(][一二三四五六七八九十]+[)）]\s*|\d{1,2}[.、．]\s*|[.。]?\d{1,2}(?:\.\d{1,2}){1,3}\s*)/;
 
 const LIST_LINE_RE = /^(\s*)(?:[-*+]\s+|\d+[.)]\s+)/;
 const NUMBERED_SECTION_LINE_RE = /^\d{1,2}[.、．]\s*\S+/;
 const CAPTION_LIKE_RE = /^(?:图|表)\s*\d+(?:\.\d+)*\s*[：:]/;
 const MARKDOWN_HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
+const DECIMAL_SECTION_LINE_RE = /^[.。]?\d{1,2}(?:\.\d{1,2}){1,3}\s*\S+/;
 const HEADING_DECISION_THRESHOLD = 0.35;
 const HIGH_CONFIDENCE_MARGIN = 0.35;
 
@@ -93,12 +95,16 @@ export function splitInlineHeadingAndBody(line: string): string {
   }
 
   const firstPipe = tail.search(/[|｜]/);
-  if (firstPipe <= 10) return line;
+  const tableSignal =
+    /\|\|/.test(tail) ||
+    /\|\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+/.test(tail) ||
+    (tail.match(/[|｜]/g) || []).length >= 4;
+  if (firstPipe <= 10 && !tableSignal) return line;
 
   const headingBody = tail.slice(0, firstPipe).trim();
   const remainder = tail.slice(firstPipe).replace(/^[|｜\s]+/, "").trim();
   if (!headingBody || !remainder) return line;
-  if (remainder.length < 14 && !/[，,:：；。！？.!?]/.test(remainder)) return line;
+  if (!tableSignal && remainder.length < 14 && !/[，,:：；。！？.!?]/.test(remainder)) return line;
 
   // Skip split if the first chunk already looks like a full sentence.
   if (SENTENCE_END_RE.test(headingBody) || headingBody.length < 6) return line;
@@ -141,6 +147,11 @@ export function classifyHeadingCandidate(
   if (MARKDOWN_HEADING_RE.test(text)) {
     score += 0.14;
     reasons.push("markdown-heading-prefix");
+  }
+
+  if (DECIMAL_SECTION_LINE_RE.test(text)) {
+    score += 0.24;
+    reasons.push("decimal-section-prefix");
   }
 
   if (CAPTION_LIKE_RE.test(text)) {
