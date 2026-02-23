@@ -12,6 +12,7 @@ from routes import (
     height_check,
     models,
     plaza_setback_check,
+    pedestrian_entrance_check,
     setback_check,
     setback_rate_check,
     sight_corridor,
@@ -42,6 +43,7 @@ app.include_router(green_setback_check.router)
 app.include_router(plaza_setback_check.router)
 app.include_router(setback_rate_check.router)
 app.include_router(vehicle_entrance_check.router)
+app.include_router(pedestrian_entrance_check.router)
 
 
 @app.get("/health")

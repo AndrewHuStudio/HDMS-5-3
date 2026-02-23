@@ -1,13 +1,18 @@
-import { PersonStanding } from "lucide-react";
+﻿import { PersonStanding } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
 import { PedestrianEntrancePanel } from "./panel";
+import { PedestrianEntranceSceneLayer } from "./scene";
+import { usePedestrianEntranceStore } from "./store";
 
 toolRegistry.register({
   id: "pedestrian-entrance-check",
   name: "人行出入口检测",
-  description: "正在开发中",
+  description: "统计红线上或红线内的人行出入口数量是否达标",
   category: "building",
-  status: "planned",
+  status: "implemented",
+  apiEndpoint: "/pedestrian-entrance-check",
   icon: PersonStanding,
   Panel: PedestrianEntrancePanel,
+  SceneLayer: PedestrianEntranceSceneLayer,
+  reset: () => usePedestrianEntranceStore.getState().reset(),
 });

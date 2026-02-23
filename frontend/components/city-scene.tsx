@@ -5,6 +5,7 @@ import { OrbitControls, Grid, Html, OrthographicCamera, PerspectiveCamera } from
 import { useState, useRef, Suspense, useEffect, useCallback, useMemo } from "react";
 import { useTheme } from "next-themes";
 import type { CityElement } from "@/lib/city-data";
+import { mockCityElements, elementTypeNames } from "@/lib/city-data";
 import type { HeightCheckSetbackVolume } from "@/lib/height-check-types";
 import type { SetbackCheckResult } from "@/lib/setback-check-types";
 import type { BuildingResult } from "@/components/height-check-panel-pure";
@@ -31,7 +32,7 @@ export type ViewMode = "perspective" | "isometric-ne" | "isometric-nw" | "isomet
 export type ModelFileType = "gltf" | "glb" | "3dm";
 
 // 视角配置 - zoom 值越大视野越小，显示越近
-// ????? 280 ??????????????????
+// 演示模型范围约 280 单位，相机位置需要足够远才能看到全貌
 const viewConfigs: Record<ViewMode, { position: [number, number, number]; zoom?: number; label: string }> = {
   "perspective": { position: [200, 150, 200], label: "透视" },
   "isometric-ne": { position: [200, 200, 200], zoom: 0.8, label: "东北" },
@@ -43,7 +44,7 @@ const viewConfigs: Record<ViewMode, { position: [number, number, number]; zoom?:
 
 const RHINO_LIBRARY_PATH = "/rhino3dm/";
 const GRID_PLANE_SIZE = 100000;
-const CAMERA_FIT_PADDING = 1.2;
+const CAMERA_FIT_PADDING = 0.8;
 const MIN_ORBIT_DISTANCE = 0.01;
 const MAX_ORBIT_DISTANCE = 1e7;
 const MIN_ORTHO_ZOOM = 0.01;
@@ -274,6 +275,157 @@ const computeClippingPlanes = (distance: number, radius: number) => {
   const far = Math.max(near + 1, distance + radius * CLIP_FAR_MARGIN, CLIP_MIN_FAR);
   return { near, far };
 };
+
+interface CityElementMeshProps {
+  element: CityElement;
+  isSelected: boolean;
+  isHovered: boolean;
+  onSelect: (element: CityElement) => void;
+  onHover: (element: CityElement | null) => void;
+}
+
+// 白膜材质颜色配置
+const whiteModeColors: Record<string, string> = {
+  building: "#f8fafc",      // 建筑 - 纯白
+  land: "#e2e8f0",          // 地块 - 浅灰
+  road: "#94a3b8",          // 道路 - 中灰
+  sidewalk: "#cbd5e1",      // 人行道 - 浅灰
+  greenspace: "#d1fae5",    // 绿地 - 浅绿
+  corridor: "#f1f5f9",      // 连廊 - 白色
+};
+
+// 边线组件 - 为几何体添加黑色边线
+function EdgeLines({ scale, color = "#1e293b" }: { scale: [number, number, number]; color?: string }) {
+  const edgesRef = useRef<THREE.LineSegments>(null);
+  
+  return (
+    <lineSegments scale={scale}>
+      <edgesGeometry args={[new THREE.BoxGeometry(1, 1, 1)]} />
+      <lineBasicMaterial color={color} linewidth={1} />
+    </lineSegments>
+  );
+}
+
+function CityElementMesh({
+  element,
+  isSelected,
+  isHovered,
+  onSelect,
+  onHover,
+}: CityElementMeshProps) {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  // 获取白膜颜色
+  const getWhiteModeColor = () => {
+    if (isSelected) return "#86efac"; // 选中时绿色
+    if (isHovered) return "#bfdbfe";  // 悬停时蓝色
+    return whiteModeColors[element.type] || "#f8fafc";
+  };
+
+  // 获取边线颜色
+  const getEdgeColor = () => {
+    if (isSelected) return "#16a34a"; // 选中时深绿
+    if (isHovered) return "#3b82f6";  // 悬停时蓝色
+    return "#475569";                  // 默认深灰色边线
+  };
+
+  const getMaterialProps = () => {
+    const color = getWhiteModeColor();
+    
+    switch (element.type) {
+      case "land":
+        return { color, transparent: true, opacity: 0.9, metalness: 0, roughness: 1 };
+      case "road":
+        return { color, metalness: 0, roughness: 1 };
+      case "sidewalk":
+        return { color, metalness: 0, roughness: 1 };
+      case "greenspace":
+        return { color, metalness: 0, roughness: 1 };
+      case "building":
+        return { color, metalness: 0, roughness: 0.9 };
+      case "corridor":
+        return { color, metalness: 0, roughness: 0.8, transparent: true, opacity: 0.95 };
+      default:
+        return { color, metalness: 0, roughness: 1 };
+    }
+  };
+
+  return (
+    <group 
+      position={element.position}
+      rotation={element.rotation ? element.rotation.map(r => r * Math.PI / 180) as [number, number, number] : [0, 0, 0]}
+    >
+      {/* 主体白膜 */}
+      <mesh
+        ref={meshRef}
+        scale={element.scale}
+        onClick={(e: ThreeEvent<MouseEvent>) => {
+          e.stopPropagation();
+          onSelect(element);
+        }}
+        onPointerOver={(e: ThreeEvent<PointerEvent>) => {
+          e.stopPropagation();
+          onHover(element);
+          document.body.style.cursor = "pointer";
+        }}
+        onPointerOut={() => {
+          onHover(null);
+          document.body.style.cursor = "auto";
+        }}
+        castShadow={element.type === "building"}
+        receiveShadow
+      >
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial {...getMaterialProps()} />
+      </mesh>
+
+      {/* 黑色边线 */}
+      <EdgeLines scale={element.scale} color={getEdgeColor()} />
+
+      {/* 悬停状态的标签 - 只在悬停且未选中时显示，使用固定大小 */}
+      {isHovered && !isSelected && (
+        <Html
+          position={[0, element.scale[1] / 2 + 0.3, 0]}
+          center
+          sprite
+          style={{ pointerEvents: 'none' }}
+        >
+          <div className="bg-white/95 border border-slate-200 rounded px-1.5 py-0.5 shadow-sm whitespace-nowrap">
+            <p className="text-[10px] font-medium text-slate-700">{element.name}</p>
+          </div>
+        </Html>
+      )}
+    </group>
+  );
+}
+
+function RoadMarkings() {
+  const markings = [];
+  
+  for (let x = -9; x <= 9; x += 1.5) {
+    if (Math.abs(x) > 1.5) {
+      markings.push(
+        <mesh key={`ew-${x}`} position={[x, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.8, 0.1]} />
+          <meshBasicMaterial color="#ffffff" />
+        </mesh>
+      );
+    }
+  }
+  
+  for (let z = -9; z <= 9; z += 1.5) {
+    if (Math.abs(z) > 1.5) {
+      markings.push(
+        <mesh key={`ns-${z}`} position={[0, 0.05, z]} rotation={[-Math.PI / 2, 0, Math.PI / 2]}>
+          <planeGeometry args={[0.8, 0.1]} />
+          <meshBasicMaterial color="#ffffff" />
+        </mesh>
+      );
+    }
+  }
+  
+  return <group>{markings}</group>;
+}
 
 function Tree({ position }: { position: [number, number, number] }) {
   return (
@@ -1751,8 +1903,10 @@ interface PlanViewportProps {
   onPlanViewClick?: (position: SightCorridorPosition) => void;
   onModelError?: (error: string) => void;
   footerContent?: React.ReactNode;
+  overlayContent?: React.ReactNode;
   title?: string;
   withCard?: boolean;
+  visibleLayerPrefixes?: string[];
   sceneUpAxis: UpAxis;
 }
 
@@ -1949,8 +2103,10 @@ export function PlanViewport({
   onPlanViewClick,
   onModelError,
   footerContent,
+  overlayContent = null,
   title = "平面图",
   withCard = true,
+  visibleLayerPrefixes,
   sceneUpAxis,
 }: PlanViewportProps) {
   const personScale = 2 * sightCorridorScale * PERSON_SCALE_MULTIPLIER;
@@ -2010,7 +2166,7 @@ export function PlanViewport({
           <OrthographicCamera
             makeDefault
             ref={cameraRef}
-            position={[0, 0, 450]}
+            position={[0, 0, 300]}
             near={0.01}
             far={1000}
           />
@@ -2219,6 +2375,7 @@ export interface CitySceneProps {
   selectedElement: CityElement | null;
   externalModelUrl?: string | null;
   externalModelType?: ModelFileType | null;
+  showDemoModel?: boolean;
   onModelError?: (error: string) => void;
   onImportedMeshSelect?: (mesh: ImportedMeshInfo | null) => void;
   selectedImportedMesh?: ImportedMeshInfo | null;
@@ -2252,6 +2409,7 @@ export function CityScene({
   selectedElement,
   externalModelUrl,
   externalModelType,
+  showDemoModel = true,
   onModelError,
   onImportedMeshSelect,
   selectedImportedMesh,
@@ -2279,10 +2437,12 @@ export function CityScene({
   onModelTransformComputed,
   onBuildingsExtracted,
 }: CitySceneProps) {
+  const [hoveredElement, setHoveredElement] = useState<CityElement | null>(null);
   const [sceneMeshList, setSceneMeshList] = useState<ImportedMeshInfo[]>([]);
   const controlsRef = useRef<any>(null);
   const isOrthographic = viewMode !== "perspective";
   const sceneUpAxis = SCENE_UP_AXIS;
+  const demoRotation = getYUpToSceneRotation(sceneUpAxis);
   const mainLightPosition = toSceneUp([15, 25, 15], sceneUpAxis);
   const fillLightPosition = toSceneUp([-10, 15, -10], sceneUpAxis);
   const hemiLightPosition: [number, number, number] = sceneUpAxis === "z" ? [0, 0, 1] : [0, 1, 0];
@@ -2305,7 +2465,7 @@ export function CityScene({
     const camera = controls.object as THREE.Camera;
 
     if (!modelBounds) {
-      // ????????????????????????????????????????
+      // 没有模型时，重置为默认剪裁平面，避免之前大模型的剪裁值影响演示场景并保持网格可见
       if (camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera) {
         camera.near = 0.01;
         camera.far = CLIP_MIN_FAR;
@@ -2343,6 +2503,7 @@ export function CityScene({
       selectedImportedMesh: selectedImportedMesh ?? null,
       externalModelUrl,
       externalModelType,
+      showDemoModel,
       viewMode,
       modelBounds,
       meshList: sceneMeshList,
@@ -2352,6 +2513,7 @@ export function CityScene({
       selectedImportedMesh,
       externalModelUrl,
       externalModelType,
+      showDemoModel,
       viewMode,
       modelBounds,
       sceneMeshList,
@@ -2431,6 +2593,20 @@ export function CityScene({
               opacity={gridColors.opacity}
               upAxis={sceneUpAxis}
             />
+
+          <group rotation={demoRotation}>
+            <RoadMarkings />
+            {showDemoModel && mockCityElements.map((element) => (
+              <CityElementMesh
+                key={element.id}
+                element={element}
+                isSelected={selectedElement?.id === element.id}
+                isHovered={hoveredElement?.id === element.id}
+                onSelect={onSelectElement}
+                onHover={setHoveredElement}
+              />
+            ))}
+          </group>
 
           {externalModelUrl && externalModelType && (
             <ExternalModel
