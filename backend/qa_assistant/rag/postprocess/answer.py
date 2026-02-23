@@ -3,6 +3,7 @@ from typing import Dict, Optional, Tuple
 from . import citations as pp_citations
 from . import markdown as pp_markdown
 from . import math as pp_math
+from . import images as pp_images
 
 
 def sanitize_answer(text: str) -> str:
@@ -24,6 +25,7 @@ def postprocess_answer(text: str, valid_labels: Optional[set] = None) -> Tuple[s
     text = sanitize_answer(text)
     text = pp_markdown.normalize_markdown_image_syntax(text)
     text = pp_markdown.strip_disallowed_markdown_images(text)
+    text = pp_images.normalize_image_reference_markers(text, valid_labels)
     text = pp_math.unescape_dollar_delimiters(text)
     text, remap = pp_citations.normalize_citations(text, valid_labels)
     text = pp_math.normalize_math_delimiters(text)

@@ -5,6 +5,17 @@ from urllib.parse import quote
 
 # Figure label matching used to align answer paragraphs with the correct images.
 _FIGURE_LABEL_RE = re.compile(r"(?:图|Fig\.?)\s*([0-9]+(?:[.\-][0-9]+){1,3})", flags=re.IGNORECASE)
+_STRUCTURED_IMG_MARKER_RE = re.compile(r"\[\[\s*IMG\s*:\s*(\d{1,2}-\d{1,2})(?:#(\d{1,2}))?\s*\]\]", flags=re.IGNORECASE)
+_DOC_FILE_IMAGE_MENTION_RE = re.compile(
+    r"(?:见|参考|参见|详见)?\s*文档\s*(\d{1,2}-\d{1,2})[^。\n，；;）)]{0,80}?"
+    r"[A-Za-z0-9_-]{4,}\.(?:png|jpe?g|webp|gif|bmp|svg)\b",
+    flags=re.IGNORECASE,
+)
+_DOC_HASH_IMAGE_MENTION_RE = re.compile(
+    r"(?:见|参考|参见|详见)?\s*文档\s*(\d{1,2}-\d{1,2})[^。\n，；;）)]{0,60}?"
+    r"[A-Fa-f0-9]{6,}(?:\.(?:png|jpe?g|webp|gif|bmp|svg))?",
+    flags=re.IGNORECASE,
+)
 
 
 def find_matching_bracket(text: str, start: int, opener: str, closer: str) -> int:
@@ -201,3 +212,74 @@ def rewrite_image_urls(text: str, doc_id: str) -> str:
         idx = next_idx
 
     return "".join(result_parts)
+
+
+def _format_structured_img_marker(
+    label: str,
+    raw_ordinal: Optional[str],
+    valid_labels: Optional[set[str]],
+) -> str:
+    normalized_label = str(label or "").strip()
+    if not normalized_label:
+        return ""
+    if valid_labels is not None and normalized_label not in valid_labels:
+        return ""
+
+    ordinal = 1
+    try:
+        parsed = int(str(raw_ordinal or "").strip())
+        if parsed >= 1:
+            ordinal = parsed
+    except Exception:
+        ordinal = 1
+    return f"[[IMG:{normalized_label}#{ordinal}]]"
+
+
+def normalize_image_reference_markers(text: str, valid_labels: Optional[set[str]] = None) -> str:
+    """
+    Normalize free-form document-image mentions into structured IMG markers.
+
+    Examples:
+    - 见文档3-1中的307b272.jpg -> [[IMG:3-1#1]]
+    - [[img:3-1]] -> [[IMG:3-1#1]]
+    """
+    if not text:
+        return text
+
+    parts = re.split(r"(```[\s\S]*?```|`[^`\n]*`)", text)
+    out: List[str] = []
+
+    for idx, seg in enumerate(parts):
+        if idx % 2 == 1:
+            out.append(seg)
+            continue
+
+        def _marker_repl(match: re.Match) -> str:
+            return _format_structured_img_marker(match.group(1), match.group(2), valid_labels)
+
+        normalized = _STRUCTURED_IMG_MARKER_RE.sub(_marker_repl, seg)
+        normalized = _DOC_FILE_IMAGE_MENTION_RE.sub(
+            lambda m: _format_structured_img_marker(m.group(1), "1", valid_labels),
+            normalized,
+        )
+        normalized = _DOC_HASH_IMAGE_MENTION_RE.sub(
+            lambda m: _format_structured_img_marker(m.group(1), "1", valid_labels),
+            normalized,
+        )
+
+        normalized = re.sub(
+            r"(\[\[IMG:\d{1,2}-\d{1,2}#\d{1,2}\]\])(?:\s*\1)+",
+            r"\1",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = (
+            normalized
+            .replace("（ ）", "")
+            .replace("( )", "")
+            .replace("（  ）", "")
+            .replace("(  )", "")
+        )
+        out.append(normalized)
+
+    return "".join(out)

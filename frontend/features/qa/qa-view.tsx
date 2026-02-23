@@ -6,6 +6,10 @@ import { useQAViewStore } from "@/lib/stores/qa-store";
 import { sendQuestion, sendQuestionStream } from "./api";
 import type { ChatHistoryMessage, ChatMessage } from "./types";
 import { mergeStreamingSources } from "@/lib/stream-source-utils";
+import {
+  initialAssistantRenderState,
+  transitionAssistantRenderState,
+} from "@/features/qa/render/assistant-render-state-machine";
 
 const quickQuestions: string[] = [];
 
@@ -35,6 +39,7 @@ type MarkdownShapeMetrics = {
   gfmTableBlocks: number;
   pipeHeavyLines: number;
   markdownImageCount: number;
+  structuredImageMarkerCount: number;
   length: number;
 };
 
@@ -57,11 +62,15 @@ function inspectMarkdownShape(markdown: string): MarkdownShapeMetrics {
   }
 
   const markdownImageCount = (text.match(/!\[[^\]]*]\([^)]+\)/g) || []).length;
+  const structuredImageMarkerCount = (
+    text.match(/\[\[\s*IMG\s*:\s*\d{1,2}-\d{1,2}(?:#\d{1,2})?\s*\]\]/gi) || []
+  ).length;
 
   return {
     gfmTableBlocks,
     pipeHeavyLines,
     markdownImageCount,
+    structuredImageMarkerCount,
     length: text.trim().length,
   };
 }
@@ -82,8 +91,10 @@ function shouldAcceptAnswerReplacement(current: string, replacement: string): bo
     next.pipeHeavyLines >= Math.max(2, cur.pipeHeavyLines);
   if (tableDowngradedToPipes) return false;
 
-  // Reject when images disappear completely after replacement.
-  if (cur.markdownImageCount > 0 && next.markdownImageCount === 0) return false;
+  // Reject when image-like anchors disappear completely after replacement.
+  const curImageLike = cur.markdownImageCount + cur.structuredImageMarkerCount;
+  const nextImageLike = next.markdownImageCount + next.structuredImageMarkerCount;
+  if (curImageLike > 0 && nextImageLike === 0) return false;
 
   // Guard against accidental severe truncation.
   if (cur.length > 120 && next.length < cur.length * 0.55) return false;
@@ -130,6 +141,7 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
       isStreaming: true,
       statusStage: "understanding",
       statusMessage: "正在理解你的问题...",
+      renderState: initialAssistantRenderState(),
     });
     const assistantId = assistantMsg.id;
     appendMessage(assistantMsg);
@@ -145,28 +157,49 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
         onRetrievalStats: (stats) => {
           updateMessage(assistantId, (msg) => ({ ...msg, retrievalStats: stats }));
         },
+        onRetrievalOverview: (overview) => {
+          updateMessage(assistantId, (msg) => ({
+            ...msg,
+            retrievalOverview: overview,
+            renderState: transitionAssistantRenderState(msg.renderState, { type: "retrieval_overview" }),
+          }));
+        },
         onGraph: (subgraph) => {
           updateMessage(assistantId, (msg) => ({ ...msg, subgraph }));
         },
         onStatus: (stage, message) => {
-          updateMessage(assistantId, (msg) => ({ ...msg, statusStage: stage, statusMessage: message }));
+          updateMessage(assistantId, (msg) => ({
+            ...msg,
+            statusStage: stage,
+            statusMessage: message,
+            renderState: transitionAssistantRenderState(msg.renderState, { type: "status", stage }),
+          }));
         },
         onThinking: (token) => {
           updateMessage(assistantId, (msg) => ({
             ...msg,
             thinking: (msg.thinking || "") + token,
             thinkingDone: false,
+            renderState: transitionAssistantRenderState(msg.renderState, { type: "thinking" }),
           }));
         },
         onThinkingDone: () => {
           updateMessage(assistantId, (msg) => ({
             ...msg,
             thinkingDone: true,
+            renderState: transitionAssistantRenderState(msg.renderState, { type: "thinking_done" }),
           }));
         },
         onAnswer: (token) => {
           updateMessage(assistantId, (msg) => ({
             ...msg,
+            // Keep answer hidden only when there is real, unfinished thinking text.
+            // If the model streams answer directly (no thinking_done event), we should
+            // still enter answering state to avoid "nothing shows until done".
+            renderState: transitionAssistantRenderState(msg.renderState, {
+              type: "answer",
+              holdDuringReasoning: Boolean((msg.thinking || "").trim()) && !msg.thinkingDone,
+            }),
             content: msg.content + token,
           }));
         },
@@ -178,6 +211,7 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
               : msg.content,
             isStreaming: false,
             finalizedByServer: true,
+            renderState: transitionAssistantRenderState(msg.renderState, { type: "answer_replaced" }),
             ...(replacedSources
               ? { sources: mergeStreamingSources(msg.sources, replacedSources) }
               : {}),
@@ -189,6 +223,7 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
             isStreaming: false,
             statusStage: undefined,
             statusMessage: undefined,
+            renderState: transitionAssistantRenderState(msg.renderState, { type: "done" }),
           }));
         },
         onError: (detail) => {
@@ -198,6 +233,7 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
             isStreaming: false,
             statusStage: undefined,
             statusMessage: undefined,
+            renderState: transitionAssistantRenderState(msg.renderState, { type: "error" }),
           }));
         },
       }, streamAbortController.signal);
@@ -212,6 +248,7 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
           thinkingDone: true,
           statusStage: undefined,
           statusMessage: undefined,
+          renderState: transitionAssistantRenderState(msg.renderState, { type: "done" }),
         }));
         return;
       }
@@ -224,6 +261,7 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
           content: response.answer || "未返回答案。",
           sources: response.sources,
           isStreaming: false,
+          renderState: transitionAssistantRenderState(msg.renderState, { type: "done" }),
         }));
       } catch (fallbackError) {
         const detail =
@@ -232,6 +270,7 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
           ...msg,
           content: msg.content || `请求失败：${detail}`,
           isStreaming: false,
+          renderState: transitionAssistantRenderState(msg.renderState, { type: "error" }),
         }));
       }
     } finally {

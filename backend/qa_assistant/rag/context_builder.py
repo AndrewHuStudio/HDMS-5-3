@@ -1,3 +1,4 @@
+import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -13,6 +14,20 @@ def _truncate_text(value: str, limit: int) -> str:
     if last_img_start != -1 and clipped.find(")", last_img_start) == -1:
         clipped = clipped[:last_img_start].rstrip()
     return f"{clipped}..."
+
+
+def _looks_like_opaque_image_name(value: str) -> bool:
+    s = str(value or "").strip()
+    if not s:
+        return False
+    base = s.replace("\\", "/").split("/")[-1]
+    stem = base.rsplit(".", 1)[0]
+    if len(stem) < 20:
+        return False
+    return bool(
+        re.match(r"^[A-Fa-f0-9-]{20,}$", stem)
+        or re.match(r"^[A-Za-z0-9_]{24,}$", stem)
+    )
 
 
 def build_context_and_sources(
@@ -170,6 +185,16 @@ def build_context_and_sources(
                         chunk_doc = None
                 chunk_doc_cache[chunk_id] = chunk_doc
 
+        if not doc_id:
+            doc_id = (
+                metadata.get("doc_id")
+                or metadata.get("source_doc_id")
+                or (chunk_doc.get("doc_id") if isinstance(chunk_doc, dict) else None)
+                or (chunk_doc.get("source_doc_id") if isinstance(chunk_doc, dict) else None)
+            )
+        if doc_id is not None:
+            doc_id = str(doc_id).strip() or None
+
         section = (
             metadata.get("section_title")
             or result.get("section_title")
@@ -316,14 +341,18 @@ def build_context_and_sources(
                     fig = str(figures[idx]).strip() if idx < len(figures) else ""
                     cap = str(captions[idx]).strip() if idx < len(captions) else ""
                     name = str(names[idx]).strip() if idx < len(names) else ""
-                    desc = cap or fig or name or f"图片{idx + 1}"
-                    if fig and cap and fig not in cap:
-                        desc = f"{fig} {cap}"
-                    hint_lines.append(f"  - {desc}")
+                    safe_cap = cap if cap and not _looks_like_opaque_image_name(cap) else ""
+                    safe_name = name if name and not _looks_like_opaque_image_name(name) else ""
+                    if fig and safe_cap and fig not in safe_cap:
+                        desc = f"{fig} {safe_cap}"
+                    else:
+                        desc = safe_cap or fig or safe_name or f"图片{idx + 1}"
+                    anchor = f"[[IMG:{label}#{idx + 1}]]"
+                    hint_lines.append(f"  - {anchor} {desc}")
                 img_count = len(hint_lines)
                 image_hint = (
-                    f"\n[本片段包含 {img_count} 张图片，请在回答相关内容时引用]\n"
-                    + "图片目录：\n"
+                    f"\n[本片段包含 {img_count} 张图片；相关段落请优先使用如下 IMG 标记引用，不要输出图片文件名]\n"
+                    + "图片目录（IMG 标记 -> 图片语义）：\n"
                     + "\n".join(hint_lines)
                     + "\n"
                 )

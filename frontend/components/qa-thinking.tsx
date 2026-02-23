@@ -149,20 +149,27 @@ export function ThinkingProcess({
                   {index < visibleSteps.length - 1 && (
                     <span className="qa-thinking-step__tail" />
                   )}
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span
-                      className={`qa-thinking-step__label font-medium ${
-                        step.state === "active" ? "text-foreground" : "text-muted-foreground"
-                      }`}
-                    >
-                      {step.label}
-                    </span>
-                    {step.state === "active" && (
-                      <span className="inline-flex items-center gap-1" aria-label={`${step.label}进行中`}>
-                        <span className="qa-thinking-dot qa-thinking-dot--1" />
-                        <span className="qa-thinking-dot qa-thinking-dot--2" />
-                        <span className="qa-thinking-dot qa-thinking-dot--3" />
+                  <div className="text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`qa-thinking-step__label font-medium ${
+                          step.state === "active" ? "text-foreground" : "text-muted-foreground"
+                        }`}
+                      >
+                        {step.label}
                       </span>
+                      {step.state === "active" && (
+                        <span className="inline-flex items-center gap-1" aria-label={`${step.label}进行中`}>
+                          <span className="qa-thinking-dot qa-thinking-dot--1" />
+                          <span className="qa-thinking-dot qa-thinking-dot--2" />
+                          <span className="qa-thinking-dot qa-thinking-dot--3" />
+                        </span>
+                      )}
+                    </div>
+                    {step.detail && (
+                      <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                        {step.detail}
+                      </p>
                     )}
                   </div>
                 </li>

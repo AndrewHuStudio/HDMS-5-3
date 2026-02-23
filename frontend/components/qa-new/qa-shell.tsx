@@ -13,20 +13,19 @@ import { QARetrievalStats } from "@/components/qa-retrieval-stats";
 import { QAFeedback } from "@/components/qa-feedback";
 import { QAExportButton } from "@/components/qa-export-button";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
-import type { ChatMessage } from "@/features/qa/types";
+import type { ChatMessage, RetrievalOverview, RetrievalStats, SourceInfo } from "@/features/qa/types";
 import { cn } from "@/lib/utils";
 import { API_BASE, QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
-import { injectSourceImages } from "@/lib/inject-source-images";
-import { injectSourceTables } from "@/lib/inject-source-tables";
-import { normalizeAnswerTables } from "@/lib/normalize-answer-tables";
-import { normalizeAnswerMarkdownArtifacts } from "@/lib/normalize-answer-markdown-artifacts";
 import { QA_REMARK_PLUGINS } from "@/lib/qa-markdown-plugins";
 import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
-import { collapseFigureMentions } from "@/lib/stream-source-utils";
+import { buildAnswerMarkdown } from "@/features/qa/render/answer-markdown-pipeline";
+import {
+  buildAssistantRenderModel,
+  deriveAssistantRenderState,
+} from "@/features/qa/render/assistant-render-state-machine";
 import {
   buildCitationLabelIndexMap,
   CitationLink,
-  processAnswerCitations,
 } from "@/features/qa/citations";
 
 interface QAShellProps {
@@ -105,6 +104,80 @@ function extractRecommendedQuestions(content: string): {
   return { cleanContent, questions };
 }
 
+function collectRetrievalDocNames(
+  sources: SourceInfo[],
+  preferredNames: string[] = [],
+): string[] {
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  const pushName = (raw: string) => {
+    const name = String(raw || "").trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    deduped.push(name);
+  };
+
+  preferredNames.forEach(pushName);
+  for (const src of sources) {
+    if (src.type !== "document") continue;
+    pushName(src.name);
+  }
+
+  return deduped;
+}
+
+function QARetrievalOverview({
+  overview,
+  stats,
+  docNames,
+  isStreaming,
+}: {
+  overview?: RetrievalOverview;
+  stats?: RetrievalStats;
+  docNames: string[];
+  isStreaming: boolean;
+}) {
+  if (!overview && !stats && docNames.length === 0) return null;
+
+  const candidateCount = typeof overview?.candidate_count === "number"
+    ? overview.candidate_count
+    : stats
+    ? stats.vector_count + stats.graph_count + stats.keyword_count
+    : 0;
+  const fusedCount = typeof overview?.fused_count === "number"
+    ? overview.fused_count
+    : (stats?.fused_count ?? 0);
+  const summaryLine = (overview?.summary || "").trim() || (
+    (stats?.cached || overview?.cached)
+      ? "已使用缓存结果并复用检索依据。"
+      : candidateCount > 0
+        ? `已检索 ${candidateCount} 条候选，融合 ${fusedCount} 条结果。`
+        : ""
+  );
+  const docLine = docNames.length > 0 ? `检索资料清单：${docNames.join("；")}。` : "";
+
+  return (
+    <div className="mb-2 rounded-md border border-border/60 bg-muted/25 px-3 py-2">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <span>检索综述</span>
+        {isStreaming && (
+          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+        )}
+      </div>
+      {summaryLine && (
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{summaryLine}</p>
+      )}
+      {docLine && (
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          {highlightRetrievalDocNames(docLine, "overview-doc")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Resolve image src: convert relative /rag/... paths to absolute URLs */
 function resolveImageSrc(src: string): string {
   if (!src) return src;
@@ -118,51 +191,8 @@ function resolveImageSrc(src: string): string {
   return src.startsWith("/") ? `${base}${src}` : `${base}/${src}`;
 }
 
-const MARKDOWN_IMAGE_DEST_RE = /!\[[^\]]*\]\(([^)\n]+)\)/g;
-const HTML_IMAGE_SRC_RE = /<img\b[^>]*\bsrc=(['"])([^'"]+)\1/gi;
-const RAG_IMAGE_ROUTE_RE = /^\/(?:api\/)?rag\/documents\/[^/?#]+\/image$/i;
 const FIGURE_CAPTION_TEXT_RE =
   /^(?:FIGCAPTION\s+)?(?:图\s*\d+(?:[.\-]\d+){0,3}\s*[：:.]|[（(]?\s*(?:图示|图注|图例)\s*[：:])/u;
-
-function parseMarkdownImageDestination(raw: string): string {
-  let cleaned = String(raw || "").trim();
-  if (!cleaned) return "";
-  if (cleaned.startsWith("<") && cleaned.endsWith(">")) {
-    cleaned = cleaned.slice(1, -1).trim();
-  } else {
-    const titleMatch = cleaned.match(/^(.*?)(?:\s+["'][^"']*["'])\s*$/);
-    if (titleMatch?.[1]) cleaned = titleMatch[1].trim();
-  }
-  return cleaned.replace(/\\ /g, " ").replace(/\\\\/g, "\\").trim();
-}
-
-function isRenderableMarkdownImageUrl(raw: string): boolean {
-  const url = String(raw || "").trim();
-  if (!url) return false;
-  if (/^(?:https?:\/\/|data:)/i.test(url)) return true;
-  if (!(url.startsWith("/rag/") || url.startsWith("/api/rag/"))) return false;
-  try {
-    const parsed = new URL(url, "http://localhost");
-    if (!RAG_IMAGE_ROUTE_RE.test(parsed.pathname)) return true;
-    return Boolean((parsed.searchParams.get("ref") || "").trim());
-  } catch {
-    return false;
-  }
-}
-
-function countRenderableMarkdownImages(text: string): number {
-  if (!text) return 0;
-  let count = 0;
-  for (const match of text.matchAll(MARKDOWN_IMAGE_DEST_RE)) {
-    const dest = parseMarkdownImageDestination(match[1] || "");
-    if (isRenderableMarkdownImageUrl(dest)) count += 1;
-  }
-  for (const match of text.matchAll(HTML_IMAGE_SRC_RE)) {
-    const src = String(match[2] || "").trim();
-    if (isRenderableMarkdownImageUrl(src)) count += 1;
-  }
-  return count;
-}
 
 function flattenReactText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -626,7 +656,17 @@ function AssistantContent({
   onFillInput?: (value: string) => void;
   onImageClick?: (src: string) => void;
 }) {
-  const { content, thinking, sources, retrievalStats, feedback, isStreaming, thinkingDone, finalizedByServer } = message;
+  const {
+    content,
+    thinking,
+    sources,
+    retrievalStats,
+    retrievalOverview,
+    feedback,
+    isStreaming,
+    thinkingDone,
+    finalizedByServer,
+  } = message;
   const [activeCitationLabel, setActiveCitationLabel] = useState<string | null>(null);
   const markdownRef = useRef<HTMLDivElement>(null);
 
@@ -653,38 +693,36 @@ function AssistantContent({
   );
 
   const answerMarkdown = useMemo(() => {
-    const withTables = normalizeAnswerTables(cleanContent);
-    const withArtifacts = normalizeAnswerMarkdownArtifacts(withTables, {
-      streaming: isStreaming,
-    });
-    const withoutInlineCitations = processAnswerCitations({
-      text: withArtifacts,
+    return buildAnswerMarkdown({
+      content: cleanContent,
       sources: sourcesNormalized,
-      isStreaming,
+      isStreaming: Boolean(isStreaming),
+      precedingQuestion,
+      finalizedByServer,
     });
-    if (isStreaming) {
-      // Keep streaming text stable; inject images only after the answer is complete.
-      return collapseFigureMentions(withoutInlineCitations);
-    }
-    const renderableImageCount = countRenderableMarkdownImages(withoutInlineCitations);
-    const hasRenderableMarkdownImage = renderableImageCount > 0;
-    const hasGfmTable = /\|.+\|\n\s*\|?\s*:?-{3,}:?/m.test(withoutInlineCitations);
-
-    // Inject only when no renderable image exists in answer markdown. This
-    // avoids duplicate "broken + injected" figures between streaming/final paths.
-    const shouldInjectImages = !hasRenderableMarkdownImage;
-    // If backend already emitted a finalized answer_replaced payload, avoid
-    // aggressive reinjection that can diverge from the server-final structure.
-    const shouldInjectTables = !finalizedByServer || !hasGfmTable;
-
-    const withImages = shouldInjectImages
-      ? injectSourceImages(withoutInlineCitations, sourcesNormalized, precedingQuestion)
-      : withoutInlineCitations;
-    const withTablesAndImages = shouldInjectTables
-      ? injectSourceTables(withImages, sourcesNormalized)
-      : withImages;
-    return collapseFigureMentions(withTablesAndImages);
   }, [cleanContent, sourcesNormalized, isStreaming, precedingQuestion, finalizedByServer]);
+
+  const retrievalDocNames = useMemo(
+    () => collectRetrievalDocNames(
+      sourcesNormalized,
+      retrievalOverview?.document_names || retrievalStats?.document_names || [],
+    ),
+    [sourcesNormalized, retrievalOverview?.document_names, retrievalStats?.document_names],
+  );
+  const hasInlineRetrievalOverviewHeading = /^##\s*(?:[一二三四五六七八九十]+、\s*)?检索综述\b/m.test(
+    answerMarkdown,
+  );
+  const renderState = deriveAssistantRenderState(message);
+  const hasThinkingTokens = Boolean((thinking || "").trim());
+  const renderModel = buildAssistantRenderModel({
+    state: renderState,
+    isStreaming: Boolean(isStreaming),
+    hasThinking: hasThinkingTokens,
+    hasAnswer: Boolean(content),
+    hasRetrievalStats: Boolean(retrievalStats),
+    hasRetrievalOverview: Boolean(retrievalOverview) || Boolean(retrievalStats) || retrievalDocNames.length > 0,
+    hasInlineRetrievalOverviewHeading,
+  });
 
   useEffect(() => {
     setActiveCitationLabel(null);
@@ -702,21 +740,22 @@ function AssistantContent({
 
   const hasSourcePanel = Boolean(sourcesNormalized && sourcesNormalized.length > 0 && !isStreaming);
   const useSidebarSourceLayout = hasSourcePanel && !embedded;
-  const normalizedStatusStage = (message.statusStage || "").trim().toLowerCase();
-  const stageReadyForRetrievalSummary =
-    normalizedStatusStage === "reasoning" || normalizedStatusStage === "generating";
-  const hasThinkingTokens = Boolean((thinking || "").trim());
-  const showParallelRetrievalStats = Boolean(retrievalStats) && (
-    !isStreaming || stageReadyForRetrievalSummary || Boolean(thinkingDone) || hasThinkingTokens
-  );
-
   return (
     <div>
-      {showParallelRetrievalStats && (
+      {renderModel.showRetrievalStats && (
         <QARetrievalStats stats={retrievalStats!} isStreaming={!!isStreaming} />
       )}
 
-      {(isStreaming || thinking) && (
+      {renderModel.showRetrievalOverview && (
+        <QARetrievalOverview
+          overview={retrievalOverview}
+          stats={retrievalStats}
+          docNames={retrievalDocNames}
+          isStreaming={!!isStreaming}
+        />
+      )}
+
+      {renderModel.showThinking && (
         <ThinkingProcess
           thinking={thinking || ""}
           isStreaming={!!isStreaming}
@@ -743,7 +782,7 @@ function AssistantContent({
         </details>
       )}
 
-      {content ? (
+      {renderModel.showAnswer && content ? (
         <div
           className={cn(
             useSidebarSourceLayout && "mt-1 grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]"
@@ -877,7 +916,7 @@ function AssistantContent({
             >
               {answerMarkdown}
             </ReactMarkdown>
-            {isStreaming && (
+            {renderModel.showStreamingCursor && (
               <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-foreground" />
             )}
           </div>
@@ -895,7 +934,7 @@ function AssistantContent({
             </aside>
           )}
         </div>
-      ) : isStreaming ? (
+      ) : renderModel.showStreamingCursor ? (
         <span className="inline-block h-4 w-0.5 animate-pulse bg-foreground" />
       ) : null}
 

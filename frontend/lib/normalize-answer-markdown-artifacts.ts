@@ -392,7 +392,19 @@ function splitRunOnNumberedItems(text: string): string {
         // Ensure "1.文本" -> "1. 文本" at line start.
         let normalized = line.replace(/^([ \t]*\d{1,2}[.．])(?=[^\s\d])/, "$1 ");
         const markerRe = /\d{1,2}[.．](?=\s*[^\s\d])/g;
-        const matches = Array.from(normalized.matchAll(markerRe));
+        const matches = Array.from(normalized.matchAll(markerRe)).filter((m) => {
+          const pos = m.index ?? 0;
+          const marker = m[0] || "";
+          const prevChar = pos > 0 ? normalized[pos - 1] : "";
+          const tail = normalized.slice(pos + marker.length).trimStart();
+
+          // Guard against splitting inside filenames/hash tokens like:
+          // "307b272.jpg" -> "307b2\\n72. jpg" (wrong).
+          if (prevChar && /[A-Za-z0-9_./-]/.test(prevChar)) return false;
+          if (/^(?:jpe?g|png|webp|gif|bmp|svg)\b/i.test(tail)) return false;
+
+          return true;
+        });
         if (matches.length <= 1) return normalized;
 
         let out = "";
@@ -661,6 +673,18 @@ function normalizeMarkdownHeadingHierarchy(text: string, diagnostics?: Normaliza
     const rawTitle = (match[2] || "").trim();
     const semanticTitle = normalizeHeadingTitle(rawTitle);
     if (!semanticTitle) return "";
+
+    const isExplicitMarkdownHeading = /^#{1,6}\s+/.test(trimmed);
+    if (isExplicitMarkdownHeading) {
+      // Trust explicit markdown headings and only normalize their level/title.
+      let level = originalLevel;
+      if (MAJOR_SECTION_TITLE_RE.test(semanticTitle)) level = 2;
+      level = Math.max(2, Math.min(6, level));
+      if (diagnostics) {
+        recordHeadingDecision(diagnostics, "heading", ["explicit-markdown-heading"]);
+      }
+      return `${"#".repeat(level)} ${semanticTitle}`;
+    }
 
     const classification = classifyHeadingCandidate(semanticTitle, {
       previousNonEmptyLine: findPreviousNonEmptyLine(idx),

@@ -380,12 +380,26 @@ def strip_disallowed_markdown_images(text: str) -> str:
         u = u.split(None, 1)[0].strip()
         return u.startswith(("/rag/", "/api/rag/", "http://", "https://", "data:"))
 
+    def _is_filename_like_alt(value: str) -> bool:
+        alt = (value or "").strip()
+        if not alt:
+            return False
+        if re.fullmatch(r"[A-Za-z0-9_.-]{6,}\.(?:png|jpe?g|webp|gif|bmp|svg)", alt, flags=re.IGNORECASE):
+            return True
+        stem = alt.rsplit(".", 1)[0] if "." in alt else alt
+        if len(stem) >= 12 and re.fullmatch(r"[A-Fa-f0-9_-]{12,}", stem):
+            return True
+        return False
+
     def _repl(m: re.Match) -> str:
         alt = (m.group(1) or "").strip()
         raw = (m.group(2) or "").strip()
         normalized = _normalize_rag_image_query_url(raw)
         if _allowed(normalized):
             return f"![{alt}]({normalized})"
+        # Do not leak opaque filenames/hashes into final prose.
+        if _is_filename_like_alt(alt):
+            return ""
         # Replace broken image with plain alt text (no broken icon).
         return alt if alt else ""
 

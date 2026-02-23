@@ -10,20 +10,22 @@ type CandidateImage = {
 const FIGURE_REF_RE = /图\s*([0-9]+(?:[.\-][0-9]+){1,3})/g;
 const GUIDE_HINT_RE = /(如下图|下图|见下图|如图所示|流程图如下|示意图如下)/;
 const IMAGE_MENTION_RE = /(控制图|示意图|图示|图注|剖面|总图|平面图|流程图|附图|配图)/;
+const IMAGE_INTENT_RE = /(见图|如图|下图|配图|附图|流程图|示意图|剖面图|平面图|控制图)/u;
 // Matches user-facing inline refs like:
 // - （见图1）
 // - （见图3.0.1）
 // - （见图3.0.3流程图）
 // Also tolerates missing parentheses to avoid partial replacements that leave ".0.1）" fragments.
 const INLINE_SEE_FIGURE_RE =
-  /[（(]?\s*见图\s*\d+(?:[.\-]\d+){0,3}(?:[^)）]{0,20})?\s*[)）]?/u;
+  /[（(]?\s*(?:见)?图\s*\d+(?:[.\-]\d+){0,3}(?:[^)）]{0,20})?\s*[)）]?/u;
 const INLINE_SEE_FIGURE_GLOBAL_RE =
-  /[（(]?\s*见图\s*\d+(?:[.\-]\d+){0,3}(?:[^)）]{0,20})?\s*[)）]?/gu;
+  /[（(]?\s*(?:见)?图\s*\d+(?:[.\-]\d+){0,3}(?:[^)）]{0,20})?\s*[)）]?/gu;
 const IMAGE_PLACEHOLDER_RE =
   /\[([^\]]{2,80})\][（(][^)\n]*?(此处应插入|未见附图)[^)\n]*[)）]?/;
 const MARKDOWN_IMAGE_DEST_RE = /!\[[^\]]*\]\(([^)\n]+)\)/g;
 const CITATION_ANCHOR_RE = /\[\d{1,2}-\d{1,2}\]\(#source-\d{1,2}-\d{1,2}\)/g;
 const FIGURE_CONTEXT_PREFIX_RE = /^\s*[（(]?\s*(?:图示|图注|图例|示意图|附图)\s*[：:]/u;
+const STRUCTURED_IMG_ANCHOR_RE = /\[\[\s*IMG\s*:\s*(\d{1,2}-\d{1,2})(?:#(\d{1,2}))?\s*\]\]/giu;
 
 function normalizeCaptionText(text: string): string {
   const t = String(text || "").trim();
@@ -327,6 +329,11 @@ type FigureCaptionLineOptions = {
   citationAnchors?: string[];
 };
 
+interface InjectSourceImagesOptions {
+  streaming?: boolean;
+  allowAppendixFallback?: boolean;
+}
+
 function buildFigureCaptionLine(
   figLabel: string,
   image: CandidateImage,
@@ -395,6 +402,23 @@ function pickFirstUnusedCandidate(
   return null;
 }
 
+function pickCandidateByStructuredAnchor(
+  candidates: CandidateImage[],
+  rawOrdinal: string | undefined,
+  lines: string[],
+  injectedUrls: Set<string>
+): CandidateImage | null {
+  if (candidates.length === 0) return null;
+
+  const ordinal = Number(rawOrdinal);
+  if (Number.isFinite(ordinal) && ordinal >= 1) {
+    const preferred = candidates[ordinal - 1];
+    if (preferred) return preferred;
+  }
+
+  return pickFirstUnusedCandidate(candidates, lines, injectedUrls) || candidates[0] || null;
+}
+
 /**
  * Inject images into answer markdown with "figure-first" matching:
  * - Prefer matching by nearest figure number token (e.g. 图3.0.1)
@@ -403,9 +427,12 @@ function pickFirstUnusedCandidate(
 export function injectSourceImages(
   text: string,
   sources: SourceInfo[] | undefined,
-  query?: string
+  query?: string,
+  options: InjectSourceImagesOptions = {}
 ): string {
   if (!text || !sources || sources.length === 0) return text;
+  const streaming = Boolean(options.streaming);
+  const allowAppendixFallback = options.allowAppendixFallback ?? !streaming;
 
   const sourceByLabel = new Map<string, SourceInfo>();
   for (const src of sources) {
@@ -424,63 +451,147 @@ export function injectSourceImages(
 
   // 1) Handle explicit "should insert image here" placeholders by replacing them
   //    with a best-effort real image from the retrieved sources.
+  if (!streaming) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const placeholder = line.match(IMAGE_PLACEHOLDER_RE);
+      if (!placeholder) continue;
+
+      const title = (placeholder[1] || "").trim();
+      const candidates = allCandidates;
+      const chosen =
+        pickImageByFigureOrHint(line, candidates) ||
+        pickImageByKeyword(title, candidates) ||
+        pickImageByKeyword(line, candidates) ||
+        (candidates[0] ?? null);
+
+      if (!chosen) {
+        // Strip the placeholder note even if we can't find an image.
+        lines[i] = line.replace(IMAGE_PLACEHOLDER_RE, "").trim();
+        continue;
+      }
+
+      if (!isUrlAlreadyPresent(chosen.url, lines, injectedUrls)) {
+        figCount += 1;
+        const figLabel = `图${figCount}`;
+
+        // Try attaching "(见图N)" to the closest meaningful text line above.
+        for (let j = i - 1; j >= 0; j--) {
+          const prev = lines[j]?.trim();
+          if (!prev) continue;
+          if (prev.startsWith("![")) continue; // image
+          if (prev.startsWith("【图注】")) continue; // caption marker
+          lines[j] = appendFigureRefToLine(lines[j], figLabel);
+          break;
+        }
+
+        const alt = pickDisplayText(chosen) || "参考配图";
+        const contextLine = (lines[i - 1] ?? "").trim() ? lines[i - 1] : "";
+        const listIndent = detectListContentIndent(lines[i - 1] || "");
+        const injectedBlock = buildInjectedBlock(
+          `![${alt}](${chosen.url})`,
+          buildFigureCaptionLine(figLabel, chosen, { contextLine }),
+          listIndent
+        );
+        lines.splice(
+          i,
+          1,
+          ...injectedBlock
+        );
+        injectedUrls.add(chosen.url);
+        urlToFigLabel.set(chosen.url, figLabel);
+        i += injectedBlock.length - 1;
+      } else {
+        // If the image is already present, at least remove the placeholder note.
+        lines[i] = line.replace(IMAGE_PLACEHOLDER_RE, "").trim();
+      }
+    }
+  }
+
+  // 1.5) Consume structured image anchors emitted by backend prompt/postprocess:
+  // [[IMG:3-1#2]] -> use source 3-1, image index 2 (1-based).
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const placeholder = line.match(IMAGE_PLACEHOLDER_RE);
-    if (!placeholder) continue;
+    const anchorPattern = new RegExp(STRUCTURED_IMG_ANCHOR_RE.source, STRUCTURED_IMG_ANCHOR_RE.flags);
+    const anchors = Array.from(line.matchAll(anchorPattern));
+    if (anchors.length === 0) continue;
 
-    const title = (placeholder[1] || "").trim();
-    const candidates = allCandidates;
-    const chosen =
-      pickImageByFigureOrHint(line, candidates) ||
-      pickImageByKeyword(title, candidates) ||
-      pickImageByKeyword(line, candidates) ||
-      (candidates[0] ?? null);
+    let nextLine = line;
+    const injectedBlocks: string[] = [];
 
-    if (!chosen) {
-      // Strip the placeholder note even if we can't find an image.
-      lines[i] = line.replace(IMAGE_PLACEHOLDER_RE, "").trim();
+    for (const match of anchors) {
+      const rawToken = match[0] || "";
+      const label = (match[1] || "").trim();
+      const rawOrdinal = (match[2] || "").trim();
+      if (!rawToken || !label) continue;
+
+      const src = sourceByLabel.get(label);
+      if (!src) {
+        nextLine = nextLine.replace(rawToken, "");
+        continue;
+      }
+
+      const candidates = buildCandidates(src);
+      const chosen = pickCandidateByStructuredAnchor(candidates, rawOrdinal, lines, injectedUrls);
+      if (!chosen) {
+        nextLine = nextLine.replace(rawToken, "");
+        continue;
+      }
+
+      if (isUrlAlreadyPresent(chosen.url, lines, injectedUrls)) {
+        const existing = urlToFigLabel.get(chosen.url);
+        nextLine = nextLine.replace(rawToken, existing ? `（${existing}）` : "");
+        continue;
+      }
+
+      figCount += 1;
+      const figLabel = `图${figCount}`;
+      nextLine = nextLine.replace(rawToken, `（${figLabel}）`);
+
+      const alt = pickDisplayText(chosen) || "参考配图";
+      const listIndent = detectListContentIndent(line);
+      const captionLine = buildFigureCaptionLine(figLabel, chosen, {
+        contextLine: line,
+        citationAnchors: [`[${label}](#source-${label})`],
+      });
+      injectedBlocks.push(
+        ...buildInjectedBlock(
+          `![${alt}](${chosen.url})`,
+          captionLine,
+          listIndent
+        )
+      );
+
+      injectedUrls.add(chosen.url);
+      urlToFigLabel.set(chosen.url, figLabel);
+    }
+
+    const cleanupPattern = new RegExp(STRUCTURED_IMG_ANCHOR_RE.source, STRUCTURED_IMG_ANCHOR_RE.flags);
+    nextLine = nextLine
+      .replace(cleanupPattern, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .trimEnd();
+
+    if (injectedBlocks.length === 0) {
+      lines[i] = nextLine;
       continue;
     }
 
-    if (!isUrlAlreadyPresent(chosen.url, lines, injectedUrls)) {
-      figCount += 1;
-      const figLabel = `图${figCount}`;
-
-      // Try attaching "(见图N)" to the closest meaningful text line above.
-      for (let j = i - 1; j >= 0; j--) {
-        const prev = lines[j]?.trim();
-        if (!prev) continue;
-        if (prev.startsWith("![")) continue; // image
-        if (prev.startsWith("【图注】")) continue; // caption marker
-        lines[j] = appendFigureRefToLine(lines[j], figLabel);
-        break;
-      }
-
-      const alt = pickDisplayText(chosen) || "参考配图";
-      const contextLine = (lines[i - 1] ?? "").trim() ? lines[i - 1] : "";
-      const listIndent = detectListContentIndent(lines[i - 1] || "");
-      const injectedBlock = buildInjectedBlock(
-        `![${alt}](${chosen.url})`,
-        buildFigureCaptionLine(figLabel, chosen, { contextLine }),
-        listIndent
-      );
-      lines.splice(
-        i,
-        1,
-        ...injectedBlock
-      );
-      injectedUrls.add(chosen.url);
-      urlToFigLabel.set(chosen.url, figLabel);
-      i += injectedBlock.length - 1;
+    const lineWithoutTrailingFigureRef = nextLine.replace(/[（(]\s*图\d+\s*[)）]\s*$/u, "").trim();
+    const consumeLine = !lineWithoutTrailingFigureRef;
+    if (consumeLine) {
+      lines.splice(i, 1, ...injectedBlocks);
+      i += injectedBlocks.length - 1;
     } else {
-      // If the image is already present, at least remove the placeholder note.
-      lines[i] = line.replace(IMAGE_PLACEHOLDER_RE, "").trim();
+      lines[i] = nextLine;
+      lines.splice(i + 1, 0, ...injectedBlocks);
+      i += injectedBlocks.length;
     }
   }
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (/^\s*FIGCAPTION\b/.test(line)) continue;
     const labelMatches = Array.from(line.matchAll(/\[(\d{1,2}-\d{1,2})\]\(#source-\1\)/g));
     if (labelMatches.length === 0) continue;
 
@@ -557,7 +668,7 @@ export function injectSourceImages(
   // dangling references that confuse users.
   if (allCandidates.length === 0) {
     out = out
-      .replace(/[（(]\s*见图\s*\d{1,2}\s*[)）]/g, "")
+      .replace(/[（(]\s*(?:见)?图\s*\d{1,2}\s*[)）]/g, "")
       .replace(/[ \t]{2,}/g, " ")
       .replace(/\s+\n/g, "\n");
     return out;
@@ -580,14 +691,21 @@ export function injectSourceImages(
   //    the diagrams from the retrieved sources.
   const alreadyHasImage = /!\[[^\]]*\]\([^)]+\)/.test(out);
 
-  if (!alreadyHasImage && allCandidates.length > 0) {
+  if (allowAppendixFallback && !alreadyHasImage && allCandidates.length > 0) {
     // If the answer explicitly references (见图N), try to provide at least N figures.
     let needed = 0;
-    for (const m of out.matchAll(/[（(]\s*见图\s*(\d{1,2})\s*[)）]/g)) {
+    for (const m of out.matchAll(/[（(]\s*(?:见)?图\s*(\d{1,2})\s*[)）]/g)) {
       const n = Number(m[1]);
       if (Number.isFinite(n) && n > needed) needed = n;
     }
-    if (needed <= 0) return out;
+
+    const queryHasImageIntent = IMAGE_INTENT_RE.test(String(query || ""));
+    const answerHasImageIntent = IMAGE_INTENT_RE.test(out) || IMAGE_MENTION_RE.test(out);
+    const streamingReadyForAppendix =
+      !streaming ||
+      needed > 0 ||
+      answerHasImageIntent ||
+      out.trim().length >= 120;
 
     // Try query-scored images first, fall back to all candidates.
     const scoredByQuery = queryKeywords.length > 0
@@ -596,6 +714,20 @@ export function injectSourceImages(
           .filter((x) => x.score >= 2)
           .sort((a, b) => b.score - a.score)
       : [];
+
+    // When explicit "(见图N)" refs are absent, still append a tiny appendix
+    // for strong image-intent questions so images don't vanish from UX.
+    if (needed <= 0) {
+      const confidentMatchCount = scoredByQuery.length > 0
+        ? scoredByQuery.length
+        : ((queryHasImageIntent || answerHasImageIntent) ? Math.min(2, allCandidates.length) : 0);
+      const canUseIntentFallback =
+        streamingReadyForAppendix &&
+        (queryHasImageIntent || answerHasImageIntent) &&
+        confidentMatchCount > 0;
+      if (!canUseIntentFallback) return out;
+      needed = Math.min(2, confidentMatchCount);
+    }
 
     const chosen = scoredByQuery.length > 0
       ? scoredByQuery.map((x) => x.img)

@@ -63,6 +63,7 @@ def _infer_page_range_from_text(text: str) -> Tuple[Optional[int], Optional[int]
 _PAGE_RANGE_RE = re.compile(r"(\d{1,5})\s*(?:[-~—–至]\s*(\d{1,5}))?")
 _MARKDOWN_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*]\([^)]+\)")
+_STRUCTURED_IMG_MARKER_RE = re.compile(r"\[\[\s*IMG\s*:\s*\d{1,2}-\d{1,2}(?:#\d{1,2})?\s*\]\]", re.IGNORECASE)
 
 
 def _inspect_markdown_shape(markdown: str) -> Dict[str, int]:
@@ -85,6 +86,7 @@ def _inspect_markdown_shape(markdown: str) -> Dict[str, int]:
         "gfm_table_blocks": gfm_table_blocks,
         "pipe_heavy_lines": pipe_heavy_lines,
         "markdown_image_count": len(_MARKDOWN_IMAGE_RE.findall(text)),
+        "structured_img_marker_count": len(_STRUCTURED_IMG_MARKER_RE.findall(text)),
         "length": len(text.strip()),
     }
 
@@ -105,8 +107,10 @@ def _should_emit_answer_replacement(current: str, replacement: str) -> Tuple[boo
     if cur["gfm_table_blocks"] > 0 and nxt["gfm_table_blocks"] == 0:
         return False, "table-block-lost"
 
-    # Preserve image markdown that was visible during streaming.
-    if cur["markdown_image_count"] > 0 and nxt["markdown_image_count"] == 0:
+    # Preserve image-like anchors that were visible during streaming.
+    cur_image_like = cur["markdown_image_count"] + cur["structured_img_marker_count"]
+    nxt_image_like = nxt["markdown_image_count"] + nxt["structured_img_marker_count"]
+    if cur_image_like > 0 and nxt_image_like == 0:
         return False, "image-lost"
 
     # Guard accidental truncation caused by downstream cleanup.
@@ -114,6 +118,30 @@ def _should_emit_answer_replacement(current: str, replacement: str) -> Tuple[boo
         return False, "severe-truncation"
 
     return True, None
+
+
+def _build_retrieval_overview_payload(
+    *,
+    candidate_count: int,
+    fused_count: int,
+    cached: bool,
+    document_names: List[str],
+) -> Dict[str, Any]:
+    if cached:
+        summary = "已使用缓存结果并复用检索依据。"
+    elif candidate_count > 0:
+        summary = f"已检索 {candidate_count} 条候选，融合 {fused_count} 条结果。"
+    else:
+        summary = ""
+
+    return {
+        "summary": summary,
+        "candidate_count": int(candidate_count),
+        "fused_count": int(fused_count),
+        "document_count": len(document_names),
+        "document_names": document_names,
+        "cached": bool(cached),
+    }
 
 
 def _parse_page_like(value: object) -> Tuple[Optional[int], Optional[int]]:
@@ -676,7 +704,13 @@ class RAGService:
             cached = cache.get(question, history_summary)
             if cached is not None:
                 logger.info("Returning cached answer via stream")
-                yield ("sources", {"sources": cached.get("sources", [])})
+                cached_sources = cached.get("sources", [])
+                yield ("sources", {"sources": cached_sources})
+                cached_doc_names = [
+                    str(item.get("name") or "").strip()
+                    for item in pp_summary.collect_document_summary_items(cached_sources)
+                    if str(item.get("name") or "").strip()
+                ]
                 yield ("retrieval_stats", {
                     "vector_count": 0,
                     "graph_count": 0,
@@ -685,7 +719,18 @@ class RAGService:
                     "reranked": False,
                     "cached": True,
                     "weights": {},
+                    "document_count": len(cached_doc_names),
+                    "document_names": cached_doc_names,
                 })
+                yield (
+                    "retrieval_overview",
+                    _build_retrieval_overview_payload(
+                        candidate_count=0,
+                        fused_count=0,
+                        cached=True,
+                        document_names=cached_doc_names,
+                    ),
+                )
                 yield ("answer", {"content": cached["answer"]})
                 yield ("done", {
                     "model": cached.get("model", self.llm_model),
@@ -727,18 +772,40 @@ class RAGService:
                 yield ("sources", {"sources": sources})
 
                 stats_source = retrieval_results or {}
+                doc_names = [
+                    str(item.get("name") or "").strip()
+                    for item in pp_summary.collect_document_summary_items(sources)
+                    if str(item.get("name") or "").strip()
+                ]
+                candidate_count = (
+                    len(stats_source.get("vector_results", []))
+                    + len(stats_source.get("graph_results", []))
+                    + len(stats_source.get("keyword_results", []))
+                )
+                fused_count = len(stats_source.get("fused_results", []))
                 yield ("retrieval_stats", {
                     "vector_count": len(stats_source.get("vector_results", [])),
                     "graph_count": len(stats_source.get("graph_results", [])),
                     "keyword_count": len(stats_source.get("keyword_results", [])),
-                    "fused_count": len(stats_source.get("fused_results", [])),
+                    "fused_count": fused_count,
                     "reranked": bool(stats_source.get("reranked", False)),
                     "cached": False,
                     "weights": self.retriever._compute_weights(retrieval_query),
                     "timed_out": False,
                     "mode": retrieval_mode,
                     "top_k": stream_top_k,
+                    "document_count": len(doc_names),
+                    "document_names": doc_names,
                 })
+                yield (
+                    "retrieval_overview",
+                    _build_retrieval_overview_payload(
+                        candidate_count=candidate_count,
+                        fused_count=fused_count,
+                        cached=False,
+                        document_names=doc_names,
+                    ),
+                )
 
                 if retrieval_results is not None:
                     for gr in retrieval_results.get("graph_results", []):
