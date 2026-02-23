@@ -9,7 +9,7 @@ type CandidateImage = {
 
 const FIGURE_REF_RE = /图\s*([0-9]+(?:[.\-][0-9]+){1,3})/g;
 const GUIDE_HINT_RE = /(如下图|下图|见下图|如图所示|流程图如下|示意图如下)/;
-const IMAGE_MENTION_RE = /(控制图|示意图|剖面|总图|平面图|流程图|附图|配图)/;
+const IMAGE_MENTION_RE = /(控制图|示意图|图示|图注|剖面|总图|平面图|流程图|附图|配图)/;
 // Matches user-facing inline refs like:
 // - （见图1）
 // - （见图3.0.1）
@@ -22,6 +22,8 @@ const INLINE_SEE_FIGURE_GLOBAL_RE =
 const IMAGE_PLACEHOLDER_RE =
   /\[([^\]]{2,80})\][（(][^)\n]*?(此处应插入|未见附图)[^)\n]*[)）]?/;
 const MARKDOWN_IMAGE_DEST_RE = /!\[[^\]]*\]\(([^)\n]+)\)/g;
+const CITATION_ANCHOR_RE = /\[\d{1,2}-\d{1,2}\]\(#source-\d{1,2}-\d{1,2}\)/g;
+const FIGURE_CONTEXT_PREFIX_RE = /^\s*[（(]?\s*(?:图示|图注|图例|示意图|附图)\s*[：:]/u;
 
 function normalizeCaptionText(text: string): string {
   const t = String(text || "").trim();
@@ -114,6 +116,52 @@ function pickDisplayText(image: CandidateImage): string {
   if (name && !looksLikeOpaqueFilename(name)) return name;
 
   return "";
+}
+
+function extractCitationAnchors(line: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const match of String(line || "").matchAll(CITATION_ANCHOR_RE)) {
+    const raw = match[0];
+    if (!raw || seen.has(raw)) continue;
+    seen.add(raw);
+    out.push(raw);
+  }
+  return out;
+}
+
+type FigureContextLineParseResult = {
+  consumeLine: boolean;
+  captionHint: string;
+  citationAnchors: string[];
+};
+
+function parseStandaloneFigureContextLine(line: string): FigureContextLineParseResult {
+  const raw = String(line || "");
+  const citationAnchors = extractCitationAnchors(raw);
+  const withoutAnchors = raw.replace(CITATION_ANCHOR_RE, "").trim();
+  if (!withoutAnchors) {
+    return { consumeLine: false, captionHint: "", citationAnchors };
+  }
+
+  const unwrapped = withoutAnchors
+    .replace(/^\s*[（(]\s*/u, "")
+    .replace(/\s*[)）]\s*$/u, "")
+    .trim();
+
+  if (!FIGURE_CONTEXT_PREFIX_RE.test(unwrapped)) {
+    return { consumeLine: false, captionHint: "", citationAnchors };
+  }
+
+  const captionHint = normalizeCaptionText(
+    unwrapped
+      .replace(/^(?:图示|图注|图例|示意图|附图)\s*[：:]\s*/u, "")
+      .replace(/\s*[，,；;。]?\s*(?:来源|见图|详见图|如图|参见图)\s*.*$/u, "")
+      .replace(/[（(]\s*图\s*\d+(?:[.\-]\d+){0,3}\s*[)）]\s*$/u, "")
+      .trim()
+  );
+
+  return { consumeLine: true, captionHint, citationAnchors };
 }
 
 function inferCaptionFromLine(line: string): string {
@@ -273,19 +321,36 @@ function pickImageByKeyword(lineOrKeyword: string, candidates: CandidateImage[])
   return null;
 }
 
-function buildFigureCaptionLine(figLabel: string, image: CandidateImage, contextLine?: string): string {
+type FigureCaptionLineOptions = {
+  contextLine?: string;
+  captionHint?: string;
+  citationAnchors?: string[];
+};
+
+function buildFigureCaptionLine(
+  figLabel: string,
+  image: CandidateImage,
+  options: FigureCaptionLineOptions = {}
+): string {
   const base = pickDisplayText(image);
-  const inferredRaw = contextLine ? inferCaptionFromLine(contextLine) : "";
+  const normalizedHint = normalizeCaptionText(options.captionHint || "");
+  const inferredRaw = options.contextLine ? inferCaptionFromLine(options.contextLine) : "";
   const inferred = looksLikeFigureTitle(inferredRaw) ? inferredRaw : "";
+  const contextual = normalizedHint && !isGenericCaption(normalizedHint) ? normalizedHint : inferred;
 
   // Prefer the backend-provided (and normalized) caption unless it's missing or too generic.
   const name =
-    (!base || isGenericCaption(base)) && inferred && !isGenericCaption(inferred)
-      ? inferred
-      : (base || inferred || "相关示意图");
+    (!base || isGenericCaption(base)) && contextual && !isGenericCaption(contextual)
+      ? contextual
+      : (base || contextual || "参考配图");
 
-  // Emit the user-facing caption line. We'll style it in the markdown renderer.
-  return `${figLabel}：${name}`;
+  const sourceTrail =
+    options.citationAnchors && options.citationAnchors.length > 0
+      ? ` ${options.citationAnchors.join("")}`
+      : "";
+
+  // Keep caption lines as an explicit marker so downstream cleanup won't split/mutate them.
+  return `FIGCAPTION ${figLabel}：${name}${sourceTrail}`;
 }
 
 function detectListContentIndent(line: string): string {
@@ -397,7 +462,7 @@ export function injectSourceImages(
       const listIndent = detectListContentIndent(lines[i - 1] || "");
       const injectedBlock = buildInjectedBlock(
         `![${alt}](${chosen.url})`,
-        buildFigureCaptionLine(figLabel, chosen, contextLine),
+        buildFigureCaptionLine(figLabel, chosen, { contextLine }),
         listIndent
       );
       lines.splice(
@@ -419,6 +484,7 @@ export function injectSourceImages(
     const labelMatches = Array.from(line.matchAll(/\[(\d{1,2}-\d{1,2})\]\(#source-\1\)/g));
     if (labelMatches.length === 0) continue;
 
+    const contextLineMeta = parseStandaloneFigureContextLine(line);
     let injected = false;
     let insertedLen = 0;
     for (const m of labelMatches) {
@@ -434,36 +500,49 @@ export function injectSourceImages(
         (explicitSeeFigure ? pickFirstUnusedCandidate(candidates, lines, injectedUrls) : null) ||
         (IMAGE_MENTION_RE.test(line)
           ? (pickImageByKeyword(line, candidates) || pickFirstUnusedCandidate(candidates, lines, injectedUrls))
-          : null) ||
-        // Fallback: if the cited source has images but none of the above matched,
-        // inject the first unused image anyway — the source was cited for a reason.
-        pickFirstUnusedCandidate(candidates, lines, injectedUrls);
+          : null);
       if (!chosen) continue;
 
       if (isUrlAlreadyPresent(chosen.url, lines, injectedUrls)) {
         // If the image was already injected earlier, keep figure refs consistent.
         const existing = urlToFigLabel.get(chosen.url);
-        if (existing) lines[i] = appendFigureRefToLine(lines[i], existing);
+        if (existing) {
+          if (contextLineMeta.consumeLine) {
+            lines[i] = `（${existing}）${contextLineMeta.citationAnchors.join("")}`;
+          } else {
+            lines[i] = appendFigureRefToLine(lines[i], existing);
+          }
+        }
         injected = true;
         break;
       }
 
       figCount += 1;
       const figLabel = `图${figCount}`;
-      lines[i] = appendFigureRefToLine(lines[i], figLabel);
-
+      const originalLine = lines[i];
       const alt = pickDisplayText(chosen) || "参考配图";
-      const listIndent = detectListContentIndent(lines[i]);
+      const listIndent = detectListContentIndent(originalLine);
+      const captionLine = buildFigureCaptionLine(figLabel, chosen, {
+        contextLine: originalLine,
+        captionHint: contextLineMeta.captionHint,
+        citationAnchors: contextLineMeta.consumeLine ? contextLineMeta.citationAnchors : [],
+      });
       const injectedBlock = buildInjectedBlock(
         `![${alt}](${chosen.url})`,
-        buildFigureCaptionLine(figLabel, chosen, lines[i]),
+        captionLine,
         listIndent
       );
-      lines.splice(i + 1, 0, ...injectedBlock);
+
+      if (contextLineMeta.consumeLine) {
+        lines.splice(i, 1, ...injectedBlock);
+      } else {
+        lines[i] = appendFigureRefToLine(lines[i], figLabel);
+        lines.splice(i + 1, 0, ...injectedBlock);
+      }
       injectedUrls.add(chosen.url);
       urlToFigLabel.set(chosen.url, figLabel);
       injected = true;
-      insertedLen = injectedBlock.length;
+      insertedLen = contextLineMeta.consumeLine ? injectedBlock.length - 1 : injectedBlock.length;
       break;
     }
 
@@ -508,6 +587,7 @@ export function injectSourceImages(
       const n = Number(m[1]);
       if (Number.isFinite(n) && n > needed) needed = n;
     }
+    if (needed <= 0) return out;
 
     // Try query-scored images first, fall back to all candidates.
     const scoredByQuery = queryKeywords.length > 0

@@ -80,17 +80,22 @@ export function splitInlineHeadingAndBody(line: string): string {
     pipeSegments.every((segment) => !/[。！？.!?；;:]$/.test(segment));
   if (looksLikeInlineEnumeration) return line;
 
-  const numberedRunOn = tail.match(/^(.*?)(\d{1,2}[.．](?=[^\s\d]).*)$/);
+  const numberedRunOn = tail.match(
+    /^(.*?)(\d{1,2}(?:[.．](?=[^\s\d])|[)）](?=\S)).*)$/,
+  );
   if (numberedRunOn) {
     const headingBody = (numberedRunOn[1] || "").trimEnd();
     const remainder = (numberedRunOn[2] || "").trimStart();
+    const normalizedRemainder = remainder
+      .replace(/^(\d{1,2}[.．])(?=\S)/, "$1 ")
+      .replace(/^(\d{1,2}[)）])(?=\S)/, "$1 ");
     if (
       headingBody &&
-      remainder &&
+      normalizedRemainder &&
       !/\d$/.test(headingBody) &&
       /[\u4e00-\u9fffA-Za-z）)]$/.test(headingBody)
     ) {
-      return `${`${prefix}${headingBody}`.trimEnd()}\n${remainder}`;
+      return `${`${prefix}${headingBody}`.trimEnd()}\n${normalizedRemainder}`;
     }
   }
 

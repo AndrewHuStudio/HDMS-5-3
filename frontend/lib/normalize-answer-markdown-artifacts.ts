@@ -127,6 +127,36 @@ const INLINE_MATH_IMAGE_WRAPPER_RE =
 const DISPLAY_MATH_IMAGE_WRAPPER_RE =
   /(?<!\\)\$\$\s*(!\[[^\]\n]*\]\([^)\n]+\)|<img\b[^>]*>)\s*\$\$/gi;
 const MARKDOWN_OR_HTML_IMAGE_RE = /(?:!\[[^\]\n]*\]\([^)\n]+\)|<img\b[^>]*>)/i;
+const HTML_IMAGE_SRC_RE = /(<img\b[^>]*\bsrc=)(['"])([^'"]+)\2/gi;
+
+function parseMarkdownImageDestination(raw: string): string {
+  let cleaned = String(raw || "").trim();
+  if (!cleaned) return "";
+  if (cleaned.startsWith("<") && cleaned.endsWith(">")) {
+    cleaned = cleaned.slice(1, -1).trim();
+  } else {
+    const titleMatch = cleaned.match(/^(.*?)(?:\s+["'][^"']*["'])\s*$/);
+    if (titleMatch?.[1]) cleaned = titleMatch[1].trim();
+  }
+  return cleaned.replace(/\\ /g, " ").replace(/\\\\/g, "\\").trim();
+}
+
+function isRenderableImageUrl(rawUrl: string): boolean {
+  const url = String(rawUrl || "").trim();
+  if (!url) return false;
+
+  const normalized = normalizeRagImageQueryUrl(url);
+  if (/^(?:https?:\/\/|data:)/i.test(normalized)) return true;
+  if (!(normalized.startsWith("/rag/") || normalized.startsWith("/api/rag/"))) return false;
+
+  try {
+    const parsed = new URL(normalized, "http://localhost");
+    if (!RAG_IMAGE_ROUTE_RE.test(parsed.pathname)) return true;
+    return Boolean((parsed.searchParams.get("ref") || "").trim());
+  } catch {
+    return false;
+  }
+}
 
 function normalizeRagImageQueryUrl(rawUrl: string): string {
   let url = String(rawUrl || "").trim();
@@ -217,6 +247,47 @@ function unwrapMathWrappedImages(text: string): string {
         .replace(INLINE_MATH_IMAGE_WRAPPER_RE, "$1");
     })
     .join("");
+}
+
+function stripUnrenderableImageTokens(text: string, diagnostics?: NormalizationDiagnostics): string {
+  if (!text) return text;
+
+  const segments = text.split(INLINE_OR_FENCED_CODE_RE);
+  let removedCount = 0;
+  const out = segments
+    .map((segment, index) => {
+      if (index % 2 === 1) return segment;
+
+      let next = segment.replace(
+        /!\[([^\]\n]*)\]\(([^)\n]+)\)/g,
+        (_match, alt: string, rawUrl: string) => {
+          const url = parseMarkdownImageDestination(rawUrl);
+          if (isRenderableImageUrl(url)) {
+            return `![${alt}](${normalizeRagImageQueryUrl(url)})`;
+          }
+          removedCount += 1;
+          return "";
+        },
+      );
+
+      next = next.replace(HTML_IMAGE_SRC_RE, (_match, prefix: string, quote: string, rawUrl: string) => {
+        const url = String(rawUrl || "").trim();
+        if (!isRenderableImageUrl(url)) {
+          removedCount += 1;
+          return "";
+        }
+        return `${prefix}${quote}${normalizeRagImageQueryUrl(url)}${quote}`;
+      });
+
+      return next;
+    })
+    .join("");
+
+  if (removedCount > 0 && diagnostics?.enabled) {
+    bumpCounter(diagnostics, "strip-unrenderable-image-tokens", removedCount);
+  }
+
+  return out;
 }
 
 const MAJOR_SECTION_TITLE_RE =
@@ -370,7 +441,8 @@ function normalizeLoosePipeTables(
   options: NormalizeLoosePipeTableOptions = {},
 ): string {
   const { diagnostics, streaming = false } = options;
-  if (!text || streaming) return text;
+  if (!text) return text;
+  if (streaming && !/[|｜]/.test(text)) return text;
 
   const parsePipeCells = (line: string): string[] | null => {
     if (!line.includes("|")) return null;
@@ -1531,6 +1603,13 @@ export function normalizeAnswerMarkdownArtifacts(
   const beforeImageMathUnwrap = out;
   out = unwrapMathWrappedImages(out);
   bumpIfChanged(diagnostics, "unwrap-image-math-wrappers", beforeImageMathUnwrap, out);
+
+  // Drop markdown/html image tokens that cannot render in the QA UI so
+  // streaming output doesn't show broken-image placeholders before source-based
+  // image injection runs at completion.
+  const beforeStripBrokenImages = out;
+  out = stripUnrenderableImageTokens(out, diagnostics);
+  bumpIfChanged(diagnostics, "strip-unrenderable-image-tokens", beforeStripBrokenImages, out);
 
   // Fullwidth / lookalike asterisks that users visually read as "**".
   // Protect LaTeX regions so that ∗ inside formulas is not replaced.

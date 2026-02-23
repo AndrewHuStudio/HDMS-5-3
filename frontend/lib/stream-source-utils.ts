@@ -11,6 +11,8 @@ interface MergeThinkingArgs {
 }
 
 const FIGURE_MENTION_RE = /[（(]?\s*(?:见)?图\s*(\d{1,2})\s*[)）]?/gu;
+const FIGURE_CAPTION_LINE_RE = /^\s*(?:FIGCAPTION\s+)?图\s*\d+(?:[.\-]\d+){0,3}\s*[：:.]/u;
+const FIGURE_LEGEND_LINE_RE = /^\s*[（(]?\s*(?:图示|图注|图例)\s*[：:]/u;
 
 function hasImagePayload(source: SourceInfo): boolean {
   return Boolean(
@@ -106,14 +108,19 @@ export function mergeThinkingIntoAnswer({ answer, thinking, isStreaming, heading
 export function collapseFigureMentions(text: string): string {
   if (!text) return text;
 
-  const seenGlobal = new Set<string>();
   const lines = text.split("\n");
   const out = lines.map((line) => {
+    const trimmed = line.trim();
+    if (FIGURE_CAPTION_LINE_RE.test(trimmed) || FIGURE_LEGEND_LINE_RE.test(trimmed)) {
+      return line.trimEnd();
+    }
+
+    const seenLine = new Set<string>();
     const deduped = line.replace(FIGURE_MENTION_RE, (_raw, figureNum: string) => {
       const normalized = String(figureNum || "").trim();
       if (!normalized) return "";
-      if (seenGlobal.has(normalized)) return "";
-      seenGlobal.add(normalized);
+      if (seenLine.has(normalized)) return "";
+      seenLine.add(normalized);
       return `（图${normalized}）`;
     });
 

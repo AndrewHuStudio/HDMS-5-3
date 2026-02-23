@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isValidElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -116,6 +116,62 @@ function resolveImageSrc(src: string): string {
     ? normalizeApiBase(QA_API_BASE)
     : normalizeApiBase(API_BASE);
   return src.startsWith("/") ? `${base}${src}` : `${base}/${src}`;
+}
+
+const MARKDOWN_IMAGE_DEST_RE = /!\[[^\]]*\]\(([^)\n]+)\)/g;
+const HTML_IMAGE_SRC_RE = /<img\b[^>]*\bsrc=(['"])([^'"]+)\1/gi;
+const RAG_IMAGE_ROUTE_RE = /^\/(?:api\/)?rag\/documents\/[^/?#]+\/image$/i;
+const FIGURE_CAPTION_TEXT_RE =
+  /^(?:FIGCAPTION\s+)?(?:图\s*\d+(?:[.\-]\d+){0,3}\s*[：:.]|[（(]?\s*(?:图示|图注|图例)\s*[：:])/u;
+
+function parseMarkdownImageDestination(raw: string): string {
+  let cleaned = String(raw || "").trim();
+  if (!cleaned) return "";
+  if (cleaned.startsWith("<") && cleaned.endsWith(">")) {
+    cleaned = cleaned.slice(1, -1).trim();
+  } else {
+    const titleMatch = cleaned.match(/^(.*?)(?:\s+["'][^"']*["'])\s*$/);
+    if (titleMatch?.[1]) cleaned = titleMatch[1].trim();
+  }
+  return cleaned.replace(/\\ /g, " ").replace(/\\\\/g, "\\").trim();
+}
+
+function isRenderableMarkdownImageUrl(raw: string): boolean {
+  const url = String(raw || "").trim();
+  if (!url) return false;
+  if (/^(?:https?:\/\/|data:)/i.test(url)) return true;
+  if (!(url.startsWith("/rag/") || url.startsWith("/api/rag/"))) return false;
+  try {
+    const parsed = new URL(url, "http://localhost");
+    if (!RAG_IMAGE_ROUTE_RE.test(parsed.pathname)) return true;
+    return Boolean((parsed.searchParams.get("ref") || "").trim());
+  } catch {
+    return false;
+  }
+}
+
+function countRenderableMarkdownImages(text: string): number {
+  if (!text) return 0;
+  let count = 0;
+  for (const match of text.matchAll(MARKDOWN_IMAGE_DEST_RE)) {
+    const dest = parseMarkdownImageDestination(match[1] || "");
+    if (isRenderableMarkdownImageUrl(dest)) count += 1;
+  }
+  for (const match of text.matchAll(HTML_IMAGE_SRC_RE)) {
+    const src = String(match[2] || "").trim();
+    if (isRenderableMarkdownImageUrl(src)) count += 1;
+  }
+  return count;
+}
+
+function flattenReactText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map((child) => flattenReactText(child)).join("");
+  if (isValidElement(node)) {
+    const withChildren = node as { props?: { children?: ReactNode } };
+    return flattenReactText(withChildren.props?.children);
+  }
+  return "";
 }
 
 const INPUT_MIN_LINES = 1;
@@ -610,12 +666,15 @@ function AssistantContent({
       // Keep streaming text stable; inject images only after the answer is complete.
       return collapseFigureMentions(withoutInlineCitations);
     }
-    const hasMarkdownImage = /!\[[^\]]*]\([^)]+\)/.test(withoutInlineCitations);
+    const renderableImageCount = countRenderableMarkdownImages(withoutInlineCitations);
+    const hasRenderableMarkdownImage = renderableImageCount > 0;
     const hasGfmTable = /\|.+\|\n\s*\|?\s*:?-{3,}:?/m.test(withoutInlineCitations);
 
+    // Inject only when no renderable image exists in answer markdown. This
+    // avoids duplicate "broken + injected" figures between streaming/final paths.
+    const shouldInjectImages = !hasRenderableMarkdownImage;
     // If backend already emitted a finalized answer_replaced payload, avoid
     // aggressive reinjection that can diverge from the server-final structure.
-    const shouldInjectImages = !finalizedByServer || !hasMarkdownImage;
     const shouldInjectTables = !finalizedByServer || !hasGfmTable;
 
     const withImages = shouldInjectImages
@@ -711,18 +770,20 @@ function AssistantContent({
                   </h4>
                 ),
                 p: ({ children }) => {
-                  const isPlainText =
+                  const flattened = flattenReactText(children).trim();
+                  const isPlainTextOnly =
                     typeof children === "string" ||
                     (Array.isArray(children) && children.every((c) => typeof c === "string"));
-                  const plain = isPlainText
+                  const plain = isPlainTextOnly
                     ? String(Array.isArray(children) ? children.join("") : children).trim()
-                    : null;
+                    : "";
+                  const isFigureCaption = FIGURE_CAPTION_TEXT_RE.test(flattened);
 
-                  if (plain && (plain.startsWith("FIGCAPTION ") || /^图\d+[：:.]/.test(plain))) {
-                    const shown = plain.replace(/^FIGCAPTION\s+/u, "");
+                  if (isFigureCaption) {
+                    const shown = (plain || flattened).replace(/^FIGCAPTION\s+/u, "");
                     return (
                       <p className="mt-1 mb-3 text-[11px] leading-snug text-left text-muted-foreground/75">
-                        {shown}
+                        {isPlainTextOnly ? shown : children}
                       </p>
                     );
                   }
