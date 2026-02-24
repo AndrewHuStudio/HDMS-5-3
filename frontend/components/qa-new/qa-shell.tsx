@@ -9,11 +9,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { ChevronDown, ImagePlus, Send, Square, X } from "lucide-react";
 import { ThinkingProcess } from "@/components/qa-thinking";
 import { QASources } from "@/components/qa-sources";
-import { QARetrievalStats } from "@/components/qa-retrieval-stats";
 import { QAFeedback } from "@/components/qa-feedback";
 import { QAExportButton } from "@/components/qa-export-button";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
-import type { ChatMessage, RetrievalOverview, RetrievalStats, SourceInfo } from "@/features/qa/types";
+import type { ChatMessage, RetrievalStats, SourceInfo } from "@/features/qa/types";
 import { cn } from "@/lib/utils";
 import { API_BASE, QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
 import { QA_REMARK_PLUGINS } from "@/lib/qa-markdown-plugins";
@@ -22,6 +21,7 @@ import { buildAnswerMarkdown } from "@/features/qa/render/answer-markdown-pipeli
 import {
   buildAssistantRenderModel,
   deriveAssistantRenderState,
+  resolveAnswerRenderPhase,
 } from "@/features/qa/render/assistant-render-state-machine";
 import {
   buildCitationLabelIndexMap,
@@ -126,56 +126,6 @@ function collectRetrievalDocNames(
   }
 
   return deduped;
-}
-
-function QARetrievalOverview({
-  overview,
-  stats,
-  docNames,
-  isStreaming,
-}: {
-  overview?: RetrievalOverview;
-  stats?: RetrievalStats;
-  docNames: string[];
-  isStreaming: boolean;
-}) {
-  if (!overview && !stats && docNames.length === 0) return null;
-
-  const candidateCount = typeof overview?.candidate_count === "number"
-    ? overview.candidate_count
-    : stats
-    ? stats.vector_count + stats.graph_count + stats.keyword_count
-    : 0;
-  const fusedCount = typeof overview?.fused_count === "number"
-    ? overview.fused_count
-    : (stats?.fused_count ?? 0);
-  const summaryLine = (overview?.summary || "").trim() || (
-    (stats?.cached || overview?.cached)
-      ? "已使用缓存结果并复用检索依据。"
-      : candidateCount > 0
-        ? `已检索 ${candidateCount} 条候选，融合 ${fusedCount} 条结果。`
-        : ""
-  );
-  const docLine = docNames.length > 0 ? `检索资料清单：${docNames.join("；")}。` : "";
-
-  return (
-    <div className="mb-2 rounded-md border border-border/60 bg-muted/25 px-3 py-2">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <span>检索综述</span>
-        {isStreaming && (
-          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-        )}
-      </div>
-      {summaryLine && (
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{summaryLine}</p>
-      )}
-      {docLine && (
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          {highlightRetrievalDocNames(docLine, "overview-doc")}
-        </p>
-      )}
-    </div>
-  );
 }
 
 /** Resolve image src: convert relative /rag/... paths to absolute URLs */
@@ -661,7 +611,6 @@ function AssistantContent({
     thinking,
     sources,
     retrievalStats,
-    retrievalOverview,
     feedback,
     isStreaming,
     thinkingDone,
@@ -686,6 +635,11 @@ function AssistantContent({
 
   const sourcesNormalized = useMemo(() => normalizeCitationSources(sources ?? []), [sources]);
   const labelIndexMap = useMemo(() => buildCitationLabelIndexMap(sourcesNormalized), [sourcesNormalized]);
+  const renderState = deriveAssistantRenderState(message);
+  const answerRenderPhase = resolveAnswerRenderPhase({
+    state: renderState,
+    isStreaming: Boolean(isStreaming),
+  });
 
   const { cleanContent, questions: recommendedQuestions } = useMemo(
     () => (isStreaming ? { cleanContent: content, questions: [] } : extractRecommendedQuestions(content)),
@@ -697,22 +651,19 @@ function AssistantContent({
       content: cleanContent,
       sources: sourcesNormalized,
       isStreaming: Boolean(isStreaming),
+      renderPhase: answerRenderPhase,
       precedingQuestion,
       finalizedByServer,
     });
-  }, [cleanContent, sourcesNormalized, isStreaming, precedingQuestion, finalizedByServer]);
+  }, [cleanContent, sourcesNormalized, isStreaming, answerRenderPhase, precedingQuestion, finalizedByServer]);
 
   const retrievalDocNames = useMemo(
     () => collectRetrievalDocNames(
       sourcesNormalized,
-      retrievalOverview?.document_names || retrievalStats?.document_names || [],
+      retrievalStats?.document_names || [],
     ),
-    [sourcesNormalized, retrievalOverview?.document_names, retrievalStats?.document_names],
+    [sourcesNormalized, retrievalStats?.document_names],
   );
-  const hasInlineRetrievalOverviewHeading = /^##\s*(?:[一二三四五六七八九十]+、\s*)?检索综述\b/m.test(
-    answerMarkdown,
-  );
-  const renderState = deriveAssistantRenderState(message);
   const hasThinkingTokens = Boolean((thinking || "").trim());
   const renderModel = buildAssistantRenderModel({
     state: renderState,
@@ -720,8 +671,6 @@ function AssistantContent({
     hasThinking: hasThinkingTokens,
     hasAnswer: Boolean(content),
     hasRetrievalStats: Boolean(retrievalStats),
-    hasRetrievalOverview: Boolean(retrievalOverview) || Boolean(retrievalStats) || retrievalDocNames.length > 0,
-    hasInlineRetrievalOverviewHeading,
   });
 
   useEffect(() => {
@@ -742,27 +691,11 @@ function AssistantContent({
   const useSidebarSourceLayout = hasSourcePanel && !embedded;
   return (
     <div>
-      {renderModel.showRetrievalStats && (
-        <QARetrievalStats stats={retrievalStats!} isStreaming={!!isStreaming} />
-      )}
-
-      {renderModel.showRetrievalOverview && (
-        <QARetrievalOverview
-          overview={retrievalOverview}
-          stats={retrievalStats}
-          docNames={retrievalDocNames}
-          isStreaming={!!isStreaming}
-        />
-      )}
-
       {renderModel.showThinking && (
         <ThinkingProcess
           thinking={thinking || ""}
           isStreaming={!!isStreaming}
           thinkingDone={!!thinkingDone}
-          statusMessage={message.statusMessage}
-          statusStage={message.statusStage}
-          retrievalStats={retrievalStats}
         />
       )}
 

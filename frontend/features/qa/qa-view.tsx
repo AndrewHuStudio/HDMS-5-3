@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { QAShell } from "@/components/qa-new";
 import { useQAViewStore } from "@/lib/stores/qa-store";
-import { sendQuestion, sendQuestionStream } from "./api";
+import { sendQuestionStream } from "./api";
 import type { ChatHistoryMessage, ChatMessage } from "./types";
 import { mergeStreamingSources } from "@/lib/stream-source-utils";
 import {
@@ -157,13 +157,6 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
         onRetrievalStats: (stats) => {
           updateMessage(assistantId, (msg) => ({ ...msg, retrievalStats: stats }));
         },
-        onRetrievalOverview: (overview) => {
-          updateMessage(assistantId, (msg) => ({
-            ...msg,
-            retrievalOverview: overview,
-            renderState: transitionAssistantRenderState(msg.renderState, { type: "retrieval_overview" }),
-          }));
-        },
         onGraph: (subgraph) => {
           updateMessage(assistantId, (msg) => ({ ...msg, subgraph }));
         },
@@ -209,7 +202,9 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
             content: shouldAcceptAnswerReplacement(msg.content, fullAnswer)
               ? fullAnswer
               : msg.content,
-            isStreaming: false,
+            // Keep streaming UI state until `done` so finalizing and done share
+            // one stable final-content pipeline instead of two style jumps.
+            isStreaming: true,
             finalizedByServer: true,
             renderState: transitionAssistantRenderState(msg.renderState, { type: "answer_replaced" }),
             ...(replacedSources
@@ -253,26 +248,15 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
         return;
       }
 
-      // Fallback to non-streaming if SSE fails
-      try {
-        const response = await sendQuestion(question, history);
-        updateMessage(assistantId, (msg) => ({
-          ...msg,
-          content: response.answer || "未返回答案。",
-          sources: response.sources,
-          isStreaming: false,
-          renderState: transitionAssistantRenderState(msg.renderState, { type: "done" }),
-        }));
-      } catch (fallbackError) {
-        const detail =
-          fallbackError instanceof Error ? fallbackError.message : "请求失败";
-        updateMessage(assistantId, (msg) => ({
-          ...msg,
-          content: msg.content || `请求失败：${detail}`,
-          isStreaming: false,
-          renderState: transitionAssistantRenderState(msg.renderState, { type: "error" }),
-        }));
-      }
+      // SSE stream failed (non-abort)
+      const detail =
+        error instanceof Error ? error.message : "请求失败";
+      updateMessage(assistantId, (msg) => ({
+        ...msg,
+        content: msg.content || `请求失败：${detail}`,
+        isStreaming: false,
+        renderState: transitionAssistantRenderState(msg.renderState, { type: "error" }),
+      }));
     } finally {
       if (activeAbortControllerRef.current === streamAbortController) {
         activeAbortControllerRef.current = null;

@@ -4,7 +4,6 @@ RAG service for intelligent question answering.
 
 import json
 import re
-import urllib.request
 from typing import List, Dict, Any, Optional, Generator, Tuple
 import logging
 from pathlib import Path
@@ -14,7 +13,6 @@ import openai
 
 from core import config as app_config
 from rag.retriever import MultiSourceRetriever
-from rag.cache import get_query_cache
 from rag import prompting as rag_prompting
 from rag import retrieval_helpers as rag_retrieval
 from rag import context_builder as rag_context_builder
@@ -119,29 +117,6 @@ def _should_emit_answer_replacement(current: str, replacement: str) -> Tuple[boo
 
     return True, None
 
-
-def _build_retrieval_overview_payload(
-    *,
-    candidate_count: int,
-    fused_count: int,
-    cached: bool,
-    document_names: List[str],
-) -> Dict[str, Any]:
-    if cached:
-        summary = "已使用缓存结果并复用检索依据。"
-    elif candidate_count > 0:
-        summary = f"已检索 {candidate_count} 条候选，融合 {fused_count} 条结果。"
-    else:
-        summary = ""
-
-    return {
-        "summary": summary,
-        "candidate_count": int(candidate_count),
-        "fused_count": int(fused_count),
-        "document_count": len(document_names),
-        "document_names": document_names,
-        "cached": bool(cached),
-    }
 
 
 def _parse_page_like(value: object) -> Tuple[Optional[int], Optional[int]]:
@@ -253,88 +228,6 @@ class RAGService:
         self.llm_api_key = llm_api_key
         self.llm_model = llm_model
 
-    def answer_question(
-        self,
-        question: str,
-        history: Optional[List[Dict[str, str]]] = None,
-        use_retrieval: bool = True,
-        top_k: int = app_config.QA_DEFAULT_TOP_K
-    ) -> Dict[str, Any]:
-        """Answer a question using retrieval-augmented generation."""
-        question = (question or "").strip()
-        quick_reply = self._get_quick_reply(question)
-
-        if quick_reply is not None:
-            return {
-                "answer": quick_reply,
-                "sources": [],
-                "context_used": False,
-                "model": self.llm_model,
-            }
-
-        effective_use_retrieval = bool(use_retrieval)
-        effective_top_k = self._normalize_top_k(top_k)
-        retrieval_query = question
-        retrieval_selection = rag_retrieval_mode.resolve_retrieval_selection(
-            use_retrieval=effective_use_retrieval,
-            raw_mode=getattr(app_config, "QA_RETRIEVAL_MODE", "hybrid"),
-            allowed_modes=getattr(app_config, "QA_RETRIEVAL_MODES", getattr(app_config, "STREAM_RETRIEVAL_MODES", set())),
-            default_mode="hybrid",
-            allow_keyword=False,
-        )
-        effective_use_retrieval = retrieval_selection.enabled
-
-        cache = get_query_cache()
-        history_summary = self._build_history_summary(history)
-        if effective_use_retrieval and app_config.QUERY_CACHE_ENABLED:
-            cached = cache.get(question, history_summary)
-            if cached is not None:
-                logger.info("Returning cached answer for query")
-                return cached
-
-        context = ""
-        sources: List[Dict[str, Any]] = []
-
-        if effective_use_retrieval:
-            retrieval_results = self.retriever.retrieve(
-                query=retrieval_query,
-                top_k=effective_top_k,
-                use_vector=retrieval_selection.use_vector,
-                use_graph=retrieval_selection.use_graph,
-                use_keyword=retrieval_selection.use_keyword,
-            )
-            context, sources = self._build_context_and_sources(retrieval_results, query=retrieval_query)
-
-        doc_nums = sorted({s["doc_num"] for s in sources if s.get("doc_num")})
-        prompt = self._build_prompt(
-            question,
-            context,
-            history,
-            source_doc_nums=doc_nums,
-            source_doc_required_labels=rag_prompting.build_doc_required_labels(sources),
-        )
-        answer = self._generate_answer(prompt)
-
-        answer, sources = self._finalize_answer_and_sources(
-            answer,
-            sources,
-            question=question,
-            inject_summary_with_llm=True,
-            missing_image_log="Answer mentions figures but no image-bearing sources survived filtering.",
-        )
-
-        result = {
-            "answer": answer,
-            "sources": sources,
-            "context_used": bool(context),
-            "model": self.llm_model,
-        }
-
-        if effective_use_retrieval and app_config.QUERY_CACHE_ENABLED:
-            cache.put(question, result, history_summary)
-
-        return result
-
     @staticmethod
     def _is_brief_greeting(question: str) -> bool:
         """Return True when the input is a pure greeting with no real question."""
@@ -373,7 +266,6 @@ class RAGService:
         sources: List[Dict[str, Any]],
         *,
         question: str,
-        inject_summary_with_llm: bool,
         missing_image_log: str,
     ) -> Tuple[str, List[Dict[str, Any]]]:
         valid_labels = {s["citation_label"] for s in sources if s.get("citation_label")} or None
@@ -387,10 +279,6 @@ class RAGService:
         )
         if ("见图" in (processed or "")) and not any(s.get("image_urls") or s.get("image_url") for s in sources):
             logger.warning(missing_image_log)
-        if inject_summary_with_llm:
-            processed = self._inject_summary_document_names_with_llm(processed, question, sources)
-        else:
-            processed = pp_summary.inject_summary_document_names(processed, sources)
         return processed, sources
 
     def _build_context_and_sources(
@@ -463,113 +351,6 @@ class RAGService:
         except (TypeError, ValueError):
             parsed_top_k = int(getattr(app_config, "QA_DEFAULT_TOP_K", min_k))
         return max(min_k, min(parsed_top_k, max_k))
-
-    def _generate_summary_reasons_with_llm(
-        self,
-        question: str,
-        summary_items: List[Dict[str, Any]],
-    ) -> Optional[str]:
-        """Use LLM to rewrite one overall summary line."""
-        if not app_config.SUMMARY_REASON_LLM_REWRITE:
-            return None
-        if not summary_items:
-            return None
-
-        materials = [
-            {
-                "name": item["name"],
-                "section": item["section"] or None,
-                "page": item["page"] if isinstance(item.get("page"), int) else None,
-            }
-            for item in summary_items
-        ]
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是资料综述润色助手。只能基于给定事实改写，不得新增事实，不要模板化套话。"
-                    "输出严格JSON：{\"summary\":\"...\"}。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "question": question,
-                        "materials": materials,
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ]
-        raw = self._generate_answer(messages)
-        obj = pp_summary.extract_first_json_object(raw)
-        if obj:
-            summary = str(obj.get("summary") or "").strip().replace("\n", " ")
-            summary = re.sub(r"\s{2,}", " ", summary)[:120]
-            if summary:
-                return summary
-
-        # Fallback for providers that return plain text instead of JSON.
-        fallback = re.sub(r"^AI总结[:：]\s*", "", str(raw or "").strip())
-        fallback = re.sub(r"```(?:json)?|```", "", fallback, flags=re.IGNORECASE).strip()
-        fallback = re.sub(r"\s{2,}", " ", fallback)
-        fallback = re.sub(r"^\{[\s\S]*\"summary\"\s*:\s*\"(.*?)\"[\s\S]*\}$", r"\1", fallback)
-        fallback = fallback.strip().strip("\"' ")
-        return fallback[:120] if fallback else None
-
-    def _inject_summary_document_names_with_llm(
-        self,
-        answer: str,
-        question: str,
-        sources: List[Dict[str, Any]],
-    ) -> str:
-        if not answer:
-            return answer
-        if "涉及资料" in answer or "检索资料清单" in answer:
-            return answer
-
-        summary_items = pp_summary.collect_document_summary_items(sources)
-        if not summary_items:
-            return answer
-        llm_summary = self._generate_summary_reasons_with_llm(question, summary_items)
-        return pp_summary.inject_summary_document_names(
-            answer,
-            sources,
-            llm_summary_override=llm_summary,
-        )
-
-    def _generate_answer(self, messages: List[Dict[str, str]]) -> str:
-        """Generate answer using LLM (non-streaming)."""
-        endpoint = f"{self.llm_base_url}/chat/completions"
-        payload = {
-            "model": self.llm_model,
-            "messages": messages,
-            "temperature": app_config.QA_LLM_TEMPERATURE,
-            "max_tokens": app_config.QA_LLM_MAX_TOKENS,
-        }
-
-        data = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.llm_api_key}",
-        }
-
-        req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
-
-        try:
-            with urllib.request.urlopen(req, timeout=app_config.QA_LLM_TIMEOUT_SECONDS) as response:
-                body = response.read().decode("utf-8")
-                result = json.loads(body)
-
-            answer = result["choices"][0]["message"]["content"]
-            # Strip <think> tags that reasoning models may include.
-            answer = self._strip_think_tags(answer)
-            logger.info("Generated answer: %s characters", len(answer))
-            return answer
-        except Exception as e:
-            logger.error("Failed to generate answer: %s", e)
-            return f"抱歉，生成答案时出错：{str(e)}"
 
     def _stream_chat_completion(
         self,
@@ -645,13 +426,14 @@ class RAGService:
         top_k: int = app_config.QA_DEFAULT_TOP_K
     ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
         """
-        Stream answer with retrieval-first UX:
-        - Retrieve sources first, then stream the grounded answer.
+        Stream answer with retrieval-first UX.
 
         Flow:
-        1) Send status event so frontend knows we're working.
+        1) Send status events so frontend knows we're working.
         2) Run retrieval (if enabled), then emit sources/stats/graph events.
-        3) Stream one grounded answer (thinking + answer) to avoid early answer tokens.
+        3) Emit retrieval summary as the first answer tokens (inline prefix).
+        4) Stream the grounded LLM answer (thinking + answer).
+        5) Post-process and optionally emit answer_replaced.
         """
         import time
 
@@ -668,7 +450,6 @@ class RAGService:
             yield ("done", {
                 "model": self.llm_model,
                 "context_used": False,
-                "cached": False,
             })
             return
 
@@ -697,54 +478,13 @@ class RAGService:
         use_graph = retrieval_selection.use_graph
         use_keyword = retrieval_selection.use_keyword
 
-        # --- Cache check ---
-        cache = get_query_cache()
-        history_summary = self._build_history_summary(history)
-        if effective_use_retrieval and app_config.QUERY_CACHE_ENABLED:
-            cached = cache.get(question, history_summary)
-            if cached is not None:
-                logger.info("Returning cached answer via stream")
-                cached_sources = cached.get("sources", [])
-                yield ("sources", {"sources": cached_sources})
-                cached_doc_names = [
-                    str(item.get("name") or "").strip()
-                    for item in pp_summary.collect_document_summary_items(cached_sources)
-                    if str(item.get("name") or "").strip()
-                ]
-                yield ("retrieval_stats", {
-                    "vector_count": 0,
-                    "graph_count": 0,
-                    "keyword_count": 0,
-                    "fused_count": 0,
-                    "reranked": False,
-                    "cached": True,
-                    "weights": {},
-                    "document_count": len(cached_doc_names),
-                    "document_names": cached_doc_names,
-                })
-                yield (
-                    "retrieval_overview",
-                    _build_retrieval_overview_payload(
-                        candidate_count=0,
-                        fused_count=0,
-                        cached=True,
-                        document_names=cached_doc_names,
-                    ),
-                )
-                yield ("answer", {"content": cached["answer"]})
-                yield ("done", {
-                    "model": cached.get("model", self.llm_model),
-                    "context_used": cached.get("context_used", True),
-                    "cached": True,
-                })
-                return
-
         # --- Retrieval phase ---
         context = ""
         sources: List[Dict[str, Any]] = []
         retrieval_results: Optional[Dict[str, Any]] = None
 
         full_answer_parts: List[str] = []
+        retrieval_overview_prefix = ""
 
         try:
             if effective_use_retrieval:
@@ -797,15 +537,6 @@ class RAGService:
                     "document_count": len(doc_names),
                     "document_names": doc_names,
                 })
-                yield (
-                    "retrieval_overview",
-                    _build_retrieval_overview_payload(
-                        candidate_count=candidate_count,
-                        fused_count=fused_count,
-                        cached=False,
-                        document_names=doc_names,
-                    ),
-                )
 
                 if retrieval_results is not None:
                     for gr in retrieval_results.get("graph_results", []):
@@ -817,6 +548,14 @@ class RAGService:
                                     "edges": subgraph_data.get("edges", []),
                                 })
                             break
+
+                # --- Build retrieval overview as answer prefix ---
+                retrieval_overview_prefix = self._build_retrieval_overview_text(
+                    candidate_count=candidate_count,
+                    fused_count=fused_count,
+                    doc_names=doc_names,
+                    sources=sources,
+                )
 
                 yield ("status", {"stage": "reasoning", "message": "正在进行智能研判..."})
                 doc_nums = sorted({s["doc_num"] for s in sources if s.get("doc_num")})
@@ -831,10 +570,18 @@ class RAGService:
 
                 llm_start = time.perf_counter()
                 first_token_received = False
+                overview_prefix_emitted = False
                 for event_type, payload in self._stream_chat_completion(
                     prompt,
                     max_tokens=app_config.QA_STREAM_MAX_TOKENS,
                 ):
+                    # Inject retrieval overview right before the first answer token
+                    # (i.e. after thinking_done), so it doesn't flash during thinking.
+                    if not overview_prefix_emitted and event_type == "answer" and retrieval_overview_prefix:
+                        overview_prefix_emitted = True
+                        yield ("answer", {"content": retrieval_overview_prefix})
+                        full_answer_parts.append(retrieval_overview_prefix)
+
                     if event_type == "answer":
                         answer_piece = payload.get("content", "")
                         full_answer_parts.append(answer_piece)
@@ -881,26 +628,20 @@ class RAGService:
 
         # --- Post-process & emit corrected answer ---
         full_answer = "".join(full_answer_parts)
-        processed = full_answer
         if full_answer:
             streamed_sources = sources
             finalized_answer, finalized_sources = self._finalize_answer_and_sources(
                 full_answer,
                 sources,
                 question=question,
-                inject_summary_with_llm=False,
                 missing_image_log="Streamed answer mentions figures but no image-bearing sources survived filtering.",
             )
-            processed = finalized_answer
-            sources = finalized_sources
 
             if finalized_answer != full_answer:
                 can_replace, reject_reason = _should_emit_answer_replacement(full_answer, finalized_answer)
                 if can_replace:
-                    # Bundle sources into answer_replaced so the frontend can
-                    # atomically update both content and citation labels,
-                    # avoiding race conditions between separate SSE events.
                     yield ("answer_replaced", {"content": finalized_answer, "sources": finalized_sources})
+                    sources = finalized_sources
                 else:
                     logger.warning(
                         "Skip answer_replaced due to degraded markdown shape: %s (current=%s, replacement=%s)",
@@ -908,30 +649,37 @@ class RAGService:
                         _inspect_markdown_shape(full_answer),
                         _inspect_markdown_shape(finalized_answer),
                     )
-                    # Keep stream/final state consistent with what the user already saw.
-                    processed = full_answer
                     sources = streamed_sources
+            else:
+                sources = finalized_sources
 
         yield ("done", {
             "model": self.llm_model,
             "context_used": bool(context),
-            "cached": False,
         })
 
-        # --- Cache result ---
-        if effective_use_retrieval and app_config.QUERY_CACHE_ENABLED:
-            if processed:
-                cache.put(question, {
-                    "answer": processed,
-                    "sources": sources,
-                    "context_used": bool(context),
-                    "model": self.llm_model,
-                }, history_summary)
+    @staticmethod
+    def _build_retrieval_overview_text(
+        *,
+        candidate_count: int,
+        fused_count: int,
+        doc_names: List[str],
+        sources: List[Dict[str, Any]],
+    ) -> str:
+        """Build retrieval overview markdown to be emitted as the answer prefix."""
+        parts: List[str] = []
+        parts.append("## 检索综述\n")
 
-    def _extract_sources(self, retrieval_results: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Backwards-compatible wrapper for source extraction."""
-        _, sources = self._build_context_and_sources(retrieval_results, query="")
-        return sources
+        if candidate_count > 0:
+            parts.append(f"已检索 {candidate_count} 条候选，融合 {fused_count} 条结果。")
+
+        if doc_names:
+            summary_items = pp_summary.collect_document_summary_items(sources)
+            block = pp_summary.build_summary_analysis_block(summary_items)
+            parts.append(block)
+
+        parts.append("\n\n")
+        return "\n".join(parts)
 
 
 

@@ -18,11 +18,8 @@ from rag.retriever import MultiSourceRetriever
 from rag.service import create_rag_service
 from rag.embedder import create_embedding_service
 from rag.graph_query import GraphQueryService
-from rag.cache import get_query_cache
 from schemas.rag_schemas import (
     RAGChatRequest as ChatRequest,
-    RAGChatResponse as ChatResponse,
-    SourceInfo,
     FeedbackRequest,
     FeedbackResponse,
 )
@@ -522,40 +519,6 @@ def _create_retriever() -> MultiSourceRetriever:
     )
 
 
-@router.post("/qa/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
-    """RAG-based question answering (non-streaming)."""
-    try:
-        retriever = _create_retriever()
-        rag_service = create_rag_service(retriever)
-
-        history = _normalize_history(request.history)
-
-        result = rag_service.answer_question(
-            question=request.question.strip(),
-            history=history,
-            use_retrieval=request.use_retrieval,
-            top_k=request.top_k,
-        )
-
-        sources = [
-            SourceInfo(**src) for src in result.get("sources", [])
-        ]
-
-        return ChatResponse(
-            answer=result["answer"],
-            model=result["model"],
-            sources=sources,
-            context_used=result.get("context_used", True),
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"QA chat failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.post("/qa/chat/stream")
 def chat_stream(request: ChatRequest):
     """RAG-based question answering with SSE streaming."""
@@ -642,20 +605,6 @@ def submit_feedback(request: FeedbackRequest):
     except Exception as e:
         logger.error("Failed to store feedback: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/qa/cache/stats")
-def cache_stats():
-    """Get query cache statistics."""
-    return get_query_cache().get_stats()
-
-
-@router.post("/qa/cache/clear")
-def clear_cache():
-    """Clear query cache so latest retrieval/source fields take effect immediately."""
-    cache = get_query_cache()
-    cache.invalidate_all()
-    return {"success": True}
 
 
 @router.get("/rag/sources/{chunk_id}")

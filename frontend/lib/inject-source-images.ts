@@ -332,6 +332,8 @@ type FigureCaptionLineOptions = {
 interface InjectSourceImagesOptions {
   streaming?: boolean;
   allowAppendixFallback?: boolean;
+  allowPlaceholderReplacement?: boolean;
+  allowCitationLineInjection?: boolean;
 }
 
 function buildFigureCaptionLine(
@@ -433,6 +435,8 @@ export function injectSourceImages(
   if (!text || !sources || sources.length === 0) return text;
   const streaming = Boolean(options.streaming);
   const allowAppendixFallback = options.allowAppendixFallback ?? !streaming;
+  const allowPlaceholderReplacement = options.allowPlaceholderReplacement ?? !streaming;
+  const allowCitationLineInjection = options.allowCitationLineInjection ?? true;
 
   const sourceByLabel = new Map<string, SourceInfo>();
   for (const src of sources) {
@@ -451,7 +455,7 @@ export function injectSourceImages(
 
   // 1) Handle explicit "should insert image here" placeholders by replacing them
   //    with a best-effort real image from the retrieved sources.
-  if (!streaming) {
+  if (allowPlaceholderReplacement) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const placeholder = line.match(IMAGE_PLACEHOLDER_RE);
@@ -589,76 +593,78 @@ export function injectSourceImages(
     }
   }
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^\s*FIGCAPTION\b/.test(line)) continue;
-    const labelMatches = Array.from(line.matchAll(/\[(\d{1,2}-\d{1,2})\]\(#source-\1\)/g));
-    if (labelMatches.length === 0) continue;
+  if (allowCitationLineInjection) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^\s*FIGCAPTION\b/.test(line)) continue;
+      const labelMatches = Array.from(line.matchAll(/\[(\d{1,2}-\d{1,2})\]\(#source-\1\)/g));
+      if (labelMatches.length === 0) continue;
 
-    const contextLineMeta = parseStandaloneFigureContextLine(line);
-    let injected = false;
-    let insertedLen = 0;
-    for (const m of labelMatches) {
-      const label = m[1];
-      const src = sourceByLabel.get(label);
-      if (!src) continue;
+      const contextLineMeta = parseStandaloneFigureContextLine(line);
+      let injected = false;
+      let insertedLen = 0;
+      for (const m of labelMatches) {
+        const label = m[1];
+        const src = sourceByLabel.get(label);
+        if (!src) continue;
 
-      const candidates = buildCandidates(src);
-      const explicitSeeFigure = INLINE_SEE_FIGURE_RE.test(line);
+        const candidates = buildCandidates(src);
+        const explicitSeeFigure = INLINE_SEE_FIGURE_RE.test(line);
 
-      const chosen =
-        pickImageByFigureOrHint(line, candidates) ||
-        (explicitSeeFigure ? pickFirstUnusedCandidate(candidates, lines, injectedUrls) : null) ||
-        (IMAGE_MENTION_RE.test(line)
-          ? (pickImageByKeyword(line, candidates) || pickFirstUnusedCandidate(candidates, lines, injectedUrls))
-          : null);
-      if (!chosen) continue;
+        const chosen =
+          pickImageByFigureOrHint(line, candidates) ||
+          (explicitSeeFigure ? pickFirstUnusedCandidate(candidates, lines, injectedUrls) : null) ||
+          (IMAGE_MENTION_RE.test(line)
+            ? (pickImageByKeyword(line, candidates) || pickFirstUnusedCandidate(candidates, lines, injectedUrls))
+            : null);
+        if (!chosen) continue;
 
-      if (isUrlAlreadyPresent(chosen.url, lines, injectedUrls)) {
-        // If the image was already injected earlier, keep figure refs consistent.
-        const existing = urlToFigLabel.get(chosen.url);
-        if (existing) {
-          if (contextLineMeta.consumeLine) {
-            lines[i] = `（${existing}）${contextLineMeta.citationAnchors.join("")}`;
-          } else {
-            lines[i] = appendFigureRefToLine(lines[i], existing);
+        if (isUrlAlreadyPresent(chosen.url, lines, injectedUrls)) {
+          // If the image was already injected earlier, keep figure refs consistent.
+          const existing = urlToFigLabel.get(chosen.url);
+          if (existing) {
+            if (contextLineMeta.consumeLine) {
+              lines[i] = `（${existing}）${contextLineMeta.citationAnchors.join("")}`;
+            } else {
+              lines[i] = appendFigureRefToLine(lines[i], existing);
+            }
           }
+          injected = true;
+          break;
         }
+
+        figCount += 1;
+        const figLabel = `图${figCount}`;
+        const originalLine = lines[i];
+        const alt = pickDisplayText(chosen) || "参考配图";
+        const listIndent = detectListContentIndent(originalLine);
+        const captionLine = buildFigureCaptionLine(figLabel, chosen, {
+          contextLine: originalLine,
+          captionHint: contextLineMeta.captionHint,
+          citationAnchors: contextLineMeta.consumeLine ? contextLineMeta.citationAnchors : [],
+        });
+        const injectedBlock = buildInjectedBlock(
+          `![${alt}](${chosen.url})`,
+          captionLine,
+          listIndent
+        );
+
+        if (contextLineMeta.consumeLine) {
+          lines.splice(i, 1, ...injectedBlock);
+        } else {
+          lines[i] = appendFigureRefToLine(lines[i], figLabel);
+          lines.splice(i + 1, 0, ...injectedBlock);
+        }
+        injectedUrls.add(chosen.url);
+        urlToFigLabel.set(chosen.url, figLabel);
         injected = true;
+        insertedLen = contextLineMeta.consumeLine ? injectedBlock.length - 1 : injectedBlock.length;
         break;
       }
 
-      figCount += 1;
-      const figLabel = `图${figCount}`;
-      const originalLine = lines[i];
-      const alt = pickDisplayText(chosen) || "参考配图";
-      const listIndent = detectListContentIndent(originalLine);
-      const captionLine = buildFigureCaptionLine(figLabel, chosen, {
-        contextLine: originalLine,
-        captionHint: contextLineMeta.captionHint,
-        citationAnchors: contextLineMeta.consumeLine ? contextLineMeta.citationAnchors : [],
-      });
-      const injectedBlock = buildInjectedBlock(
-        `![${alt}](${chosen.url})`,
-        captionLine,
-        listIndent
-      );
-
-      if (contextLineMeta.consumeLine) {
-        lines.splice(i, 1, ...injectedBlock);
-      } else {
-        lines[i] = appendFigureRefToLine(lines[i], figLabel);
-        lines.splice(i + 1, 0, ...injectedBlock);
+      if (injected) {
+        if (insertedLen > 0) i += insertedLen;
       }
-      injectedUrls.add(chosen.url);
-      urlToFigLabel.set(chosen.url, figLabel);
-      injected = true;
-      insertedLen = contextLineMeta.consumeLine ? injectedBlock.length - 1 : injectedBlock.length;
-      break;
-    }
-
-    if (injected) {
-      if (insertedLen > 0) i += insertedLen;
     }
   }
 

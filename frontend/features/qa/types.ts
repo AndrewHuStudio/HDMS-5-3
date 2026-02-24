@@ -39,15 +39,6 @@ export interface RetrievalStats {
   document_names?: string[];
 }
 
-export interface RetrievalOverview {
-  summary?: string;
-  candidate_count?: number;
-  fused_count?: number;
-  document_count?: number;
-  document_names?: string[];
-  cached?: boolean;
-}
-
 export type AssistantRenderState =
   | "understanding"
   | "retrieving"
@@ -85,7 +76,6 @@ export interface ChatMessage {
   thinking?: string;
   sources?: SourceInfo[];
   retrievalStats?: RetrievalStats;
-  retrievalOverview?: RetrievalOverview;
   renderState?: AssistantRenderState;
   subgraph?: SubgraphData;
   feedback?: "useful" | "not_useful";
@@ -101,8 +91,3 @@ export interface ChatHistoryMessage {
   content: string;
 }
 
-export interface ChatResponse {
-  answer: string;
-  model?: string;
-  sources?: SourceInfo[];
-}

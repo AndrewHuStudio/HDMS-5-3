@@ -1,10 +1,11 @@
 import { processAnswerCitations } from "@/features/qa/citations";
 import type { SourceInfo } from "@/features/qa/types";
-import { injectSourceImages } from "@/lib/inject-source-images";
+import type { AnswerRenderPhase } from "@/features/qa/render/assistant-render-state-machine";
 import { injectSourceTables } from "@/lib/inject-source-tables";
-import { normalizeAnswerMarkdownArtifacts } from "@/lib/normalize-answer-markdown-artifacts";
 import { normalizeAnswerTables } from "@/lib/normalize-answer-tables";
 import { collapseFigureMentions } from "@/lib/stream-source-utils";
+import { injectAnswerImagesByPhase } from "@/features/qa/render/image-injection-pipeline";
+import { normalizeAnswerMarkdownByPhase } from "@/features/qa/render/markdown-normalization-pipeline";
 
 const MARKDOWN_IMAGE_DEST_RE = /!\[[^\]]*\]\(([^)\n]+)\)/g;
 const HTML_IMAGE_SRC_RE = /<img\b[^>]*\bsrc=(['"])([^'"]+)\1/gi;
@@ -16,6 +17,7 @@ export interface BuildAnswerMarkdownArgs {
   content: string;
   sources: SourceInfo[];
   isStreaming: boolean;
+  renderPhase?: AnswerRenderPhase;
   precedingQuestion?: string;
   finalizedByServer?: boolean;
 }
@@ -65,27 +67,31 @@ export function buildAnswerMarkdown(args: BuildAnswerMarkdownArgs): string {
     content,
     sources,
     isStreaming,
+    renderPhase,
     precedingQuestion,
     finalizedByServer,
   } = args;
+  const phase: AnswerRenderPhase = renderPhase || (isStreaming ? "streaming" : "final");
+  const streamLike = phase === "streaming";
   const withTables = normalizeAnswerTables(content);
-  const withArtifacts = normalizeAnswerMarkdownArtifacts(withTables, {
-    streaming: isStreaming,
+  const withArtifacts = normalizeAnswerMarkdownByPhase({
+    content: withTables,
+    renderPhase: phase,
   });
   const withoutInlineCitations = processAnswerCitations({
     text: withArtifacts,
     sources,
-    isStreaming,
+    isStreaming: streamLike,
   });
 
-  if (isStreaming) {
-    const withStreamingImages = injectSourceImages(
-      withoutInlineCitations,
+  if (phase !== "final") {
+    const withPhaseImages = injectAnswerImagesByPhase({
+      markdown: withoutInlineCitations,
       sources,
       precedingQuestion,
-      { streaming: true, allowAppendixFallback: true },
-    );
-    return collapseFigureMentions(withStreamingImages);
+      renderPhase: phase,
+    });
+    return collapseFigureMentions(withPhaseImages);
   }
 
   const renderableImageCount = countRenderableMarkdownImages(withoutInlineCitations);
@@ -97,11 +103,15 @@ export function buildAnswerMarkdown(args: BuildAnswerMarkdownArgs): string {
   const shouldInjectTables = !finalizedByServer || !hasGfmTable;
 
   const withImages = shouldInjectImages
-    ? injectSourceImages(withoutInlineCitations, sources, precedingQuestion)
+    ? injectAnswerImagesByPhase({
+      markdown: withoutInlineCitations,
+      sources,
+      precedingQuestion,
+      renderPhase: "final",
+    })
     : withoutInlineCitations;
   const withTablesAndImages = shouldInjectTables
     ? injectSourceTables(withImages, sources)
     : withImages;
   return collapseFigureMentions(withTablesAndImages);
 }
-

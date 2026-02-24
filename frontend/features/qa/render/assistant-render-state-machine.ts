@@ -2,7 +2,6 @@ import type { AssistantRenderState, ChatMessage } from "@/features/qa/types";
 
 export type AssistantRenderEvent =
   | { type: "status"; stage?: string }
-  | { type: "retrieval_overview" }
   | { type: "thinking" }
   | { type: "thinking_done" }
   | { type: "answer"; holdDuringReasoning?: boolean }
@@ -47,8 +46,6 @@ export function transitionAssistantRenderState(
   switch (event.type) {
     case "status":
       return preferForwardState(current, normalizeStatusStage(event.stage));
-    case "retrieval_overview":
-      return preferForwardState(current, "reasoning");
     case "thinking":
       return preferForwardState(current, "reasoning");
     case "thinking_done":
@@ -88,16 +85,30 @@ export interface AssistantRenderModelInput {
   hasThinking: boolean;
   hasAnswer: boolean;
   hasRetrievalStats: boolean;
-  hasRetrievalOverview: boolean;
-  hasInlineRetrievalOverviewHeading: boolean;
 }
 
 export interface AssistantRenderModel {
   showRetrievalStats: boolean;
-  showRetrievalOverview: boolean;
   showThinking: boolean;
   showAnswer: boolean;
   showStreamingCursor: boolean;
+}
+
+export type AnswerRenderPhase = "streaming" | "finalizing" | "final";
+
+export interface ResolveAnswerRenderPhaseInput {
+  state: AssistantRenderState;
+  isStreaming: boolean;
+}
+
+export function resolveAnswerRenderPhase(
+  input: ResolveAnswerRenderPhaseInput,
+): AnswerRenderPhase {
+  if (input.state === "finalizing") return "finalizing";
+  if (!input.isStreaming || input.state === "done" || input.state === "error") {
+    return "final";
+  }
+  return "streaming";
 }
 
 export function buildAssistantRenderModel(
@@ -107,12 +118,6 @@ export function buildAssistantRenderModel(
     input.state === "finalizing" ||
     input.state === "done" ||
     input.state === "error";
-
-  const showRetrievalOverview = input.hasRetrievalOverview && (
-    input.isStreaming ||
-    completionLike ||
-    !input.hasInlineRetrievalOverviewHeading
-  );
 
   const showThinking = input.hasThinking || (input.isStreaming && STATE_RANK[input.state] <= STATE_RANK.reasoning);
 
@@ -127,7 +132,6 @@ export function buildAssistantRenderModel(
 
   return {
     showRetrievalStats,
-    showRetrievalOverview,
     showThinking,
     showAnswer,
     showStreamingCursor: Boolean(input.isStreaming && showAnswer),
