@@ -78,9 +78,9 @@ function PlotMesh({
           depthTest={false}
         />
       </mesh>
-      <line geometry={outlineGeometry}>
+      <lineLoop geometry={outlineGeometry}>
         <lineBasicMaterial color={isSelected ? "#3b82f6" : "#94a3b8"} depthTest={false} />
-      </line>
+      </lineLoop>
     </group>
   );
 }
@@ -100,9 +100,9 @@ function ConnectionLine({
   }, [start, end]);
 
   return (
-    <line geometry={geometry} userData={{ isOverlayLine: true }} renderOrder={3}>
+    <lineSegments geometry={geometry} userData={{ isOverlayLine: true }} renderOrder={3}>
       <lineBasicMaterial color={color} depthTest={false} />
-    </line>
+    </lineSegments>
   );
 }
 

@@ -1853,8 +1853,6 @@ interface PlanViewportProps {
   withCard?: boolean;
   visibleLayerPrefixes?: string[];
   sceneUpAxis: UpAxis;
-  visibleLayerPrefixes?: string[];
-  overlayContent?: React.ReactNode;
 }
 
 function PlanViewportCameraController({
@@ -2055,8 +2053,6 @@ export function PlanViewport({
   withCard = true,
   visibleLayerPrefixes,
   sceneUpAxis,
-  visibleLayerPrefixes,
-  overlayContent,
 }: PlanViewportProps) {
   const personScale = 2 * sightCorridorScale * PERSON_SCALE_MULTIPLIER;
   const hemisphereRadius = Math.max(0, sightCorridorRadius) * sightCorridorScale;
