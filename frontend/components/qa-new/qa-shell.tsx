@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import rehypeKatex from "rehype-katex";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Send } from "lucide-react";
@@ -13,9 +13,21 @@ import { QARetrievalStats } from "@/components/qa-retrieval-stats";
 import { QAFeedback } from "@/components/qa-feedback";
 import { QAExportButton } from "@/components/qa-export-button";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
+import { PdfLightbox } from "@/components/pdf-lightbox";
 import type { ChatMessage, SourceInfo } from "@/features/qa/types";
 import { cn } from "@/lib/utils";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { API_BASE, QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { injectSourceImages } from "@/lib/inject-source-images";
+import { injectSourceTables } from "@/lib/inject-source-tables";
+import { normalizeAnswerTables } from "@/lib/normalize-answer-tables";
+import { normalizeAnswerMarkdownArtifacts } from "@/lib/normalize-answer-markdown-artifacts";
+import { QA_REMARK_PLUGINS } from "@/lib/qa-markdown-plugins";
+import { resolvePdfUrlForSource } from "@/lib/resolve-pdf-url";
+import { resolvePdfSearchKeyword } from "@/lib/pdf-auto-highlight";
+import { sanitizeAnswerCitations } from "@/lib/sanitize-answer-citations";
+import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
+import { stripInlineCitationLabels } from "@/lib/strip-inline-citation-labels";
+import { collapseFigureMentions } from "@/lib/stream-source-utils";
 
 interface QAShellProps {
   title?: string;
@@ -37,26 +49,83 @@ function useImageLightbox() {
   return { lightboxSrc, open, close };
 }
 
-const CITATION_PATTERN = /\[(\d{1,2})\](?!\()/g;
+const RETRIEVAL_DOC_NAME_PATTERN = /([A-Za-z0-9\u4e00-\u9fff_\-（）()《》【】·、]+\.pdf)/giu;
 
-function injectCitationAnchors(content: string, sourceCount: number): string {
-  if (!content || sourceCount <= 0) return content;
-
-  return content.replace(CITATION_PATTERN, (raw, value) => {
-    const index = Number.parseInt(value, 10);
-    if (Number.isNaN(index) || index < 1 || index > sourceCount) {
-      return raw;
+function highlightRetrievalDocNames(node: ReactNode, keyPrefix = "doc"): ReactNode {
+  if (typeof node === "string") {
+    const parts: ReactNode[] = [];
+    let last = 0;
+    let index = 0;
+    RETRIEVAL_DOC_NAME_PATTERN.lastIndex = 0;
+    for (const match of node.matchAll(RETRIEVAL_DOC_NAME_PATTERN)) {
+      const start = match.index ?? 0;
+      const full = match[0];
+      if (start > last) parts.push(node.slice(last, start));
+      parts.push(
+        <span key={`${keyPrefix}-${index}`} className="italic text-sky-600/80">
+          {full}
+        </span>
+      );
+      last = start + full.length;
+      index += 1;
     }
-    return `[${index}](#source-${index})`;
-  });
+    if (last === 0) return node;
+    if (last < node.length) parts.push(node.slice(last));
+    return parts;
+  }
+  if (Array.isArray(node)) {
+    return node.map((child, idx) => highlightRetrievalDocNames(child, `${keyPrefix}-${idx}`));
+  }
+  return node;
 }
 
-function parseCitationIndex(href?: string): number | null {
+/**
+ * Build a map from citation_label (e.g. "1-1") to source array index.
+ */
+function buildLabelIndexMap(sources: SourceInfo[] | undefined): Map<string, number> {
+  const map = new Map<string, number>();
+  if (!sources) return map;
+  for (let i = 0; i < sources.length; i++) {
+    const label = sources[i].citation_label;
+    if (label) map.set(label, i);
+  }
+  return map;
+}
+
+/**
+ * Post-process LLM output to normalize citation placement (N-M format):
+ * 1. Move citations before punctuation: "内容。[1-1]" → "内容[1-1]。"
+ * 2. Strip citations inside markdown table rows
+ * 3. If sources exist but no citations found, append a summary line
+ */
+function normalizeCitations(text: string, sources: SourceInfo[]): string {
+  if (!text) return text;
+
+  let result = text;
+  const validLabels = new Set(sources.map((s) => s.citation_label).filter((v): v is string => Boolean(v)));
+
+  result = result.replace(
+    /([。！？.!?])(\s*(?:\[\d{1,2}-\d{1,2}\])+)/g,
+    (_, punct, cites) => `${cites.trim()}${punct}`
+  );
+
+  result = result.replace(
+    /^(\|.+)$/gm,
+    (line) => line.replace(/\[\d{1,2}-\d{1,2}\]/g, "")
+  );
+
+  result = sanitizeAnswerCitations({ text: result, validLabels });
+
+  return result;
+}
+
+/**
+ * Parse href like #source-1-2 and return the citation label "1-2".
+ */
+function parseCitationLabel(href?: string): string | null {
   if (!href) return null;
-  const match = href.match(/^#source-(\d+)$/);
-  if (!match) return null;
-  const index = Number.parseInt(match[1], 10);
-  return Number.isNaN(index) ? null : index;
+  const match = href.match(/^#source-(\d{1,2}-\d{1,2})$/);
+  return match ? match[1] : null;
 }
 
 /** Extract recommended questions from <!--RECOMMENDED_QUESTIONS ... --> block */
@@ -83,7 +152,9 @@ function resolveImageSrc(src: string): string {
   if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("data:")) {
     return src;
   }
-  const base = normalizeApiBase(API_BASE);
+  const base = src.startsWith("/rag/")
+    ? normalizeApiBase(QA_API_BASE)
+    : normalizeApiBase(API_BASE);
   return src.startsWith("/") ? `${base}${src}` : `${base}/${src}`;
 }
 
@@ -103,10 +174,27 @@ export function QAShell({
 }: QAShellProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const userScrolledUpRef = useRef(false);
   const { lightboxSrc, open: openLightbox, close: closeLightbox } = useImageLightbox();
 
+  // Detect if user has scrolled away from the bottom
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    userScrolledUpRef.current = distanceFromBottom > 80;
+  }, []);
+
+  // When a new user message is sent, reset scroll lock so we follow the response
   useEffect(() => {
-    if (!scrollRef.current) return;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role === "user") {
+      userScrolledUpRef.current = false;
+    }
+  }, [messages.length]);
+
+  useEffect(() => {
+    if (!scrollRef.current || userScrolledUpRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, isSending]);
 
@@ -143,7 +231,7 @@ export function QAShell({
         <QAExportButton messages={messages} disabled={isSending} />
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4" ref={scrollRef}>
+      <div className="qa-scrollbar flex-1 overflow-y-auto px-6 py-4" ref={scrollRef} onScroll={handleScroll}>
         <div className="space-y-4">
           {messages.map((message, idx) => {
             let precedingQuestion: string | undefined;
@@ -273,41 +361,96 @@ function AssistantContent({
   onFillInput?: (value: string) => void;
   onImageClick?: (src: string) => void;
 }) {
-  const { content, thinking, sources, retrievalStats, feedback, isStreaming } = message;
-  const [activeCitation, setActiveCitation] = useState<number | null>(null);
+  const { content, thinking, sources, retrievalStats, feedback, isStreaming, thinkingDone } = message;
+  const [activeCitationLabel, setActiveCitationLabel] = useState<string | null>(null);
+  const [pdfSrc, setPdfSrc] = useState<string | null>(null);
+  const [pdfSearchKeyword, setPdfSearchKeyword] = useState<string | undefined>(undefined);
+  const markdownRef = useRef<HTMLDivElement>(null);
 
-  const sourceCount = sources?.length ?? 0;
+  // Detect overflowing KaTeX display formulas and add scroll-hint class.
+  useEffect(() => {
+    const el = markdownRef.current;
+    if (!el) return;
+    const displays = el.querySelectorAll<HTMLElement>(".katex-display");
+    displays.forEach((d) => {
+      if (d.scrollWidth > d.clientWidth + 2) {
+        d.classList.add("katex-overflow");
+      } else {
+        d.classList.remove("katex-overflow");
+      }
+    });
+  }, [content, isStreaming]);
+
+  const sourcesNormalized = useMemo(() => normalizeCitationSources(sources ?? []), [sources]);
+  const labelIndexMap = useMemo(() => buildLabelIndexMap(sourcesNormalized), [sourcesNormalized]);
 
   const { cleanContent, questions: recommendedQuestions } = useMemo(
     () => (isStreaming ? { cleanContent: content, questions: [] } : extractRecommendedQuestions(content)),
     [content, isStreaming]
   );
 
-  const answerMarkdown = useMemo(
-    () => injectCitationAnchors(cleanContent, sourceCount),
-    [cleanContent, sourceCount]
-  );
+  const answerMarkdown = useMemo(() => {
+    const withTables = normalizeAnswerTables(cleanContent);
+    const withArtifacts = normalizeAnswerMarkdownArtifacts(withTables, {
+      streaming: isStreaming,
+    });
+    const normalized = isStreaming ? withArtifacts : normalizeCitations(withArtifacts, sourcesNormalized);
+    const withoutInlineCitations = stripInlineCitationLabels(normalized);
+    const withImages = injectSourceImages(withoutInlineCitations, sourcesNormalized, precedingQuestion);
+    if (isStreaming) {
+      return collapseFigureMentions(withImages);
+    }
+    const withTablesAndImages = injectSourceTables(withImages, sourcesNormalized);
+    return collapseFigureMentions(withTablesAndImages);
+  }, [cleanContent, sourcesNormalized, isStreaming, precedingQuestion]);
 
   useEffect(() => {
-    setActiveCitation(null);
+    setActiveCitationLabel(null);
   }, [message.id]);
 
-  const handleCitationSelect = useCallback((index: number) => {
-    setActiveCitation(index);
-    const target = document.getElementById(`source-${index}`);
+  const handleCitationSelect = useCallback((label: string) => {
+    setActiveCitationLabel(label);
+    const idx = labelIndexMap.get(label);
+    const src = idx !== undefined ? sourcesNormalized?.[idx] : undefined;
+    if (src) {
+      void resolvePdfUrlForSource(src).then((url) => {
+        if (url) {
+          setPdfSrc(url);
+          setPdfSearchKeyword(resolvePdfSearchKeyword(src));
+          return;
+        }
+
+        // Fall back to scrolling the source card into view when no PDF is available.
+        const target = document.getElementById(`source-${label}`);
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+          target.classList.add("qa-source-flash");
+          setTimeout(() => target.classList.remove("qa-source-flash"), 1200);
+        }
+      });
+      return;
+    }
+    const target = document.getElementById(`source-${label}`);
     if (target) {
       target.scrollIntoView({ behavior: "smooth", block: "center" });
       target.classList.add("qa-source-flash");
       setTimeout(() => target.classList.remove("qa-source-flash"), 1200);
     }
-  }, []);
+  }, [labelIndexMap, sourcesNormalized]);
 
-  const hasSourcePanel = Boolean(sources && sources.length > 0 && !isStreaming);
+  const hasSourcePanel = Boolean(sourcesNormalized && sourcesNormalized.length > 0 && !isStreaming);
 
   return (
     <div>
       {(isStreaming || thinking) && (
-        <ThinkingProcess thinking={thinking || ""} isStreaming={!!isStreaming} statusMessage={message.statusMessage} />
+        <ThinkingProcess
+          thinking={thinking || ""}
+          isStreaming={!!isStreaming}
+          thinkingDone={!!thinkingDone}
+          statusMessage={message.statusMessage}
+          statusStage={message.statusStage}
+          retrievalStats={retrievalStats}
+        />
       )}
 
       {retrievalStats && <QARetrievalStats stats={retrievalStats} isStreaming={!!isStreaming} />}
@@ -334,16 +477,66 @@ function AssistantContent({
             hasSourcePanel && "mt-1 grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]"
           )}
         >
-          <div className="qa-markdown prose prose-sm max-w-none dark:prose-invert">
+          <div ref={markdownRef} className="qa-markdown prose prose-sm max-w-none dark:prose-invert">
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={QA_REMARK_PLUGINS}
+              rehypePlugins={[rehypeKatex]}
               components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                h2: ({ children }) => (
+                  <h2 className="qa-heading-1 mt-5 mb-2 text-base font-bold border-l-4 border-primary pl-2">
+                    {children}
+                  </h2>
+                ),
+                h3: ({ children }) => (
+                  <h3 className="qa-heading-2 mt-4 mb-1.5 text-[15px] font-semibold text-primary/85">
+                    {children}
+                  </h3>
+                ),
+                h4: ({ children }) => (
+                  <h4 className="qa-heading-3 mt-3 mb-1 text-sm font-medium text-foreground/80">
+                    {children}
+                  </h4>
+                ),
+                p: ({ children }) => {
+                  const isPlainText =
+                    typeof children === "string" ||
+                    (Array.isArray(children) && children.every((c) => typeof c === "string"));
+                  const plain = isPlainText
+                    ? String(Array.isArray(children) ? children.join("") : children).trim()
+                    : null;
+
+                  if (plain && (plain.startsWith("FIGCAPTION ") || /^图\d+：/.test(plain))) {
+                    const shown = plain.replace(/^FIGCAPTION\s+/u, "");
+                    return (
+                      <p className="mt-1 mb-3 text-[10px] leading-snug text-muted-foreground">
+                        {shown}
+                      </p>
+                    );
+                  }
+
+                  return <p className="mb-2 last:mb-0">{children}</p>;
+                },
                 ul: ({ children }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
                 ol: ({ children }) => <ol className="mb-2 list-decimal pl-5">{children}</ol>,
-                li: ({ children }) => <li className="mb-1 last:mb-0">{children}</li>,
+                li: ({ children }) => {
+                  const plainText =
+                    typeof children === "string"
+                      ? children
+                      : Array.isArray(children)
+                        ? children.filter((c) => typeof c === "string").join("").trim()
+                        : "";
+                  const isRetrievalReason = plainText.startsWith("资料调用理由（");
+                  const isRetrievalList = plainText.startsWith("检索资料清单");
+                  const className = isRetrievalReason
+                    ? "mb-1 last:mb-0"
+                    : "mb-1 last:mb-0";
+                  const content = (isRetrievalReason || isRetrievalList)
+                    ? highlightRetrievalDocNames(children, "retrieval-doc")
+                    : children;
+                  return <li className={className}>{content}</li>;
+                },
                 strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                em: ({ children }) => <em className="italic">{children}</em>,
+                em: ({ children }) => <em className="italic text-sky-700/80">{children}</em>,
                 code: ({ children, className }) => {
                   const isBlock = className?.includes("language-");
                   return isBlock ? (
@@ -356,22 +549,22 @@ function AssistantContent({
                 },
                 pre: ({ children }) => <pre className="mb-2 overflow-x-auto">{children}</pre>,
                 blockquote: ({ children }) => (
-                  <blockquote className="border-l-2 border-border pl-3 italic text-muted-foreground">
+                  <blockquote className="rounded-md border border-border/55 bg-background/85 px-3 py-2 text-xs leading-relaxed text-muted-foreground shadow-sm">
                     {children}
                   </blockquote>
                 ),
                 table: ({ children }) => (
-                  <div className="mb-2 overflow-x-auto">
+                  <div className="qa-table-wrap mb-2 overflow-x-auto rounded-md border border-border/80 bg-white/90 dark:bg-background/75">
                     <table className="min-w-full border-collapse text-xs">{children}</table>
                   </div>
                 ),
                 th: ({ children }) => (
-                  <th className="border border-border bg-muted px-2 py-1 text-left font-semibold">
+                  <th className="border border-border bg-white/80 px-2 py-1 text-left font-semibold dark:bg-muted/45">
                     {children}
                   </th>
                 ),
                 td: ({ children }) => (
-                  <td className="border border-border px-2 py-1">{children}</td>
+                  <td className="border border-border bg-white/55 px-2 py-1 dark:bg-transparent">{children}</td>
                 ),
                 img: ({ src, alt }) => {
                   const resolved = resolveImageSrc(typeof src === "string" ? src : "");
@@ -383,20 +576,26 @@ function AssistantContent({
                       loading="lazy"
                       onClick={() => onImageClick?.(resolved)}
                       onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
+                        const img = e.target as HTMLImageElement;
+                        img.alt = "";
+                        img.title = "参考图片暂不可用";
+                        // Hide broken-image icon and fallback alt text to keep layout clean.
+                        img.style.display = "none";
                       }}
                     />
                   );
                 },
                 a: ({ href, children }) => {
-                  const citationIndex = parseCitationIndex(href);
-                  if (citationIndex) {
+                  const citationLabel = parseCitationLabel(href);
+                  if (citationLabel !== null) {
+                    const sourceIdx = labelIndexMap.get(citationLabel);
+                    const source = sourceIdx !== undefined ? sources?.[sourceIdx] : undefined;
                     return (
                       <CitationPill
-                        index={citationIndex}
-                        source={sources?.[citationIndex - 1]}
-                        isActive={activeCitation === citationIndex}
-                        onHover={setActiveCitation}
+                        label={citationLabel}
+                        source={source}
+                        isActive={activeCitationLabel === citationLabel}
+                        onHover={setActiveCitationLabel}
                         onSelect={handleCitationSelect}
                       >
                         {children}
@@ -424,13 +623,13 @@ function AssistantContent({
             )}
           </div>
 
-          {hasSourcePanel && sources && (
+          {hasSourcePanel && sourcesNormalized && (
             <aside className="self-start xl:sticky xl:top-4">
               <QASources
-                sources={sources}
+                sources={sourcesNormalized}
                 query={precedingQuestion}
-                activeCitation={activeCitation}
-                onCitationHover={setActiveCitation}
+                activeCitation={activeCitationLabel}
+                onCitationHover={setActiveCitationLabel}
                 onCitationSelect={handleCitationSelect}
                 layout="sidebar"
               />
@@ -469,49 +668,64 @@ function AssistantContent({
           onFeedbackChange={(fb) => onFeedback(message.id, fb)}
         />
       )}
+
+      {pdfSrc && (
+        <PdfLightbox
+          src={pdfSrc}
+          searchKeyword={pdfSearchKeyword}
+          onClose={() => {
+            setPdfSrc(null);
+            setPdfSearchKeyword(undefined);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 function CitationPill({
-  index,
+  label,
   source,
   isActive,
   onHover,
   onSelect,
   children,
 }: {
-  index: number;
+  label: string;
   source?: SourceInfo;
   isActive: boolean;
-  onHover: (index: number | null) => void;
-  onSelect: (index: number) => void;
+  onHover: (label: string | null) => void;
+  onSelect: (label: string) => void;
   children: React.ReactNode;
 }) {
   const typeLabel = source?.source === "knowledge_graph" ? "知识图谱" : "文档检索";
 
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
-    onSelect(index);
+    onSelect(label);
   };
+
+  const displayLabel = label;
 
   return (
     <span className="relative inline-flex align-middle">
       <a
-        href={`#source-${index}`}
-        title={source?.name || `引用 [${index}]`}
+        href={`#source-${label}`}
+        title={source?.name || `引用 [${label}]`}
         className={cn(
-          "inline-flex h-5 min-w-[1.2rem] items-center justify-center rounded px-1 text-[10px] font-semibold no-underline transition-colors",
+          "inline-flex h-5 items-center justify-center rounded-full border px-1.5 text-[10px] font-medium no-underline transition-colors",
           "cursor-pointer",
-          isActive ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary hover:bg-primary/20"
+          isActive
+            ? "border-red-600 bg-red-600 text-white"
+            : "border-red-400 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-500/50 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
         )}
-        onMouseEnter={() => onHover(index)}
+        onMouseEnter={() => onHover(label)}
         onMouseLeave={() => onHover(null)}
-        onFocus={() => onHover(index)}
+        onFocus={() => onHover(label)}
         onBlur={() => onHover(null)}
         onClick={handleClick}
       >
-        {children}
+        {displayLabel}
       </a>
 
       {isActive && source && (

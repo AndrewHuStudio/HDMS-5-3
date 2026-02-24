@@ -14,10 +14,17 @@ from ..schemas.graph_schemas import (
     GraphQueryRequest,
     GraphQueryResponse,
     PlotInfoResponse,
-    GraphStatistics
+    GraphStatistics,
+    SubgraphData,
+    FusionRequest,
+    FusionResponse,
+    PipelineRequest,
+    PipelineResponse,
 )
 from .builder import GraphBuilder
 from ..graph_store import create_graph_store_service
+from ..fusion import create_fusion_service
+from ..orchestrator import create_orchestrator
 from ...core.database.manager import db_manager
 
 logger = logging.getLogger(__name__)
@@ -25,13 +32,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/graph", tags=["graph"])
 
 
+def _ensure_db_ready() -> None:
+    if db_manager._initialized:
+        return
+    try:
+        db_manager.ensure_initialized()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Database connections not initialized: {exc}") from exc
+
+
 def _create_graph_builder() -> GraphBuilder:
     """Create graph builder with all dependencies."""
-    if not db_manager._initialized:
-        raise HTTPException(
-            status_code=503,
-            detail="Database connections not initialized"
-        )
+    _ensure_db_ready()
 
     graph_store = create_graph_store_service(db_manager.neo4j)
 
@@ -51,15 +63,17 @@ async def build_graph(request: GraphBuildRequest) -> GraphBuildResponse:
     2. Extracts entities and relationships (using LLM or regex)
     3. Creates nodes and relationships in Neo4j
 
-    Entity types: Plot, Indicator, Function, Requirement, Location
-    Relationship types: HAS_INDICATOR, HAS_FUNCTION, HAS_REQUIREMENT, LOCATED_IN
+    Entity types: 片区, 地块, 空间要素, 法规, 标准, 导则
+    Relationship types: PART_OF, CONTAINS, ADJACENT_TO, LOCATED_IN, APPLIES_TO, REFERENCES, DERIVED_FROM, HAS_PROPERTY
     """
     try:
         builder = _create_graph_builder()
         result = builder.build_from_document(
             doc_id=request.doc_id,
             use_llm=request.use_llm,
-            max_chunks=request.max_chunks
+            max_chunks=request.max_chunks,
+            skip_if_built=request.skip_if_built,
+            force_rebuild=request.force_rebuild,
         )
 
         if result.get("status") == "failed":
@@ -89,7 +103,9 @@ async def build_graph_batch(request: BatchGraphBuildRequest) -> BatchGraphBuildR
         builder = _create_graph_builder()
         result = builder.build_from_all_documents(
             use_llm=request.use_llm,
-            max_docs=request.max_docs
+            max_docs=request.max_docs,
+            skip_built=request.skip_built,
+            force_rebuild=request.force_rebuild,
         )
         return BatchGraphBuildResponse(**result)
 
@@ -104,9 +120,9 @@ async def query_graph(request: GraphQueryRequest) -> GraphQueryResponse:
     Execute a Cypher query on the knowledge graph.
 
     Example queries:
-    - Find all plots: MATCH (p:Plot) RETURN p
-    - Find plot indicators: MATCH (p:Plot {name: "DU01-01"})-[r:HAS_INDICATOR]->(i:Indicator) RETURN i.name, r.value
-    - Find related plots: MATCH (p1:Plot)-[:RELATES_TO]-(p2:Plot) RETURN p1.name, p2.name
+    - Find all plots: MATCH (p:地块) RETURN p
+    - Find plot properties: MATCH (p:地块 {name: "DU01-01"}) RETURN p.name, p.far, p.height_limit
+    - Find plots in district: MATCH (p:地块)-[:PART_OF]->(d:片区) RETURN p.name, d.name
     """
     try:
         builder = _create_graph_builder()
@@ -131,10 +147,9 @@ async def get_plot_info(plot_name: str) -> PlotInfoResponse:
     Get comprehensive information about a specific plot.
 
     Returns:
-    - Plot indicators with values
-    - Plot functions
-    - Plot requirements
-    - Plot locations
+    - Plot properties (far, height_limit, setback, etc.)
+    - Districts the plot belongs to
+    - Related regulations/standards/guidelines
     """
     try:
         builder = _create_graph_builder()
@@ -148,10 +163,10 @@ async def get_plot_info(plot_name: str) -> PlotInfoResponse:
 
         return PlotInfoResponse(
             plot_name=plot_name,
-            indicators=info.get("indicators", []),
-            functions=info.get("functions", []),
-            requirements=info.get("requirements", []),
-            locations=info.get("locations", [])
+            properties=info.get("properties", {}),
+            districts=info.get("districts", []),
+            locations=info.get("locations", []),
+            rules=info.get("rules", []),
         )
 
     except HTTPException:
@@ -166,8 +181,16 @@ async def get_entities_by_type(entity_type: str, limit: int = 100) -> Dict[str, 
     """
     Get all entities of a specific type.
 
-    Entity types: Plot, Indicator, Function, Requirement, Location, Document
+    Entity types: 片区, 地块, 空间要素, 法规, 标准, 导则
     """
+    from ..graph_store import VALID_ENTITY_TYPES
+
+    if entity_type not in VALID_ENTITY_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid entity type: {entity_type}. Must be one of: {', '.join(sorted(VALID_ENTITY_TYPES))}"
+        )
+
     try:
         builder = _create_graph_builder()
 
@@ -213,6 +236,51 @@ async def get_graph_statistics() -> GraphStatistics:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/documents/status")
+async def get_document_build_statuses() -> Dict[str, Any]:
+    """Return per-document graph build status from Neo4j :Document nodes."""
+    try:
+        _ensure_db_ready()
+        docs = db_manager.neo4j.list_document_statuses()
+        return {"documents": docs}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get document build statuses: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/visualize", response_model=SubgraphData)
+async def visualize_graph(
+    limit: int = 200,
+    include_documents: bool = True,
+    max_relationships: int = 5000,
+) -> SubgraphData:
+    """
+    Return a limited "full graph" view for visualization.
+
+    - Selects top-*limit* nodes by degree
+    - Returns relationships where both endpoints are in the selected node set
+    - Optionally includes :Document nodes (default: True)
+
+    Note: This endpoint is designed for UI preview and should not be treated
+    as a full export API.
+    """
+    try:
+        _ensure_db_ready()
+        data = db_manager.neo4j.get_visual_subgraph(
+            limit=limit,
+            include_documents=include_documents,
+            max_relationships=max_relationships,
+        )
+        return SubgraphData(**data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to visualize graph: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/clear")
 async def clear_graph() -> Dict[str, str]:
     """
@@ -221,11 +289,7 @@ async def clear_graph() -> Dict[str, str]:
     WARNING: This operation cannot be undone!
     """
     try:
-        if not db_manager._initialized:
-            raise HTTPException(
-                status_code=503,
-                detail="Database connections not initialized"
-            )
+        _ensure_db_ready()
 
         db_manager.neo4j.delete_all()
 
@@ -281,4 +345,94 @@ async def test_graph_build() -> Dict[str, Any]:
         raise
     except Exception as e:
         logger.error(f"Test graph build failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Fusion endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/fuse", response_model=FusionResponse)
+async def fuse_graph(request: FusionRequest) -> FusionResponse:
+    """
+    Run knowledge graph fusion.
+
+    Modes:
+    - full: Disambiguate all entities + discover cross-document relations.
+      Use after first-time graph construction.
+    - incremental: Only fuse specified new entities against existing graph.
+      Use after adding new documents.
+    """
+    try:
+        _ensure_db_ready()
+
+        fusion = create_fusion_service(db_manager.neo4j)
+        fusion.confidence_threshold = request.confidence_threshold
+
+        if request.mode == "incremental":
+            if not request.new_entity_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail="new_entity_ids is required for incremental mode",
+                )
+            result = fusion.fuse_incremental(request.new_entity_ids)
+        else:
+            result = fusion.fuse_full()
+
+        return FusionResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Graph fusion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Pipeline endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/pipeline", response_model=PipelineResponse)
+async def run_pipeline(request: PipelineRequest) -> PipelineResponse:
+    """
+    Run the full build + fuse pipeline.
+
+    Modes:
+    - full: Build graph from all documents, then run full fusion.
+      Use for first-time setup.
+    - incremental: Build graph for specified documents, then fuse new entities
+      against existing graph. Use when adding new materials.
+    """
+    try:
+        _ensure_db_ready()
+
+        orchestrator = create_orchestrator(db_manager.mongodb, db_manager.neo4j)
+
+        if request.mode == "incremental":
+            if not request.doc_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail="doc_ids is required for incremental mode",
+                )
+            result = orchestrator.run_incremental_pipeline(
+                doc_ids=request.doc_ids,
+                use_llm=request.use_llm,
+                max_chunks=request.max_chunks,
+                skip_built=request.skip_built,
+                force_rebuild=request.force_rebuild,
+            )
+        else:
+            result = orchestrator.run_full_pipeline(
+                use_llm=request.use_llm,
+                max_docs=request.max_docs,
+                skip_built=request.skip_built,
+                force_rebuild=request.force_rebuild,
+            )
+
+        return PipelineResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Pipeline failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

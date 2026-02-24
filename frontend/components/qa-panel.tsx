@@ -8,6 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { QASources } from "@/components/qa-sources";
+import type { SourcePreview } from "@/components/qa-sources";
+import { PdfLightbox } from "@/components/pdf-lightbox";
 import { ThinkingProcess } from "@/components/qa-thinking";
 import type { CityElement } from "@/lib/city-data";
 import { elementTypeNames } from "@/lib/city-data";
@@ -16,9 +18,23 @@ import { sendQuestion, sendQuestionStream } from "@/features/qa/api";
 import type { SourceInfo } from "@/features/qa/types";
 import { Send, Network, MessageSquare, Plus, BookOpenText, FileStack, Link2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import rehypeKatex from "rehype-katex";
 import { cn } from "@/lib/utils";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { API_BASE, QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { injectSourceImages } from "@/lib/inject-source-images";
+import { injectSourceTables } from "@/lib/inject-source-tables";
+import { normalizeAnswerTables } from "@/lib/normalize-answer-tables";
+import { normalizeAnswerMarkdownArtifacts } from "@/lib/normalize-answer-markdown-artifacts";
+import { QA_REMARK_PLUGINS } from "@/lib/qa-markdown-plugins";
+import { resolvePdfUrlForSource } from "@/lib/resolve-pdf-url";
+import { resolvePdfSearchKeyword } from "@/lib/pdf-auto-highlight";
+import { prefetchSourcePreviews } from "@/lib/prefetch-source-previews";
+import { getSourcePreviewCacheKey } from "@/lib/source-preview-cache";
+import { sanitizeAnswerCitations } from "@/lib/sanitize-answer-citations";
+import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
+import { countReferencedCitations } from "@/lib/align-sources-to-answer";
+import { stripInlineCitationLabels } from "@/lib/strip-inline-citation-labels";
+import { collapseFigureMentions, mergeStreamingSources } from "@/lib/stream-source-utils";
 
 type Message = QAPanelMessage;
 
@@ -36,7 +52,62 @@ const quickQuestions = [
   "城市设计管控方案的审查要点是什么",
 ];
 
-const CITATION_PATTERN = /\[(\d{1,2})\](?!\()/g;
+const RETRIEVAL_DOC_NAME_PATTERN = /([A-Za-z0-9\u4e00-\u9fff_\-（）()《》【】·、]+\.pdf)/giu;
+
+function highlightRetrievalDocNames(node: ReactNode, keyPrefix = "doc"): ReactNode {
+  if (typeof node === "string") {
+    const parts: ReactNode[] = [];
+    let last = 0;
+    let index = 0;
+    RETRIEVAL_DOC_NAME_PATTERN.lastIndex = 0;
+    for (const match of node.matchAll(RETRIEVAL_DOC_NAME_PATTERN)) {
+      const start = match.index ?? 0;
+      const full = match[0];
+      if (start > last) parts.push(node.slice(last, start));
+      parts.push(
+        <span key={`${keyPrefix}-${index}`} className="italic text-sky-600/80">
+          {full}
+        </span>
+      );
+      last = start + full.length;
+      index += 1;
+    }
+    if (last === 0) return node;
+    if (last < node.length) parts.push(node.slice(last));
+    return parts;
+  }
+  if (Array.isArray(node)) {
+    return node.map((child, idx) => highlightRetrievalDocNames(child, `${keyPrefix}-${idx}`));
+  }
+  return node;
+}
+
+/**
+ * Post-process LLM output to normalize citation placement (N-M format):
+ * 1. Move citations before punctuation: "内容。[1-1]" → "内容[1-1]。"
+ * 2. Strip citations inside markdown table rows
+ * 3. If sources exist but no citations found, append a summary line
+ */
+const normalizeCitations = (text: string, sources: SourceInfo[]): string => {
+  if (!text) return text;
+
+  let result = text;
+  const validLabels = new Set(sources.map((s) => s.citation_label).filter((v): v is string => Boolean(v)));
+
+  result = result.replace(
+    /([。！？.!?])(\s*(?:\[\d{1,2}-\d{1,2}\])+)/g,
+    (_, punct, cites) => `${cites.trim()}${punct}`
+  );
+
+  result = result.replace(
+    /^(\|.+)$/gm,
+    (line) => line.replace(/\[\d{1,2}-\d{1,2}\]/g, "")
+  );
+
+  result = sanitizeAnswerCitations({ text: result, validLabels });
+
+  return result;
+};
 
 const buildHistory = (messages: Message[]) =>
   messages
@@ -60,23 +131,21 @@ const buildFallbackAnswer = (question: string, element: CityElement | null, deta
   return `当前接口不可用，已启用本地简答。您可以提问资料内容、地块指标关系与管控审查结论。${suffix}`;
 };
 
-const injectCitationAnchors = (content: string, sourceCount: number) => {
-  if (!content || sourceCount <= 0) return content;
-  return content.replace(CITATION_PATTERN, (raw, value) => {
-    const index = Number.parseInt(value, 10);
-    if (Number.isNaN(index) || index < 1 || index > sourceCount) {
-      return raw;
-    }
-    return `[${index}](#source-${index})`;
-  });
+/** Build a map from citation_label to source array index */
+const buildLabelIndexMap = (sources: SourceInfo[] | undefined): Map<string, number> => {
+  const map = new Map<string, number>();
+  if (!sources) return map;
+  for (let i = 0; i < sources.length; i++) {
+    const label = sources[i].citation_label;
+    if (label) map.set(label, i);
+  }
+  return map;
 };
 
-const parseCitationIndex = (href?: string): number | null => {
+const parseCitationLabel = (href?: string): string | null => {
   if (!href) return null;
-  const match = href.match(/^#source-(\d+)$/);
-  if (!match) return null;
-  const index = Number.parseInt(match[1], 10);
-  return Number.isNaN(index) ? null : index;
+  const match = href.match(/^#source-(\d{1,2}-\d{1,2})$/);
+  return match ? match[1] : null;
 };
 
 /** Resolve image src: convert relative /rag/... paths to absolute URLs */
@@ -85,7 +154,9 @@ const resolveImageSrc = (src: string): string => {
   if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("data:")) {
     return src;
   }
-  const base = normalizeApiBase(API_BASE);
+  const base = src.startsWith("/rag/")
+    ? normalizeApiBase(QA_API_BASE)
+    : normalizeApiBase(API_BASE);
   return src.startsWith("/") ? `${base}${src}` : `${base}/${src}`;
 };
 
@@ -107,78 +178,6 @@ const extractRecommendedQuestions = (content: string): {
   return { cleanContent, questions };
 };
 
-const getReferencedCitationCount = (content: string, sourceCount: number) => {
-  if (!content || sourceCount <= 0) return 0;
-
-  const matches = content.match(/\[(\d{1,2})\]/g) || [];
-  const unique = new Set<number>();
-  for (const token of matches) {
-    const raw = token.slice(1, -1);
-    const idx = Number.parseInt(raw, 10);
-    if (!Number.isNaN(idx) && idx >= 1 && idx <= sourceCount) {
-      unique.add(idx);
-    }
-  }
-
-  return unique.size;
-};
-
-const normalizeMarkdownLists = (content: string) => {
-  const lines = content.split(/\r?\n/);
-  let activeIndent = "";
-  let orderedCounter = 0;
-
-  return lines
-    .map((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        return line;
-      }
-
-      const sectionBreak =
-        /^#{1,6}\s+/.test(trimmed) ||
-        /^[-*_]{3,}$/.test(trimmed) ||
-        /^\*\*.+\*\*$/.test(trimmed);
-      if (sectionBreak) {
-        orderedCounter = 0;
-        activeIndent = "";
-      }
-
-      const orderedMatch = line.match(/^(\s*)\d+\.\s+(.*)$/);
-      if (orderedMatch) {
-        const indent = orderedMatch[1] ?? "";
-        const body = orderedMatch[2] ?? "";
-
-        if (indent === activeIndent && orderedCounter > 0) {
-          orderedCounter += 1;
-        } else {
-          orderedCounter = 1;
-          activeIndent = indent;
-        }
-
-        return `${indent}${orderedCounter}. ${body}`;
-      }
-
-      const bulletMatch = line.match(/^(\s*)[-*+]\s+/);
-      if (bulletMatch) {
-        const bulletIndent = bulletMatch[1] ?? "";
-        if (orderedCounter > 0 && bulletIndent.length <= activeIndent.length) {
-          const normalized = line.trimStart();
-          return `${activeIndent}  ${normalized}`;
-        }
-
-        return line;
-      }
-
-      if (/^\S/.test(line)) {
-        orderedCounter = 0;
-        activeIndent = "";
-      }
-
-      return line;
-    })
-    .join("\n");
-};
 
 const getMessageTitle = (content: string) => {
   const compact = content.replace(/\s+/g, " ").trim();
@@ -212,11 +211,17 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
   const [isTyping, setIsTyping] = useState(false);
   const [activeTab, setActiveTab] = useState<MainTab>("chat");
   const [materialsTab, setMaterialsTab] = useState<MaterialsTab>("references");
-  const [activeCitation, setActiveCitation] = useState<number | null>(null);
+  const [activeCitation, setActiveCitation] = useState<string | null>(null);
   const [activeSourceMessageId, setActiveSourceMessageId] = useState<string | null>(null);
+  const [activeGraphMessageId, setActiveGraphMessageId] = useState<string | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [pdfSrc, setPdfSrc] = useState<string | null>(null);
+  const [pdfSearchKeyword, setPdfSearchKeyword] = useState<string | undefined>(undefined);
+  const [sourcePreviewCache, setSourcePreviewCache] = useState<Record<string, SourcePreview[]>>({});
+  const sourcePrefetchingRef = useRef<Set<string>>(new Set());
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollTopBeforePdfRef = useRef<number | null>(null);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0],
@@ -249,18 +254,70 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
     [activeSourceMessage, messages]
   );
 
+  const graphHostMessages = useMemo(
+    () =>
+      messages.filter(
+        (message) =>
+          message.role === "assistant" &&
+          Boolean(message.subgraph && message.subgraph.nodes && message.subgraph.nodes.length > 0)
+      ),
+    [messages]
+  );
+
+  const latestGraphMessage = graphHostMessages[graphHostMessages.length - 1] ?? null;
+
+  const activeGraphMessage = useMemo(() => {
+    if (!graphHostMessages.length) return null;
+    const matched = graphHostMessages.find((message) => message.id === activeGraphMessageId);
+    return matched ?? latestGraphMessage;
+  }, [activeGraphMessageId, graphHostMessages, latestGraphMessage]);
+
+  const activeGraphQuestion = useMemo(
+    () => (activeGraphMessage ? findPrecedingQuestion(messages, activeGraphMessage.id) : undefined),
+    [activeGraphMessage, messages]
+  );
+
+  const userScrolledUpRef = useRef(false);
+
   const scrollToBottom = useCallback(() => {
-    if (scrollContainerRef.current) {
+    if (scrollContainerRef.current && !userScrolledUpRef.current) {
       scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
     }
+  }, []);
+
+  // Detect if user has scrolled away from the bottom
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    userScrolledUpRef.current = distanceFromBottom > 80;
   }, []);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
+  // When a new user message is sent, reset scroll lock so we follow the response
   useEffect(() => {
-    scrollToBottom();
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role === "user") {
+      userScrolledUpRef.current = false;
+    }
+  }, [messages.length]);
+
+  // Track previous messages length & isTyping to avoid scrolling on tab switches
+  const prevMessagesLenRef = useRef(messages.length);
+  const prevIsTypingRef = useRef(isTyping);
+
+  useEffect(() => {
+    const messagesChanged = prevMessagesLenRef.current !== messages.length;
+    const typingChanged = prevIsTypingRef.current !== isTyping;
+    prevMessagesLenRef.current = messages.length;
+    prevIsTypingRef.current = isTyping;
+
+    if (messagesChanged || typingChanged) {
+      scrollToBottom();
+    }
   }, [messages, isTyping, scrollToBottom]);
 
   useEffect(() => {
@@ -301,6 +358,58 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
     setActiveCitation(null);
   }, [activeSourceMessageId]);
 
+  useEffect(() => {
+    if (!graphHostMessages.length) {
+      setActiveGraphMessageId(null);
+      return;
+    }
+
+    if (
+      !activeGraphMessageId ||
+      !graphHostMessages.some((message) => message.id === activeGraphMessageId)
+    ) {
+      setActiveGraphMessageId(graphHostMessages[graphHostMessages.length - 1].id);
+    }
+  }, [activeGraphMessageId, graphHostMessages]);
+
+  useEffect(() => {
+    const sourcesToPrefetch = sourceHostMessages.flatMap((msg) => msg.sources ?? []);
+    if (sourcesToPrefetch.length === 0) return;
+
+    const pending = sourcesToPrefetch.filter((source) => {
+      const key = getSourcePreviewCacheKey(source);
+      if (!key) return false;
+      if (sourcePreviewCache[key]?.length) return false;
+      if (sourcePrefetchingRef.current.has(key)) return false;
+      return true;
+    });
+
+    if (pending.length === 0) return;
+
+    pending.forEach((source) => {
+      const key = getSourcePreviewCacheKey(source);
+      if (key) sourcePrefetchingRef.current.add(key);
+    });
+
+    void prefetchSourcePreviews({
+      sources: pending,
+      query: activeSourceQuestion,
+      qaApiBase: QA_API_BASE,
+      onPreview: (chunkKey, preview) => {
+        setSourcePreviewCache((prev) => {
+          if (prev[chunkKey]?.length) return prev;
+          return { ...prev, [chunkKey]: [preview as SourcePreview] };
+        });
+        sourcePrefetchingRef.current.delete(chunkKey);
+      },
+    }).finally(() => {
+      pending.forEach((source) => {
+        const key = getSourcePreviewCacheKey(source);
+        if (key) sourcePrefetchingRef.current.delete(key);
+      });
+    });
+  }, [activeSourceQuestion, sourceHostMessages, sourcePreviewCache]);
+
   const handleSend = async (directQuestion?: string) => {
     const question = directQuestion?.trim() || input.trim();
     if (!question || isTyping) return;
@@ -321,7 +430,11 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
       id: assistantId,
       role: "assistant",
       content: "",
+      pendingContent: "",
       thinking: "",
+      thinkingDone: undefined,
+      statusStage: "understanding",
+      statusMessage: "正在理解你的问题...",
       sources: [],
       isStreaming: true,
       timestamp: new Date(),
@@ -335,58 +448,126 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
         history,
         {
           onSources: (sources) => {
-            updateMessage(assistantId, (message) => ({ ...message, sources }));
-            if (sources.length > 0) {
+            const normalizedSources = normalizeCitationSources(sources);
+            updateMessage(assistantId, (message) => ({
+              ...message,
+              // Keep retrieval sources stable (do not drop uncited docs). We still compute
+              // "referenced" counts and citation badges from the answer text.
+              sources: mergeStreamingSources(message.sources, normalizedSources),
+            }));
+            if (normalizedSources.length > 0) {
               setActiveSourceMessageId(assistantId);
             }
           },
           onRetrievalStats: (stats) => {
             updateMessage(assistantId, (message) => ({ ...message, retrievalStats: stats }));
           },
-          onGraph: () => {
-            // qa-panel does not display inline subgraph; handled by qa-view only
+          onGraph: (subgraph) => {
+            updateMessage(assistantId, (message) => ({ ...message, subgraph }));
+            if (subgraph?.nodes?.length) {
+              setActiveGraphMessageId(assistantId);
+            }
           },
-          onStatus: () => undefined,
+          onStatus: (stage, message) => {
+            updateMessage(assistantId, (msg) => ({ ...msg, statusStage: stage, statusMessage: message }));
+          },
           onThinking: (token) => {
+            updateMessage(assistantId, (message) => {
+              // If the backend emits late thinking tokens after we've already marked thinkingDone,
+              // treat them as noise and keep the answer visible (avoids flicker).
+              if (message.thinkingDone) {
+                return {
+                  ...message,
+                  thinking: (message.thinking || "") + token,
+                };
+              }
+
+              // Once we start receiving "thinking", hide any already streamed answer text until thinking completes.
+              const moved = message.content || "";
+              return {
+                ...message,
+                content: moved ? "" : message.content,
+                pendingContent: (message.pendingContent || "") + moved,
+                thinking: (message.thinking || "") + token,
+                thinkingDone: false,
+              };
+            });
+          },
+          onThinkingDone: () => {
             updateMessage(assistantId, (message) => ({
               ...message,
-              thinking: (message.thinking || "") + token,
+              thinkingDone: true,
+              content: message.content + (message.pendingContent || ""),
+              pendingContent: "",
             }));
           },
           onAnswer: (token) => {
+            updateMessage(assistantId, (message) => {
+              const hasThinking = Boolean(message.thinking?.trim());
+              if (hasThinking && !message.thinkingDone) {
+                return {
+                  ...message,
+                  pendingContent: (message.pendingContent || "") + token,
+                };
+              }
+              return {
+                ...message,
+                content: message.content + token,
+              };
+            });
+          },
+          onAnswerReplaced: (fullAnswer, replacedSources) => {
             updateMessage(assistantId, (message) => ({
               ...message,
-              content: message.content + token,
+              content: fullAnswer,
+              pendingContent: "",
+              thinkingDone: true,
+              ...(replacedSources
+                ? {
+                    sources: mergeStreamingSources(
+                      message.sources,
+                      normalizeCitationSources(replacedSources)
+                    ),
+                  }
+                : {}),
             }));
           },
           onDone: () => {
             updateMessage(assistantId, (message) => ({
               ...message,
               isStreaming: false,
+              statusStage: undefined,
               statusMessage: undefined,
-              content: message.content.trim() ? message.content : "未返回答案。",
+              thinkingDone: true,
+              content: (message.content + (message.pendingContent || "")).trim()
+                ? (message.content + (message.pendingContent || "")).trim()
+                : "未返回答案。",
+              pendingContent: "",
             }));
           },
           onError: (detail) => {
             updateMessage(assistantId, (message) => ({
               ...message,
               isStreaming: false,
+              statusStage: undefined,
               statusMessage: undefined,
               content: message.content || `请求失败：${detail}`,
+              pendingContent: "",
             }));
           },
         }
       );
     } catch {
-      try {
-        const response = await sendQuestion(question, history);
+            try {
+              const response = await sendQuestion(question, history);
+        const normalizedSources = normalizeCitationSources(response.sources || []);
         updateMessage(assistantId, (message) => ({
           ...message,
           content: (response.answer || "未返回答案。").trim(),
-          sources: response.sources || [],
+          sources: normalizedSources,
           isStreaming: false,
         }));
-        if ((response.sources || []).length > 0) {
+        if (normalizedSources.length > 0) {
           setActiveSourceMessageId(assistantId);
         }
       } catch (fallbackError) {
@@ -404,12 +585,48 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
     }
   };
 
-  const handleCitationSelect = (messageId: string, citation: number) => {
+  const handleCitationSelect = (messageId: string, citation: string, alignedSources?: SourceInfo[]) => {
     setActiveSourceMessageId(messageId);
     setActiveCitation(citation);
+
+    const sourcesForLookup = alignedSources ?? messages.find((m) => m.id === messageId)?.sources ?? [];
+    const labelMap = buildLabelIndexMap(sourcesForLookup);
+    const idx = labelMap.get(citation);
+    const src = idx !== undefined ? sourcesForLookup[idx] : undefined;
+    if (src) {
+      void resolvePdfUrlForSource(src).then((url) => {
+        if (url) {
+          scrollTopBeforePdfRef.current = scrollContainerRef.current?.scrollTop ?? null;
+          setPdfSrc(url);
+          setPdfSearchKeyword(resolvePdfSearchKeyword(src));
+          return;
+        }
+
+        // If we can't open a PDF (e.g., graph source), fall back to the sources panel.
+        setMaterialsTab("references");
+        setActiveTab("materials");
+      });
+      return;
+    }
+
     setMaterialsTab("references");
     setActiveTab("materials");
   };
+
+  const handleClosePdf = useCallback(() => {
+    setPdfSrc(null);
+    setPdfSearchKeyword(undefined);
+    const saved = scrollTopBeforePdfRef.current;
+    scrollTopBeforePdfRef.current = null;
+
+    if (saved === null) return;
+    // Restore on the next frame after the overlay unmounts/reflow completes.
+    requestAnimationFrame(() => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = saved;
+      }
+    });
+  }, []);
 
 
   return (
@@ -457,16 +674,18 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
             </TabsTrigger>
             <TabsTrigger value="materials" className="flex items-center gap-2">
               <BookOpenText className="h-4 w-4" />
-              资料卡片
+              参考资料
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="chat" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div ref={scrollContainerRef} className="qa-scrollbar h-full space-y-3 overflow-y-scroll px-4 py-4">
+          <TabsContent value="chat" forceMount className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+            <div ref={scrollContainerRef} onScroll={handleScroll} className="qa-scrollbar h-full space-y-3 overflow-y-scroll px-4 py-4">
               {messages.map((message) => {
                 const isAssistant = message.role === "assistant";
-                const sourceCount = message.sources?.length ?? 0;
-                const referencedCount = getReferencedCitationCount(message.content, sourceCount);
+                const precedingQuestion = isAssistant ? findPrecedingQuestion(messages, message.id) : undefined;
+              const sourcesNormalized = normalizeCitationSources(message.sources ?? []);
+              const sourceCount = sourcesNormalized.length;
+              const referencedCount = countReferencedCitations(message.content, sourcesNormalized);
                 const isSourceMessage =
                   isAssistant &&
                   sourceCount > 0 &&
@@ -484,10 +703,12 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
                           : "bg-muted text-foreground"
                       )}
                     >
-                      {isAssistant ? (
+                    {isAssistant ? (
                         <AssistantMessageBlock
                           message={message}
-                          onCitationSelect={(citation) => handleCitationSelect(message.id, citation)}
+                          sources={sourcesNormalized}
+                          precedingQuestion={precedingQuestion}
+                          onCitationSelect={(citation) => handleCitationSelect(message.id, citation, sourcesNormalized)}
                           onFillInput={setInput}
                           onImageClick={setLightboxSrc}
                         />
@@ -519,7 +740,7 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
                             }}
                           >
                             <Link2 className="h-3 w-3" />
-                            引用 {sourceCount}
+                            引用 {referencedCount}
                           </button>
                         )}
                       </div>
@@ -575,7 +796,7 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
             </div>
           </TabsContent>
 
-          <TabsContent value="materials" className="qa-scrollbar m-0 flex-1 min-h-0 overflow-y-scroll p-4">
+          <TabsContent value="materials" className="qa-scrollbar m-0 flex-1 min-h-0 overflow-y-auto p-4">
             <Tabs
               value={materialsTab}
               onValueChange={(value) => setMaterialsTab(value as MaterialsTab)}
@@ -620,11 +841,13 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
 
                     {activeSourceMessage && (
                       <QASources
-                        sources={activeSourceMessage.sources || []}
+                        sources={normalizeCitationSources(activeSourceMessage.sources || [])}
                         query={activeSourceQuestion}
                         activeCitation={activeCitation}
                         onCitationHover={setActiveCitation}
                         onCitationSelect={setActiveCitation}
+                        previewCache={sourcePreviewCache}
+                        setPreviewCache={setSourcePreviewCache}
                         layout="inline"
                       />
                     )}
@@ -633,7 +856,48 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
               </TabsContent>
 
               <TabsContent value="graph" className="m-0">
-                <KnowledgeGraph subgraph={null} />
+                {graphHostMessages.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border/70 bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
+                    当前还没有可展示的图谱结果。您可以先提问一次，系统会把本次命中的节点与关系展示在这里。
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">关联回答</p>
+                      <Select
+                        value={
+                          activeGraphMessage?.id ??
+                          graphHostMessages[graphHostMessages.length - 1].id
+                        }
+                        onValueChange={(value) => setActiveGraphMessageId(value)}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="选择回答" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {graphHostMessages.map((message) => (
+                            <SelectItem key={message.id} value={message.id}>
+                              {getMessageTitle(message.content)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {activeGraphQuestion && (
+                        <p className="text-[11px] text-muted-foreground line-clamp-2">
+                          问题：{activeGraphQuestion}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-border overflow-hidden">
+                      <KnowledgeGraph
+                        subgraph={activeGraphMessage?.subgraph ?? null}
+                        isStreaming={Boolean(activeGraphMessage?.isStreaming)}
+                        height={320}
+                      />
+                    </div>
+                  </div>
+                )}
               </TabsContent>
             </Tabs>
           </TabsContent>
@@ -654,55 +918,138 @@ export function QAPanel({ selectedElement }: QAPanelProps) {
           />
         </div>
       )}
+
+      {pdfSrc && <PdfLightbox src={pdfSrc} onClose={handleClosePdf} searchKeyword={pdfSearchKeyword} />}
     </div>
   );
 }
 
 function AssistantMessageBlock({
   message,
+  sources,
+  precedingQuestion,
   onCitationSelect,
   onFillInput,
   onImageClick,
 }: {
   message: Message;
-  onCitationSelect: (citation: number) => void;
+  sources: SourceInfo[];
+  precedingQuestion?: string;
+  onCitationSelect: (citation: string) => void;
   onFillInput?: (value: string) => void;
   onImageClick?: (src: string) => void;
 }) {
-  const sourceCount = message.sources?.length ?? 0;
+  const labelMap = useMemo(() => buildLabelIndexMap(sources), [sources]);
+  const markdownRef = useRef<HTMLDivElement>(null);
+
+  // Detect overflowing KaTeX display formulas and add scroll-hint class.
+  useEffect(() => {
+    const el = markdownRef.current;
+    if (!el) return;
+    const displays = el.querySelectorAll<HTMLElement>(".katex-display");
+    displays.forEach((d) => {
+      if (d.scrollWidth > d.clientWidth + 2) {
+        d.classList.add("katex-overflow");
+      } else {
+        d.classList.remove("katex-overflow");
+      }
+    });
+  }, [message.content, message.isStreaming]);
 
   const { cleanContent, questions: recommendedQuestions } = useMemo(
     () => (message.isStreaming ? { cleanContent: message.content, questions: [] } : extractRecommendedQuestions(message.content)),
     [message.content, message.isStreaming]
   );
+  const thinkingText = message.thinking?.trim() ?? "";
 
   const answerContent = useMemo(() => {
-    const baseContent = injectCitationAnchors(
-      normalizeMarkdownLists(cleanContent),
-      sourceCount
-    );
-    return baseContent;
-  }, [cleanContent, sourceCount]);
-
-  const thinkingText = message.thinking?.trim() ?? "";
+    const withTables = normalizeAnswerTables(cleanContent);
+    const withArtifacts = normalizeAnswerMarkdownArtifacts(withTables, {
+      streaming: message.isStreaming,
+    });
+    const normalized = message.isStreaming ? withArtifacts : normalizeCitations(withArtifacts, sources);
+    const baseContent = stripInlineCitationLabels(normalized);
+    const withImages = injectSourceImages(baseContent, sources, precedingQuestion);
+    if (message.isStreaming) {
+      return collapseFigureMentions(withImages);
+    }
+    const withTablesAndImages = injectSourceTables(withImages, sources);
+    return collapseFigureMentions(withTablesAndImages);
+  }, [cleanContent, sources, message.isStreaming, precedingQuestion]);
 
   return (
     <div className="space-y-2">
       {(message.isStreaming || thinkingText) && (
-        <ThinkingProcess thinking={thinkingText} isStreaming={Boolean(message.isStreaming)} statusMessage={message.statusMessage} />
+        <ThinkingProcess
+          thinking={thinkingText}
+          isStreaming={Boolean(message.isStreaming)}
+          thinkingDone={Boolean(message.thinkingDone)}
+          statusStage={message.statusStage}
+          retrievalStats={message.retrievalStats}
+          statusMessage={message.statusMessage}
+        />
       )}
 
       {message.content ? (
-        <div className="qa-markdown prose prose-sm max-w-none break-words [overflow-wrap:anywhere] dark:prose-invert">
+        <div ref={markdownRef} className="qa-markdown prose prose-sm max-w-none break-words [overflow-wrap:anywhere] dark:prose-invert">
           <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={QA_REMARK_PLUGINS}
+            rehypePlugins={[rehypeKatex]}
             components={{
-              p: ({ children }) => <p className="mb-2 break-words [overflow-wrap:anywhere] last:mb-0">{children}</p>,
+              h2: ({ children }) => (
+                <h2 className="qa-heading-1 mt-6 mb-2.5 text-lg font-bold border-l-4 border-primary pl-2.5">
+                  {children}
+                </h2>
+              ),
+              h3: ({ children }) => (
+                <h3 className="qa-heading-2 mt-5 mb-2 text-base font-semibold text-primary/85">
+                  {children}
+                </h3>
+              ),
+              h4: ({ children }) => (
+                <h4 className="qa-heading-3 mt-3.5 mb-1.5 text-[13px] font-medium text-foreground/75">
+                  {children}
+                </h4>
+              ),
+              p: ({ children }) => {
+                const isPlainText =
+                  typeof children === "string" ||
+                  (Array.isArray(children) && children.every((c) => typeof c === "string"));
+                const plain = isPlainText
+                  ? String(Array.isArray(children) ? children.join("") : children).trim()
+                  : null;
+
+                if (plain && (plain.startsWith("FIGCAPTION ") || /^图\d+[：:.]/.test(plain))) {
+                  const shown = plain.replace(/^FIGCAPTION\s+/u, "");
+                  return (
+                    <p className="mt-1 mb-3 text-[11px] leading-snug text-muted-foreground/70 text-center italic">
+                      {shown}
+                    </p>
+                  );
+                }
+                return <p className="mb-2 break-words [overflow-wrap:anywhere] last:mb-0">{children}</p>;
+              },
               ul: ({ children }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
               ol: ({ children }) => <ol className="mb-2 list-decimal pl-5">{children}</ol>,
-              li: ({ children }) => <li className="mb-1 break-words [overflow-wrap:anywhere] last:mb-0">{children}</li>,
+              li: ({ children }) => {
+                const plainText =
+                  typeof children === "string"
+                    ? children
+                    : Array.isArray(children)
+                      ? children.filter((c) => typeof c === "string").join("").trim()
+                      : "";
+                const isRetrievalReason = plainText.startsWith("资料调用理由（");
+                const isRetrievalList = plainText.startsWith("检索资料清单");
+                const className = isRetrievalReason
+                  ? "mb-1 break-words [overflow-wrap:anywhere] last:mb-0"
+                  : "mb-1 break-words [overflow-wrap:anywhere] last:mb-0";
+                const content = (isRetrievalReason || isRetrievalList)
+                  ? highlightRetrievalDocNames(children, "retrieval-doc")
+                  : children;
+                return <li className={className}>{content}</li>;
+              },
               strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-              em: ({ children }) => <em className="italic">{children}</em>,
+              em: ({ children }) => <em className="italic text-sky-700/80">{children}</em>,
               code: ({ children, className }) => {
                 const isBlock = className?.includes("language-");
                 return isBlock ? (
@@ -715,39 +1062,43 @@ function AssistantMessageBlock({
               },
               pre: ({ children }) => <pre className="mb-2 overflow-x-auto">{children}</pre>,
               blockquote: ({ children }) => (
-                <blockquote className="border-l-2 border-border pl-3 text-muted-foreground">
+                <blockquote className="rounded-md border border-border/55 bg-background/85 px-3 py-2 text-xs leading-relaxed text-muted-foreground shadow-sm">
                   {children}
                 </blockquote>
               ),
               table: ({ children }) => (
-                <div className="mb-2 overflow-x-auto">
+                <div className="qa-table-wrap mb-2 overflow-x-auto rounded-md border border-border/80 bg-white/90 dark:bg-background/75">
                   <table className="min-w-full border-collapse text-xs">{children}</table>
                 </div>
               ),
-              thead: ({ children }) => <thead className="bg-muted">{children}</thead>,
+              thead: ({ children }) => <thead className="bg-white/80 dark:bg-muted/45">{children}</thead>,
               th: ({ children }) => (
-                <th className="border border-border px-2 py-1 text-left font-semibold">{children}</th>
+                <th className="border border-border bg-white/80 px-2 py-1 text-left font-semibold dark:bg-muted/45">{children}</th>
               ),
-              td: ({ children }) => <td className="border border-border px-2 py-1 align-top">{children}</td>,
+              td: ({ children }) => <td className="border border-border bg-white/55 px-2 py-1 align-top dark:bg-transparent">{children}</td>,
               hr: () => <hr className="my-2 border-border" />,
               img: ({ src, alt }) => {
                 const resolved = resolveImageSrc(typeof src === "string" ? src : "");
-                return (
-                  <img
-                    src={resolved}
-                    alt={alt ?? "参考图片"}
-                    className="my-2 max-h-60 cursor-zoom-in rounded border border-border object-contain transition-opacity hover:opacity-80"
-                    loading="lazy"
-                    onClick={() => onImageClick?.(resolved)}
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                  />
-                );
-              },
+                  return (
+                    <img
+                      src={resolved}
+                      alt={alt ?? "参考图片"}
+                      className="my-2 max-h-60 cursor-zoom-in rounded border border-border object-contain transition-opacity hover:opacity-80"
+                      loading="lazy"
+                      onClick={() => onImageClick?.(resolved)}
+                      onError={(e) => {
+                        const img = e.target as HTMLImageElement;
+                        img.alt = "";
+                        img.title = "参考图片暂不可用";
+                        // Hide broken-image icon and fallback alt text to keep layout clean.
+                        img.style.display = "none";
+                      }}
+                    />
+                  );
+                },
               a: ({ href, children }) => {
-                const citationIndex = parseCitationIndex(href);
-                if (!citationIndex) {
+                const citationLabel = parseCitationLabel(href);
+                if (!citationLabel) {
                   return (
                     <a href={href} target="_blank" rel="noreferrer" className="text-primary underline">
                       {children}
@@ -755,10 +1106,12 @@ function AssistantMessageBlock({
                   );
                 }
 
+                const sourceIdx = labelMap.get(citationLabel);
+                const source = sourceIdx !== undefined ? sources[sourceIdx] : undefined;
                 return (
                   <CitationBadge
-                    citation={citationIndex}
-                    source={message.sources?.[citationIndex - 1]}
+                    label={citationLabel}
+                    source={source}
                     onClick={onCitationSelect}
                   >
                     {children}
@@ -795,22 +1148,21 @@ function AssistantMessageBlock({
 }
 
 function CitationBadge({
-  citation,
+  label,
   source,
   onClick,
   children,
 }: {
-  citation: number;
+  label: string;
   source?: SourceInfo;
-  onClick: (citation: number) => void;
+  onClick: (citation: string) => void;
   children: ReactNode;
 }) {
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
-    onClick(citation);
-    // Flash the corresponding source card in the materials tab
+    onClick(label);
     setTimeout(() => {
-      const target = document.getElementById(`source-${citation}`);
+      const target = document.getElementById(`source-${label}`);
       if (target) {
         target.classList.add("qa-source-flash");
         setTimeout(() => target.classList.remove("qa-source-flash"), 1200);
@@ -819,17 +1171,19 @@ function CitationBadge({
   };
 
   const titleText = source?.name
-    ? `${source.name}${source.section ? " - " + source.section : ""}`
-    : `引用 [${citation}]`;
+    ? source.name
+    : `引用 [${label}]`;
+
+  const displayLabel = label;
 
   return (
     <a
-      href={`#source-${citation}`}
+      href={`#source-${label}`}
       title={titleText}
-      className="inline-flex min-h-5 items-center rounded bg-primary/10 px-1 text-[10px] font-semibold text-primary no-underline transition-colors hover:bg-primary/20"
+      className="inline-flex min-h-5 items-center gap-0.5 rounded-full border border-red-400 bg-red-50 px-1.5 text-[10px] font-medium text-red-600 no-underline transition-colors hover:bg-red-100 dark:border-red-500/50 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
       onClick={handleClick}
     >
-      {children}
+      {displayLabel}
     </a>
   );
 }

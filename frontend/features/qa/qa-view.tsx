@@ -5,6 +5,7 @@ import { QAShell } from "@/components/qa-new";
 import { useQAViewStore } from "@/lib/stores/qa-store";
 import { sendQuestion, sendQuestionStream } from "./api";
 import type { ChatHistoryMessage, ChatMessage } from "./types";
+import { mergeStreamingSources } from "@/lib/stream-source-utils";
 
 const quickQuestions = [
   "高强度片区的核心管控指标有哪些",
@@ -61,6 +62,8 @@ export function QAView() {
       thinking: "",
       sources: [],
       isStreaming: true,
+      statusStage: "understanding",
+      statusMessage: "正在理解你的问题...",
     });
     const assistantId = assistantMsg.id;
     appendMessage(assistantMsg);
@@ -68,7 +71,10 @@ export function QAView() {
     try {
       await sendQuestionStream(question, history, {
         onSources: (sources) => {
-          updateMessage(assistantId, (msg) => ({ ...msg, sources }));
+          updateMessage(assistantId, (msg) => ({
+            ...msg,
+            sources: mergeStreamingSources(msg.sources, sources),
+          }));
         },
         onRetrievalStats: (stats) => {
           updateMessage(assistantId, (msg) => ({ ...msg, retrievalStats: stats }));
@@ -76,11 +82,20 @@ export function QAView() {
         onGraph: (subgraph) => {
           updateMessage(assistantId, (msg) => ({ ...msg, subgraph }));
         },
-        onStatus: () => undefined,
+        onStatus: (stage, message) => {
+          updateMessage(assistantId, (msg) => ({ ...msg, statusStage: stage, statusMessage: message }));
+        },
         onThinking: (token) => {
           updateMessage(assistantId, (msg) => ({
             ...msg,
             thinking: (msg.thinking || "") + token,
+            thinkingDone: false,
+          }));
+        },
+        onThinkingDone: () => {
+          updateMessage(assistantId, (msg) => ({
+            ...msg,
+            thinkingDone: true,
           }));
         },
         onAnswer: (token) => {
@@ -89,10 +104,20 @@ export function QAView() {
             content: msg.content + token,
           }));
         },
+        onAnswerReplaced: (fullAnswer, replacedSources) => {
+          updateMessage(assistantId, (msg) => ({
+            ...msg,
+            content: fullAnswer,
+            ...(replacedSources
+              ? { sources: mergeStreamingSources(msg.sources, replacedSources) }
+              : {}),
+          }));
+        },
         onDone: () => {
           updateMessage(assistantId, (msg) => ({
             ...msg,
             isStreaming: false,
+            statusStage: undefined,
             statusMessage: undefined,
           }));
         },
@@ -101,6 +126,7 @@ export function QAView() {
             ...msg,
             content: msg.content || `Error: ${detail}`,
             isStreaming: false,
+            statusStage: undefined,
             statusMessage: undefined,
           }));
         },

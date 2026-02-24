@@ -5,6 +5,7 @@ Graph builder for constructing knowledge graph from documents.
 from typing import List, Dict, Any, Optional
 import logging
 
+from ...core.database.neo4j_client import _validate_label
 from ...core.database.mongodb_client import MongoDBClient
 from ..graph_store import GraphStoreService
 
@@ -33,7 +34,9 @@ class GraphBuilder:
         self,
         doc_id: str,
         use_llm: bool = True,
-        max_chunks: Optional[int] = None
+        max_chunks: Optional[int] = None,
+        skip_if_built: bool = False,
+        force_rebuild: bool = False,
     ) -> Dict[str, Any]:
         """
         Build graph from a single document.
@@ -47,6 +50,21 @@ class GraphBuilder:
             Dictionary with build results
         """
         logger.info(f"Building graph for document {doc_id}")
+
+        if skip_if_built and not force_rebuild:
+            try:
+                if self.graph_store.neo4j.is_document_built(doc_id):
+                    logger.info(f"Skipping document {doc_id}: already built")
+                    return {
+                        "doc_id": doc_id,
+                        "entities_count": 0,
+                        "relationships_count": 0,
+                        "status": "skipped",
+                        "reason": "already built",
+                    }
+            except Exception as e:
+                # If tracking isn't available, fall through to a normal build.
+                logger.warning(f"Failed to check document status for {doc_id}: {e}")
 
         # Retrieve document metadata for file_name and file_path
         doc_meta = self.mongodb.find_by_query(
@@ -90,7 +108,9 @@ class GraphBuilder:
     def build_from_all_documents(
         self,
         use_llm: bool = True,
-        max_docs: Optional[int] = None
+        max_docs: Optional[int] = None,
+        skip_built: bool = False,
+        force_rebuild: bool = False,
     ) -> Dict[str, Any]:
         """
         Build graph from all documents in MongoDB.
@@ -124,10 +144,21 @@ class GraphBuilder:
             file_name = doc.get("file_name", "")
 
             try:
-                result = self.build_from_document(doc_id, use_llm=use_llm)
-                results["success"] += 1
+                result = self.build_from_document(
+                    doc_id,
+                    use_llm=use_llm,
+                    skip_if_built=skip_built,
+                    force_rebuild=force_rebuild,
+                )
                 results["documents"].append(result)
-                logger.info(f"Successfully built graph for {file_name}")
+                if result.get("status") == "success":
+                    results["success"] += 1
+                    logger.info(f"Successfully built graph for {file_name}")
+                elif result.get("status") == "skipped":
+                    # Not a failure: treated as already processed.
+                    logger.info(f"Skipped graph build for {file_name}")
+                else:
+                    results["failed"] += 1
             except Exception as e:
                 logger.error(f"Failed to build graph for {file_name}: {e}")
                 results["failed"] += 1
@@ -239,6 +270,11 @@ class GraphBuilder:
         # Get counts by entity type
         entity_counts = {}
         for label in stats.get("labels", []):
+            try:
+                _validate_label(label)
+            except ValueError:
+                logger.warning(f"Skipping invalid label in statistics: {label!r}")
+                continue
             cypher = f"MATCH (n:{label}) RETURN count(n) as count"
             result = self.graph_store.neo4j.query(cypher)
             if result:
@@ -248,5 +284,6 @@ class GraphBuilder:
             "total_nodes": stats.get("node_count", 0),
             "total_relationships": stats.get("relationship_count", 0),
             "entity_types": stats.get("labels", []),
-            "entity_counts": entity_counts
+            "entity_counts": entity_counts,
+            "doc_count": stats.get("doc_count", 0),
         }

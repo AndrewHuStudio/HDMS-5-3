@@ -235,7 +235,8 @@ class MilvusClient:
         collection_name: str,
         expr: str,
         output_fields: List[str],
-        limit: int = 16384
+        limit: int = 16384,
+        offset: int = 0
     ) -> List[Dict[str, Any]]:
         """
         Query entities by boolean expression.
@@ -245,6 +246,7 @@ class MilvusClient:
             expr: Milvus boolean expression
             output_fields: Fields to return
             limit: Maximum number of entities to return
+            offset: Number of entities to skip
 
         Returns:
             List of query result dictionaries
@@ -253,7 +255,10 @@ class MilvusClient:
             return []
         collection = Collection(collection_name)
         collection.load()
-        results = collection.query(expr=expr, output_fields=output_fields, limit=limit)
+        results = collection.query(
+            expr=expr, output_fields=output_fields,
+            limit=limit, offset=offset,
+        )
         return list(results or [])
 
     def search(
@@ -345,7 +350,7 @@ class MilvusClient:
 
     @staticmethod
     def _escape_literal(value: str) -> str:
-        escaped = str(value).replace("\\", "\\\\").replace('"', '\"')
+        escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
 
     @classmethod

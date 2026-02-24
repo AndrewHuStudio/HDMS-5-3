@@ -426,29 +426,293 @@ function RoadMarkings() {
   
   return <group>{markings}</group>;
 }
+// --- 提取的纯计算函数（原先在 useEffect 内部每次重新定义） ---
+
+const computeConvexHull = (points: PlanViewPoint[]) => {
+  if (points.length < 3) {
+    return [];
+  }
+
+  const sorted = [...points].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
+  const cross = (o: PlanViewPoint, a: PlanViewPoint, b: PlanViewPoint) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+  const lower: PlanViewPoint[] = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+
+  const upper: PlanViewPoint[] = [];
+  for (let i = sorted.length - 1; i >= 0; i -= 1) {
+    const p = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+};
+
+const computeFootprint = (mesh: THREE.Mesh, maxSamples: number) => {
+  const position = mesh.geometry.getAttribute("position");
+  if (!position || position.count < 3) {
+    return null;
+  }
+
+  const step = Math.max(1, Math.floor(position.count / maxSamples));
+  const points: PlanViewPoint[] = [];
+  const vertex = new THREE.Vector3();
+
+  for (let i = 0; i < position.count; i += step) {
+    vertex.fromBufferAttribute(position, i);
+    vertex.applyMatrix4(mesh.matrixWorld);
+    points.push({ x: vertex.x, y: vertex.y });
+  }
+
+  const hull = computeConvexHull(points);
+  return hull.length >= 3 ? hull : null;
+};
+
+const jacobiEigenDecomposition = (matrix: number[][]) => {
+  const eigenVectors = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
+
+  for (let iter = 0; iter < 20; iter += 1) {
+    let p = 0;
+    let q = 1;
+    let max = Math.abs(matrix[p][q]);
+
+    for (let i = 0; i < 3; i += 1) {
+      for (let j = i + 1; j < 3; j += 1) {
+        const value = Math.abs(matrix[i][j]);
+        if (value > max) {
+          max = value;
+          p = i;
+          q = j;
+        }
+      }
+    }
+
+    if (max < 1e-10) {
+      break;
+    }
+
+    const app = matrix[p][p];
+    const aqq = matrix[q][q];
+    const apq = matrix[p][q];
+    const phi = 0.5 * Math.atan2(2 * apq, aqq - app);
+    const c = Math.cos(phi);
+    const s = Math.sin(phi);
+
+    matrix[p][p] = c * c * app - 2 * s * c * apq + s * s * aqq;
+    matrix[q][q] = s * s * app + 2 * s * c * apq + c * c * aqq;
+    matrix[p][q] = 0;
+    matrix[q][p] = 0;
+
+    for (let i = 0; i < 3; i += 1) {
+      if (i === p || i === q) {
+        continue;
+      }
+      const aip = matrix[i][p];
+      const aiq = matrix[i][q];
+      matrix[i][p] = c * aip - s * aiq;
+      matrix[p][i] = matrix[i][p];
+      matrix[i][q] = s * aip + c * aiq;
+      matrix[q][i] = matrix[i][q];
+    }
+
+    for (let i = 0; i < 3; i += 1) {
+      const vip = eigenVectors[i][p];
+      const viq = eigenVectors[i][q];
+      eigenVectors[i][p] = c * vip - s * viq;
+      eigenVectors[i][q] = s * vip + c * viq;
+    }
+  }
+
+  return {
+    values: [matrix[0][0], matrix[1][1], matrix[2][2]],
+    vectors: eigenVectors,
+  };
+};
+
+const getRhinoUpRotation = (scene: THREE.Object3D, targetUpAxis: Axis) => {
+  const rotations: Record<Axis, THREE.Quaternion> = {
+    x: getUpAxisRotation("x", targetUpAxis),
+    y: getUpAxisRotation("y", targetUpAxis),
+    z: getUpAxisRotation("z", targetUpAxis),
+  };
+
+  if ((RHINO_UP_AXIS as string) !== "auto") {
+    return rotations[RHINO_UP_AXIS];
+  }
+
+  const originalQuaternion = scene.quaternion.clone();
+  const originalPosition = scene.position.clone();
+  const originalScale = scene.scale.clone();
+  const size = new THREE.Vector3();
+  const box = new THREE.Box3();
+
+  const upIndex = AXIS_INDEX[targetUpAxis];
+  const horizontalIndices = [0, 1, 2].filter((index) => index !== upIndex);
+
+  const candidates = (["z", "y", "x"] as const).map((axis) => {
+    scene.quaternion.copy(rotations[axis]);
+    scene.updateMatrixWorld(true);
+    box.setFromObject(scene);
+    box.getSize(size);
+    const maxHorizontal = Math.max(
+      size.getComponent(horizontalIndices[0]),
+      size.getComponent(horizontalIndices[1])
+    );
+    const ratio = maxHorizontal > 0 ? size.getComponent(upIndex) / maxHorizontal : Number.POSITIVE_INFINITY;
+
+    return { axis, rotation: rotations[axis], ratio };
+  });
+
+  scene.quaternion.copy(originalQuaternion);
+  scene.position.copy(originalPosition);
+  scene.scale.copy(originalScale);
+  scene.updateMatrixWorld(true);
+
+  candidates.sort((a, b) => a.ratio - b.ratio);
+  const best = candidates[0];
+  const second = candidates[1];
+  const shouldAutoPick =
+    best.ratio < RHINO_AUTO_FLAT_RATIO &&
+    (!second || best.ratio < second.ratio * RHINO_AUTO_RATIO_MARGIN);
+
+  return shouldAutoPick ? best.rotation : rotations.z;
+};
+
+const alignPlanarModelToGround = (scene: THREE.Object3D, targetUpAxis: Axis) => {
+  if (!RHINO_ALIGN_PLANE_TO_GROUND) {
+    return;
+  }
+
+  const mean = new THREE.Vector3();
+  const samplePoints: THREE.Vector3[] = [];
+  let count = 0;
+  const cov = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ];
+
+  const addSample = (point: THREE.Vector3) => {
+    count += 1;
+    const dx = point.x - mean.x;
+    const dy = point.y - mean.y;
+    const dz = point.z - mean.z;
+    mean.x += dx / count;
+    mean.y += dy / count;
+    mean.z += dz / count;
+    const dx2 = point.x - mean.x;
+    const dy2 = point.y - mean.y;
+    const dz2 = point.z - mean.z;
+    cov[0][0] += dx * dx2;
+    cov[0][1] += dx * dy2;
+    cov[0][2] += dx * dz2;
+    cov[1][1] += dy * dy2;
+    cov[1][2] += dy * dz2;
+    cov[2][2] += dz * dz2;
+  };
+
+  scene.updateMatrixWorld(true);
+  scene.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) {
+      return;
+    }
+
+    const geometry = child.geometry;
+    const position = geometry.getAttribute("position");
+    if (!position) {
+      return;
+    }
+
+    const step = Math.max(1, Math.floor(position.count / RHINO_PLANE_SAMPLE_LIMIT));
+    const vertex = new THREE.Vector3();
+
+    for (let i = 0; i < position.count; i += step) {
+      vertex.fromBufferAttribute(position, i);
+      vertex.applyMatrix4(child.matrixWorld);
+      addSample(vertex);
+      samplePoints.push(vertex.clone());
+    }
+  });
+
+  if (count < 3) {
+    return;
+  }
+
+  cov[1][0] = cov[0][1];
+  cov[2][0] = cov[0][2];
+  cov[2][1] = cov[1][2];
+
+  const { values, vectors } = jacobiEigenDecomposition(cov);
+  const maxValue = Math.max(...values);
+  const minValue = Math.min(...values);
+
+  if (maxValue <= 0 || minValue / maxValue > RHINO_PLANE_EIGEN_RATIO) {
+    return;
+  }
+
+  const minIndex = values.indexOf(minValue);
+  const normal = new THREE.Vector3(
+    vectors[0][minIndex],
+    vectors[1][minIndex],
+    vectors[2][minIndex]
+  ).normalize();
+
+  const up = AXIS_VECTORS[targetUpAxis];
+  let bulkScore = 0;
+  const offset = new THREE.Vector3();
+  for (const point of samplePoints) {
+    offset.subVectors(point, mean);
+    bulkScore += offset.dot(normal);
+  }
+  if (bulkScore < 0) {
+    normal.multiplyScalar(-1);
+  } else if (Math.abs(bulkScore) < 1e-6 && normal.dot(up) < 0) {
+    normal.multiplyScalar(-1);
+  }
+
+  const rotation = new THREE.Quaternion().setFromUnitVectors(normal, up);
+  scene.applyQuaternion(rotation);
+};
+
+// 缓存 Tree 组件的 geometry，避免每次渲染重新创建
+const TREE_TRUNK_GEO = new THREE.CylinderGeometry(0.05, 0.08, 0.6, 8);
+const TREE_CROWN_GEO = new THREE.SphereGeometry(0.3, 8, 8);
+const TREE_TRUNK_EDGES = new THREE.EdgesGeometry(TREE_TRUNK_GEO);
+const TREE_CROWN_EDGES = new THREE.EdgesGeometry(TREE_CROWN_GEO);
 
 function Tree({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
       {/* 树干 - 白膜风格 */}
-      <mesh position={[0, 0.3, 0]}>
-        <cylinderGeometry args={[0.05, 0.08, 0.6, 8]} />
+      <mesh position={[0, 0.3, 0]} geometry={TREE_TRUNK_GEO}>
         <meshStandardMaterial color="#e2e8f0" metalness={0} roughness={1} />
       </mesh>
       {/* 树干边线 */}
-      <lineSegments position={[0, 0.3, 0]}>
-        <edgesGeometry args={[new THREE.CylinderGeometry(0.05, 0.08, 0.6, 8)]} />
+      <lineSegments position={[0, 0.3, 0]} geometry={TREE_TRUNK_EDGES}>
         <lineBasicMaterial color="#64748b" />
       </lineSegments>
-      
+
       {/* 树冠 - 浅绿色白膜 */}
-      <mesh position={[0, 0.8, 0]}>
-        <sphereGeometry args={[0.3, 8, 8]} />
+      <mesh position={[0, 0.8, 0]} geometry={TREE_CROWN_GEO}>
         <meshStandardMaterial color="#bbf7d0" metalness={0} roughness={1} />
       </mesh>
       {/* 树冠边线 */}
-      <lineSegments position={[0, 0.8, 0]}>
-        <edgesGeometry args={[new THREE.SphereGeometry(0.3, 8, 8)]} />
+      <lineSegments position={[0, 0.8, 0]} geometry={TREE_CROWN_EDGES}>
         <lineBasicMaterial color="#4ade80" />
       </lineSegments>
     </group>
@@ -513,6 +777,7 @@ function ExternalModel({
   resetVisibilityOnLoad = true,
 }: ExternalModelProps) {
   const [model, setModel] = useState<THREE.Group | null>(null);
+  const modelRef = useRef<THREE.Group | null>(null);
   const [meshList, setMeshList] = useState<ImportedMeshInfo[]>([]);
   const [hoveredMesh, setHoveredMesh] = useState<string | null>(null);
   const originalMaterials = useRef<Map<string, THREE.Material | THREE.Material[]>>(new Map());
@@ -529,267 +794,6 @@ function ExternalModel({
   useEffect(() => {
     const targetUpAxis: Axis = sceneUpAxis;
     const maxFootprintSamples = 2000;
-
-    const computeConvexHull = (points: PlanViewPoint[]) => {
-      if (points.length < 3) {
-        return [];
-      }
-
-      const sorted = [...points].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
-      const cross = (o: PlanViewPoint, a: PlanViewPoint, b: PlanViewPoint) =>
-        (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-
-      const lower: PlanViewPoint[] = [];
-      for (const p of sorted) {
-        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
-          lower.pop();
-        }
-        lower.push(p);
-      }
-
-      const upper: PlanViewPoint[] = [];
-      for (let i = sorted.length - 1; i >= 0; i -= 1) {
-        const p = sorted[i];
-        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
-          upper.pop();
-        }
-        upper.push(p);
-      }
-
-      lower.pop();
-      upper.pop();
-      return lower.concat(upper);
-    };
-
-    const computeFootprint = (mesh: THREE.Mesh) => {
-      const position = mesh.geometry.getAttribute("position");
-      if (!position || position.count < 3) {
-        return null;
-      }
-
-      const step = Math.max(1, Math.floor(position.count / maxFootprintSamples));
-      const points: PlanViewPoint[] = [];
-      const vertex = new THREE.Vector3();
-
-      for (let i = 0; i < position.count; i += step) {
-        vertex.fromBufferAttribute(position, i);
-        vertex.applyMatrix4(mesh.matrixWorld);
-        points.push({ x: vertex.x, y: vertex.y });
-      }
-
-      const hull = computeConvexHull(points);
-      return hull.length >= 3 ? hull : null;
-    };
-
-    const getRhinoUpRotation = (scene: THREE.Object3D) => {
-      const rotations: Record<Axis, THREE.Quaternion> = {
-        x: getUpAxisRotation("x", targetUpAxis),
-        y: getUpAxisRotation("y", targetUpAxis),
-        z: getUpAxisRotation("z", targetUpAxis),
-      };
-
-      if (RHINO_UP_AXIS !== "auto") {
-        return rotations[RHINO_UP_AXIS];
-      }
-
-      const originalQuaternion = scene.quaternion.clone();
-      const originalPosition = scene.position.clone();
-      const originalScale = scene.scale.clone();
-      const size = new THREE.Vector3();
-      const box = new THREE.Box3();
-
-      const upIndex = AXIS_INDEX[targetUpAxis];
-      const horizontalIndices = [0, 1, 2].filter((index) => index !== upIndex);
-
-      const candidates = (["z", "y", "x"] as const).map((axis) => {
-        scene.quaternion.copy(rotations[axis]);
-        scene.updateMatrixWorld(true);
-        box.setFromObject(scene);
-        box.getSize(size);
-        const maxHorizontal = Math.max(
-          size.getComponent(horizontalIndices[0]),
-          size.getComponent(horizontalIndices[1])
-        );
-        const ratio = maxHorizontal > 0 ? size.getComponent(upIndex) / maxHorizontal : Number.POSITIVE_INFINITY;
-
-        return { axis, rotation: rotations[axis], ratio };
-      });
-
-      scene.quaternion.copy(originalQuaternion);
-      scene.position.copy(originalPosition);
-      scene.scale.copy(originalScale);
-      scene.updateMatrixWorld(true);
-
-      candidates.sort((a, b) => a.ratio - b.ratio);
-      const best = candidates[0];
-      const second = candidates[1];
-      const shouldAutoPick =
-        best.ratio < RHINO_AUTO_FLAT_RATIO &&
-        (!second || best.ratio < second.ratio * RHINO_AUTO_RATIO_MARGIN);
-
-      return shouldAutoPick ? best.rotation : rotations.z;
-    };
-
-    const alignPlanarModelToGround = (scene: THREE.Object3D) => {
-      if (!RHINO_ALIGN_PLANE_TO_GROUND) {
-        return;
-      }
-
-      const mean = new THREE.Vector3();
-      const samplePoints: THREE.Vector3[] = [];
-      let count = 0;
-      const cov = [
-        [0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0],
-      ];
-
-      const addSample = (point: THREE.Vector3) => {
-        count += 1;
-        const dx = point.x - mean.x;
-        const dy = point.y - mean.y;
-        const dz = point.z - mean.z;
-        mean.x += dx / count;
-        mean.y += dy / count;
-        mean.z += dz / count;
-        const dx2 = point.x - mean.x;
-        const dy2 = point.y - mean.y;
-        const dz2 = point.z - mean.z;
-        cov[0][0] += dx * dx2;
-        cov[0][1] += dx * dy2;
-        cov[0][2] += dx * dz2;
-        cov[1][1] += dy * dy2;
-        cov[1][2] += dy * dz2;
-        cov[2][2] += dz * dz2;
-      };
-
-      scene.updateMatrixWorld(true);
-      scene.traverse((child) => {
-        if (!(child instanceof THREE.Mesh)) {
-          return;
-        }
-
-        const geometry = child.geometry;
-        const position = geometry.getAttribute("position");
-        if (!position) {
-          return;
-        }
-
-        const step = Math.max(1, Math.floor(position.count / RHINO_PLANE_SAMPLE_LIMIT));
-        const vertex = new THREE.Vector3();
-
-        for (let i = 0; i < position.count; i += step) {
-          vertex.fromBufferAttribute(position, i);
-          vertex.applyMatrix4(child.matrixWorld);
-          addSample(vertex);
-          samplePoints.push(vertex.clone());
-        }
-      });
-
-      if (count < 3) {
-        return;
-      }
-
-      cov[1][0] = cov[0][1];
-      cov[2][0] = cov[0][2];
-      cov[2][1] = cov[1][2];
-
-      const jacobiEigenDecomposition = (matrix: number[][]) => {
-        const eigenVectors = [
-          [1, 0, 0],
-          [0, 1, 0],
-          [0, 0, 1],
-        ];
-
-        for (let iter = 0; iter < 20; iter += 1) {
-          let p = 0;
-          let q = 1;
-          let max = Math.abs(matrix[p][q]);
-
-          for (let i = 0; i < 3; i += 1) {
-            for (let j = i + 1; j < 3; j += 1) {
-              const value = Math.abs(matrix[i][j]);
-              if (value > max) {
-                max = value;
-                p = i;
-                q = j;
-              }
-            }
-          }
-
-          if (max < 1e-10) {
-            break;
-          }
-
-          const app = matrix[p][p];
-          const aqq = matrix[q][q];
-          const apq = matrix[p][q];
-          const phi = 0.5 * Math.atan2(2 * apq, aqq - app);
-          const c = Math.cos(phi);
-          const s = Math.sin(phi);
-
-          matrix[p][p] = c * c * app - 2 * s * c * apq + s * s * aqq;
-          matrix[q][q] = s * s * app + 2 * s * c * apq + c * c * aqq;
-          matrix[p][q] = 0;
-          matrix[q][p] = 0;
-
-          for (let i = 0; i < 3; i += 1) {
-            if (i === p || i === q) {
-              continue;
-            }
-            const aip = matrix[i][p];
-            const aiq = matrix[i][q];
-            matrix[i][p] = c * aip - s * aiq;
-            matrix[p][i] = matrix[i][p];
-            matrix[i][q] = s * aip + c * aiq;
-            matrix[q][i] = matrix[i][q];
-          }
-
-          for (let i = 0; i < 3; i += 1) {
-            const vip = eigenVectors[i][p];
-            const viq = eigenVectors[i][q];
-            eigenVectors[i][p] = c * vip - s * viq;
-            eigenVectors[i][q] = s * vip + c * viq;
-          }
-        }
-
-        return {
-          values: [matrix[0][0], matrix[1][1], matrix[2][2]],
-          vectors: eigenVectors,
-        };
-      };
-
-      const { values, vectors } = jacobiEigenDecomposition(cov);
-      const maxValue = Math.max(...values);
-      const minValue = Math.min(...values);
-
-      if (maxValue <= 0 || minValue / maxValue > RHINO_PLANE_EIGEN_RATIO) {
-        return;
-      }
-
-      const minIndex = values.indexOf(minValue);
-      const normal = new THREE.Vector3(
-        vectors[0][minIndex],
-        vectors[1][minIndex],
-        vectors[2][minIndex]
-      ).normalize();
-
-      const up = AXIS_VECTORS[targetUpAxis];
-      let bulkScore = 0;
-      const offset = new THREE.Vector3();
-      for (const point of samplePoints) {
-        offset.subVectors(point, mean);
-        bulkScore += offset.dot(normal);
-      }
-      if (bulkScore < 0) {
-        normal.multiplyScalar(-1);
-      } else if (Math.abs(bulkScore) < 1e-6 && normal.dot(up) < 0) {
-        normal.multiplyScalar(-1);
-      }
-
-      const rotation = new THREE.Quaternion().setFromUnitVectors(normal, up);
-      scene.applyQuaternion(rotation);
-    };
 
     const applyTransform = (scene: THREE.Object3D) => {
       scene.matrixAutoUpdate = true;
@@ -815,7 +819,7 @@ function ExternalModel({
       }
       if (format === "3dm") {
         // Align the Rhino up axis to the viewer up axis.
-        scene.applyQuaternion(getRhinoUpRotation(scene));
+        scene.applyQuaternion(getRhinoUpRotation(scene, targetUpAxis));
       } else if (sceneUpAxis !== "y") {
         // GLTF/GLB are Y-up; rotate to match the viewer up axis when needed.
         scene.applyQuaternion(getUpAxisRotation("y", targetUpAxis));
@@ -916,7 +920,7 @@ function ExternalModel({
               meshBox.max.z,
             ] as [number, number, number],
             name: meshName,
-            footprint: computeFootprint(child) ?? undefined,
+            footprint: computeFootprint(child, maxFootprintSamples) ?? undefined,
             layerIndex,
             layerName,
           };
@@ -943,6 +947,7 @@ function ExternalModel({
       });
 
       setMeshList(meshes);
+      modelRef.current = scene as THREE.Group;
       setModel(scene as THREE.Group);
       if (hasLayerInfo) {
         onBuildingsExtracted?.(buildingMeshes);
@@ -962,8 +967,6 @@ function ExternalModel({
         scale: [scene.scale.x, scene.scale.y, scene.scale.z],
       });
       onScaleComputed?.(scene.scale.x);
-
-      console.log(`[v0] 模型加载完成，共识别 ${meshes.length} 个子对象`);
 
       return meshBounds.isEmpty() ? fallbackBounds : meshBounds;
     };
@@ -1014,8 +1017,9 @@ function ExternalModel({
     }
 
     return () => {
-      if (model) {
-        model.traverse((child) => {
+      const currentModel = modelRef.current;
+      if (currentModel) {
+        currentModel.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             child.geometry?.dispose();
             if (Array.isArray(child.material)) {
@@ -1025,6 +1029,7 @@ function ExternalModel({
             }
           }
         });
+        modelRef.current = null;
       }
       originalMaterials.current.clear();
     };
@@ -1168,8 +1173,35 @@ function ExternalModel({
     opacity: 1,
   } as const), []);
 
+  // 共享材质实例 - 避免每次 effect 触发时重复 new Material 导致 GPU 内存泄漏
+  const sharedMaterials = useMemo(() => {
+    const base = { metalness: 0, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 };
+    return {
+      white: new THREE.MeshStandardMaterial({ ...base, color: 0xf8fafc }),
+      selectGreen: new THREE.MeshStandardMaterial({ ...base, color: 0x86efac }),
+      hoverBlue: new THREE.MeshStandardMaterial({ ...base, color: 0xbfdbfe }),
+      corridorBlocked: new THREE.MeshStandardMaterial({ ...base, color: 0xfee2e2, transparent: false, depthWrite: true }),
+      statusVisible: new THREE.MeshStandardMaterial({ ...base, color: 0xd1fae5, transparent: false, depthWrite: true }),
+      statusBlocked: new THREE.MeshStandardMaterial({ ...base, color: 0xfef3c7, transparent: false, depthWrite: true }),
+      statusOut: new THREE.MeshStandardMaterial({ ...base, color: 0xfee2e2, transparent: false, depthWrite: true }),
+    };
+  }, []);
+
+  const statusMaterialMap = useMemo(() => ({
+    visible: sharedMaterials.statusVisible,
+    blocked: sharedMaterials.statusBlocked,
+    out: sharedMaterials.statusOut,
+  }), [sharedMaterials]);
+
   // 处理高亮效果 + 视线通廊结果着色
   useEffect(() => {
+    const setEdgeColor = (mesh: THREE.Mesh, hex: number) => {
+      mesh.children.forEach((child) => {
+        if (child instanceof THREE.LineSegments && child.userData.isEdgeLine) {
+          (child.material as THREE.LineBasicMaterial).color.setHex(hex);
+        }
+      });
+    };
 
     meshList.forEach((meshInfo) => {
       if (isSightCorridorLayerName(meshInfo.layerName)) {
@@ -1185,91 +1217,26 @@ function ExternalModel({
       const visibilityStatus = resolveVisibilityStatus(meshInfo);
 
       if (isSelected || isHovered) {
-        // 创建高亮材质 - 保持白膜风格
-        const highlightMaterial = new THREE.MeshStandardMaterial({
-          color: isSelected ? 0x86efac : 0xbfdbfe, // 绿色或蓝色
-          metalness: 0,
-          roughness: 0.9,
-          polygonOffset: true,
-          polygonOffsetFactor: 1,
-          polygonOffsetUnits: 1,
-        });
-        mesh.material = highlightMaterial;
-
-        // 更新边线颜色
-        mesh.children.forEach((child) => {
-          if (child instanceof THREE.LineSegments && child.userData.isEdgeLine) {
-            (child.material as THREE.LineBasicMaterial).color.setHex(
-              isSelected ? 0x16a34a : 0x3b82f6
-            );
-          }
-        });
+        mesh.material = isSelected ? sharedMaterials.selectGreen : sharedMaterials.hoverBlue;
+        setEdgeColor(mesh, isSelected ? 0x16a34a : 0x3b82f6);
         return;
       }
 
       if (isCorridorBlocked) {
-        const colors = corridorHighlightColors;
-        const statusMaterial = new THREE.MeshStandardMaterial({
-          color: colors.fill,
-          metalness: 0,
-          roughness: 0.9,
-          transparent: false,
-          opacity: colors.opacity,
-          depthWrite: true,
-          polygonOffset: true,
-          polygonOffsetFactor: 1,
-          polygonOffsetUnits: 1,
-        });
-        mesh.material = statusMaterial;
-
-        mesh.children.forEach((child) => {
-          if (child instanceof THREE.LineSegments && child.userData.isEdgeLine) {
-            (child.material as THREE.LineBasicMaterial).color.setHex(colors.edge);
-          }
-        });
+        mesh.material = sharedMaterials.corridorBlocked;
+        setEdgeColor(mesh, corridorHighlightColors.edge);
         return;
       }
 
       if (!corridorCollisionResult && visibilityStatus) {
-        const colors = visibilityColors[visibilityStatus];
-        const statusMaterial = new THREE.MeshStandardMaterial({
-          color: colors.fill,
-          metalness: 0,
-          roughness: 0.9,
-          transparent: false,
-          opacity: colors.opacity,
-          depthWrite: true,
-          polygonOffset: true,
-          polygonOffsetFactor: 1,
-          polygonOffsetUnits: 1,
-        });
-        mesh.material = statusMaterial;
-
-        mesh.children.forEach((child) => {
-          if (child instanceof THREE.LineSegments && child.userData.isEdgeLine) {
-            (child.material as THREE.LineBasicMaterial).color.setHex(colors.edge);
-          }
-        });
+        mesh.material = statusMaterialMap[visibilityStatus];
+        setEdgeColor(mesh, visibilityColors[visibilityStatus].edge);
         return;
       }
 
       // 恢复白膜材质
-      const whiteMaterial = new THREE.MeshStandardMaterial({
-        color: 0xf8fafc,
-        metalness: 0,
-        roughness: 0.9,
-        polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
-      });
-      mesh.material = whiteMaterial;
-
-      // 恢复边线颜色
-      mesh.children.forEach((child) => {
-        if (child instanceof THREE.LineSegments && child.userData.isEdgeLine) {
-          (child.material as THREE.LineBasicMaterial).color.setHex(0x475569);
-        }
-      });
+      mesh.material = sharedMaterials.white;
+      setEdgeColor(mesh, 0x475569);
     });
   }, [
     selectedMesh,
@@ -1280,22 +1247,16 @@ function ExternalModel({
     corridorHighlightColors,
     isCorridorBlockedMesh,
     corridorCollisionResult,
+    sharedMaterials,
+    statusMaterialMap,
   ]);
 
   const setbackMeshes = useMemo(() => {
-    console.log('[ExternalModel] setbackMeshes计算:', {
-      showSetbackVolumes,
-      setbackVolumesCount: setbackVolumes.length,
-      modelTransform: modelTransform ? 'exists' : 'null',
-    });
-
     if (!showSetbackVolumes) {
-      console.log('[ExternalModel] showSetbackVolumes=false，不渲染');
       return [];
     }
 
     const filtered = setbackVolumes.filter((volume) => volume.is_exceeded && volume.points.length >= 3);
-    console.log('[ExternalModel] 过滤后的超限地块数量:', filtered.length);
 
     return filtered
       .map((volume, index) => {
@@ -1307,7 +1268,6 @@ function ExternalModel({
         });
 
         if (cleanedPoints.length < 3) {
-          console.log(`[ExternalModel] 地块 ${volume.plot_name} 清理后点数不足3个`);
           return null;
         }
 
@@ -1317,7 +1277,6 @@ function ExternalModel({
         const polygonPoints = isClosed ? cleanedPoints.slice(0, -1) : cleanedPoints;
 
         if (polygonPoints.length < 3) {
-          console.log(`[ExternalModel] 地块 ${volume.plot_name} 多边形点数不足3个`);
           return null;
         }
 
@@ -1325,13 +1284,6 @@ function ExternalModel({
           polygonPoints.map((point) => new THREE.Vector2(point[0], point[1]))
         );
         const baseZ = Math.min(...polygonPoints.map((point) => point[2]));
-
-        console.log(`[ExternalModel] 创建红色体块: ${volume.plot_name}`, {
-          pointsCount: polygonPoints.length,
-          baseZ,
-          height: volume.height_limit,
-          samplePoints: polygonPoints.slice(0, 3),
-        });
 
         return {
           key: `setback-${volume.plot_name}-${index}`,
@@ -1676,13 +1628,6 @@ function ExternalModel({
       {/* 红色超限体块 - 独立渲染，应用与模型相同的变换 */}
       {modelTransform && setbackMeshes.length > 0 && (
         <>
-          {console.log('[ExternalModel] 渲染红色体块:', {
-            meshCount: setbackMeshes.length,
-            modelTransform: {
-              position: [modelTransform.position.x, modelTransform.position.y, modelTransform.position.z],
-              scale: [modelTransform.scale.x, modelTransform.scale.y, modelTransform.scale.z],
-            },
-          })}
           {setbackMeshes.map((mesh) => (
             <group
               key={mesh.key}
@@ -1908,6 +1853,8 @@ interface PlanViewportProps {
   withCard?: boolean;
   visibleLayerPrefixes?: string[];
   sceneUpAxis: UpAxis;
+  visibleLayerPrefixes?: string[];
+  overlayContent?: React.ReactNode;
 }
 
 function PlanViewportCameraController({
@@ -2108,12 +2055,15 @@ export function PlanViewport({
   withCard = true,
   visibleLayerPrefixes,
   sceneUpAxis,
+  visibleLayerPrefixes,
+  overlayContent,
 }: PlanViewportProps) {
   const personScale = 2 * sightCorridorScale * PERSON_SCALE_MULTIPLIER;
   const hemisphereRadius = Math.max(0, sightCorridorRadius) * sightCorridorScale;
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const controlsRef = useRef<any | null>(null);
   const modelRootRef = useRef<THREE.Group | null>(null);
+  const raycasterRef = useRef(new THREE.Raycaster());
   const [planModelBounds, setPlanModelBounds] = useState<THREE.Box3 | null>(null);
   const fitBounds = planModelBounds ?? modelBounds;
   const { resolvedTheme } = useTheme();
@@ -2137,7 +2087,7 @@ export function PlanViewport({
     const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-    const raycaster = new THREE.Raycaster();
+    const raycaster = raycasterRef.current;
     camera.updateMatrixWorld();
     raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
 

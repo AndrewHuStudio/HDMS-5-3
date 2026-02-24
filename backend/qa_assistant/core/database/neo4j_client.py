@@ -57,7 +57,7 @@ class Neo4jClient:
         Create a node in the graph.
 
         Args:
-            label: Node label (e.g., "Plot", "Indicator")
+            label: Node label (e.g., "地块", "片区", "标准")
             properties: Node properties
 
         Returns:
@@ -85,7 +85,7 @@ class Neo4jClient:
         Args:
             from_id: Source node element ID
             to_id: Target node element ID
-            rel_type: Relationship type (e.g., "HAS_INDICATOR")
+            rel_type: Relationship type (e.g., "PART_OF", "APPLIES_TO")
             properties: Optional relationship properties
         """
         with self.driver.session() as session:

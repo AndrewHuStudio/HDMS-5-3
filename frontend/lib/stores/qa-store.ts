@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ChatMessage, SourceInfo, RetrievalStats } from "@/features/qa/types";
+import type { ChatMessage, SourceInfo, RetrievalStats, SubgraphData } from "@/features/qa/types";
 
 export interface QAPanelMessage {
   id: string;
@@ -7,11 +7,17 @@ export interface QAPanelMessage {
   content: string;
   timestamp: Date;
   thinking?: string;
+  /** Signal from SSE that the model's thinking phase has completed. */
+  thinkingDone?: boolean;
+  /** Internal buffer for answer tokens while thinking is still streaming (to avoid early "吐字"). */
+  pendingContent?: string;
   sources?: SourceInfo[];
   retrievalStats?: RetrievalStats;
+  subgraph?: SubgraphData;
   feedback?: "useful" | "not_useful";
   isStreaming?: boolean;
   statusMessage?: string;
+  statusStage?: string;
 }
 
 export interface QAPanelConversation {
