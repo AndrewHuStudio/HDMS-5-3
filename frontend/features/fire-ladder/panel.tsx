@@ -43,6 +43,7 @@ export function FireLadderPanel() {
 
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allowOutsideRedline, setAllowOutsideRedline] = useState(false);
   const [uploadedModelPath, setUploadedModelPath] = useState<string | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
 
@@ -107,6 +108,7 @@ export function FireLadderPanel() {
         min_distance: 5,
         max_distance: 10,
         length_ratio: 0.25,
+        allow_outside_redline: allowOutsideRedline,
       });
 
       setResults(data.results || []);
@@ -177,6 +179,25 @@ export function FireLadderPanel() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3 pt-1">
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div className="space-y-1">
+              <Label
+                htmlFor="fire-ladder-allow-outside-redline"
+                className="text-sm font-medium cursor-pointer"
+              >
+                消防登高面可在红线外
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                开启后，红线外或超出红线的登高面也视为通过
+              </p>
+            </div>
+            <Switch
+              id="fire-ladder-allow-outside-redline"
+              checked={allowOutsideRedline}
+              disabled={isChecking}
+              onCheckedChange={(checked) => setAllowOutsideRedline(checked)}
+            />
+          </div>
           <div className="flex flex-wrap gap-2">
             <Button onClick={handleStartCheck} disabled={isChecking}>
               {isChecking ? (

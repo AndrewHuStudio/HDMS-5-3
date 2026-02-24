@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 Point3D = rhino3dm.Point3d
 Point2D = Tuple[float, float]
 Segment2D = Tuple[Point2D, Point2D]
+MIN_REQUIRED_PEDESTRIAN_ENTRANCES = 2
 
 
 def _normalize_layer_name(name: str) -> str:
@@ -271,6 +272,21 @@ def _extract_boundary_curves(geometry: rhino3dm.CommonObject) -> List[rhino3dm.C
     return []
 
 
+def _select_building_redline_layer(
+    redline_layer: Optional[str], redline_layers: Optional[Sequence[str]]
+) -> Optional[str]:
+    if redline_layer and redline_layer.strip():
+        return redline_layer
+    if redline_layers:
+        for layer in redline_layers:
+            if layer and "建筑红线" in layer:
+                return layer
+        for layer in redline_layers:
+            if layer:
+                return layer
+    return None
+
+
 def _curve_center(curve: rhino3dm.Curve) -> Optional[Point3D]:
     points = _curve_to_points(curve)
     if not points:
@@ -280,6 +296,19 @@ def _curve_center(curve: rhino3dm.Curve) -> Optional[Point3D]:
     sz = sum(pt.Z for pt in points)
     count = len(points)
     return rhino3dm.Point3d(sx / count, sy / count, sz / count)
+
+
+def _curve_anchor_point(curve: rhino3dm.Curve) -> Optional[Point3D]:
+    center = _curve_center(curve)
+    if center is not None:
+        return center
+    bbox = _get_bounding_box(curve)
+    if bbox is not None:
+        return bbox.Center
+    points = _curve_to_points(curve)
+    if points:
+        return points[0]
+    return None
 
 
 def check_pedestrian_entrance_count(
@@ -299,13 +328,10 @@ def check_pedestrian_entrance_count(
     if not entrance_objects:
         raise ValueError(f"No pedestrian entrance points found in layer: {entrance_layer}")
 
-    redline_layer_list: List[str] = []
-    if redline_layers:
-        redline_layer_list.extend([layer for layer in redline_layers if layer])
-    if redline_layer:
-        redline_layer_list.append(redline_layer)
-    if not redline_layer_list:
-        raise ValueError("No redline layers provided")
+    building_redline_layer = _select_building_redline_layer(redline_layer, redline_layers)
+    if not building_redline_layer:
+        raise ValueError("No building redline layer provided")
+    redline_layer_list = [building_redline_layer]
 
     redline_objects: List[Tuple[rhino3dm.File3dmObject, rhino3dm.CommonObject, str]] = []
     for layer_name in redline_layer_list:
@@ -316,8 +342,7 @@ def check_pedestrian_entrance_count(
     if not redline_objects:
         raise ValueError("No redline curves found in provided layers")
 
-    redline_curves: List[rhino3dm.Curve] = []
-    redline_centers: List[Dict[str, object]] = []
+    redline_entries: List[Dict[str, object]] = []
     open_curves = 0
     invalid_curves = 0
     for _, geometry, layer_name in redline_objects:
@@ -332,24 +357,26 @@ def check_pedestrian_entrance_count(
             if not curve.IsClosed:
                 open_curves += 1
                 continue
-            redline_curves.append(curve)
-            if layer_name == "限制_建筑红线":
-                center = _curve_center(curve)
-                if center is not None:
-                    redline_centers.append(
-                        {
-                            "layer": layer_name,
-                            "point": [float(center.X), float(center.Y), float(center.Z)],
-                        }
-                    )
+            anchor = _curve_anchor_point(curve)
+            if anchor is None:
+                invalid_curves += 1
+                continue
+            redline_entries.append(
+                {
+                    "layer": layer_name,
+                    "curve": curve,
+                    "point": [float(anchor.X), float(anchor.Y), float(anchor.Z)],
+                }
+            )
 
-    if not redline_curves:
+    if not redline_entries:
         raise ValueError("No closed redline curves found in provided layers")
 
     results = []
     passed = 0
     failed = 0
     skipped_points = 0
+    redline_counts = [0 for _ in redline_entries]
 
     for idx, (obj, geometry) in enumerate(entrance_objects):
         point = _geometry_to_point(geometry)
@@ -360,10 +387,11 @@ def check_pedestrian_entrance_count(
         object_id = getattr(getattr(obj, "Attributes", None), "Id", None)
         name = _resolve_object_name(obj, f"出入口{idx + 1}")
 
-        inside = any(
-            _point_inside_or_on_curve(point, curve, on_curve_tolerance)
-            for curve in redline_curves
-        )
+        inside = False
+        for entry_index, entry in enumerate(redline_entries):
+            if _point_inside_or_on_curve(point, entry["curve"], on_curve_tolerance):
+                inside = True
+                redline_counts[entry_index] += 1
 
         status = "pass" if inside else "fail"
         if inside:
@@ -390,7 +418,29 @@ def check_pedestrian_entrance_count(
     if skipped_points > 0:
         warnings.append(f"{skipped_points} entrance objects could not be resolved to points")
 
-    overall_status = "pass" if passed >= min_required_count else "fail"
+    required_min = MIN_REQUIRED_PEDESTRIAN_ENTRANCES
+    redline_results = []
+    redline_passed = 0
+    redline_failed = 0
+    for idx, entry in enumerate(redline_entries):
+        entrance_count = redline_counts[idx]
+        status = "pass" if entrance_count >= required_min else "fail"
+        if status == "pass":
+            redline_passed += 1
+        else:
+            redline_failed += 1
+        redline_results.append(
+            {
+                "index": idx,
+                "layer": entry["layer"],
+                "point": entry["point"],
+                "entrance_count": entrance_count,
+                "status": status,
+                "reasons": [] if status == "pass" else ["insufficient_entrances"],
+            }
+        )
+
+    overall_status = "pass" if redline_failed == 0 else "fail"
     summary_reasons = []
     if overall_status == "fail":
         summary_reasons.append("insufficient_entrances")
@@ -398,21 +448,21 @@ def check_pedestrian_entrance_count(
     return {
         "status": "ok",
         "summary": {
-            "total": len(results),
-            "passed": passed,
-            "failed": failed,
-            "required_min": min_required_count,
+            "total": len(redline_results),
+            "passed": redline_passed,
+            "failed": redline_failed,
+            "required_min": required_min,
             "status": overall_status,
             "reasons": summary_reasons,
         },
-        "redlines": redline_centers,
+        "redlines": redline_results,
         "results": results,
         "warnings": warnings,
         "parameters": {
             "entrance_layer": entrance_layer,
-            "redline_layer": redline_layer,
+            "redline_layer": building_redline_layer,
             "redline_layers": redline_layer_list,
             "on_curve_tolerance": on_curve_tolerance,
-            "min_required_count": min_required_count,
+            "min_required_count": required_min,
         },
     }

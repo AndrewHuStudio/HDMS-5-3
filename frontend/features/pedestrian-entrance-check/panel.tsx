@@ -14,16 +14,18 @@ import { usePedestrianEntranceStore } from "./store";
 
 const DEFAULT_LAYERS = {
   entrance: "场地_人行出入口",
-  redlines: ["限制_建筑红线", "场地_广场退线", "场地_绿地退线"],
+  redline: "限制_建筑红线",
 };
 
 const summaryReasonLabels: Record<string, string> = {
-  insufficient_entrances: "合规出入口数量不足",
+  insufficient_entrances: "建筑红线内/线上合规出入口数量不足",
 };
 
-const itemReasonLabels: Record<string, string> = {
-  outside_redline: "不在红线上或红线内",
+const redlineReasonLabels: Record<string, string> = {
+  insufficient_entrances: "建筑红线内/线上出入口数量不足",
 };
+
+const REQUIRED_MIN_COUNT = 2;
 
 export function PedestrianEntrancePanel() {
   const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
@@ -39,7 +41,6 @@ export function PedestrianEntrancePanel() {
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [onCurveTolerance, setOnCurveTolerance] = useState(1);
-  const [minRequiredCount, setMinRequiredCount] = useState(2);
   const [uploadedModelPath, setUploadedModelPath] = useState<string | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
 
@@ -95,9 +96,8 @@ export function PedestrianEntrancePanel() {
       const data = await checkPedestrianEntrance({
         model_path: resolvedModelPath,
         entrance_layer: DEFAULT_LAYERS.entrance,
-        redline_layers: DEFAULT_LAYERS.redlines,
+        redline_layer: DEFAULT_LAYERS.redline,
         on_curve_tolerance: onCurveTolerance,
-        min_required_count: minRequiredCount,
       });
 
       setResult(data);
@@ -122,10 +122,10 @@ export function PedestrianEntrancePanel() {
   const hasResults = Boolean(result);
   const passed = result?.summary?.passed ?? 0;
   const failed = result?.summary?.failed ?? 0;
-  const requiredMin = result?.summary?.required_min ?? minRequiredCount;
+  const requiredMin = result?.summary?.required_min ?? REQUIRED_MIN_COUNT;
   const overallStatus = result?.summary?.status ?? "fail";
   const summaryReasons = result?.summary?.reasons ?? [];
-  const items = useMemo(() => result?.results ?? [], [result]);
+  const redlines = useMemo(() => result?.redlines ?? [], [result]);
 
   return (
     <div className="space-y-3">
@@ -147,7 +147,7 @@ export function PedestrianEntrancePanel() {
               <div>
                 <Label className="text-sm font-medium cursor-pointer">显示红线结果</Label>
                 <p className="text-xs text-muted-foreground">
-                  {hasResults ? `${failed} 个不合规` : "暂无检测结果"}
+                  {hasResults ? `${failed} 条红线不合规` : "暂无检测结果"}
                 </p>
               </div>
             </div>
@@ -172,7 +172,7 @@ export function PedestrianEntrancePanel() {
         <CardContent className="pt-1">
           <div className="grid gap-3">
             <div className="space-y-2">
-              <Label htmlFor="pedestrian-on-tolerance">红线距离阈值 (m)</Label>
+              <Label htmlFor="pedestrian-on-tolerance">建筑红线距离阈值 (m)</Label>
               <Input
                 id="pedestrian-on-tolerance"
                 type="number"
@@ -187,11 +187,10 @@ export function PedestrianEntrancePanel() {
               <Input
                 id="pedestrian-min-required"
                 type="number"
-                min={1}
-                step={1}
-                value={minRequiredCount}
-                onChange={(e) => setMinRequiredCount(Number(e.target.value))}
+                value={REQUIRED_MIN_COUNT}
+                disabled
               />
+              <p className="text-xs text-muted-foreground">建筑红线内/线上至少需要 2 个出入口</p>
             </div>
           </div>
         </CardContent>
@@ -240,7 +239,7 @@ export function PedestrianEntrancePanel() {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            合规出入口数量不足（{passed}/{requiredMin}）。
+            不满足建筑红线出入口数量要求（合规红线 {passed}/{result?.summary?.total ?? 0}）。
           </AlertDescription>
         </Alert>
       )}
@@ -263,11 +262,11 @@ export function PedestrianEntrancePanel() {
               <CardTitle className="text-sm">检测结果</CardTitle>
               <div className="flex items-center gap-2">
                 <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
-                  {passed}/{result?.summary?.total ?? 0} 合规
+                  {passed}/{result?.summary?.total ?? 0} 条红线合规
                 </div>
                 {failed > 0 && (
                   <div className="text-xs px-2.5 py-1 rounded-full font-medium bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">
-                    {failed} 不合规
+                    {failed} 条红线不合规
                   </div>
                 )}
               </div>
@@ -281,11 +280,11 @@ export function PedestrianEntrancePanel() {
                 ))}
               </div>
             )}
-            {items.map((item) => {
+            {redlines.map((item) => {
               const isFail = item.status === "fail";
               return (
                 <div
-                  key={`${item.object_id ?? item.index}`}
+                  key={`${item.layer}-${item.index}`}
                   className={`border rounded-lg p-3 transition-all ${
                     isFail
                       ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
@@ -298,14 +297,18 @@ export function PedestrianEntrancePanel() {
                         isFail ? "bg-red-500" : "bg-emerald-500"
                       }`}
                     />
-                    <span className="text-xs font-medium">
-                      {isFail ? "不通过" : "通过"}
+                    <span className="text-xs font-medium">{isFail ? "不通过" : "通过"}</span>
+                    <span className="text-xs text-muted-foreground">
+                      红线 {item.index + 1}
                     </span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    建筑红线内/线上出入口数量：{item.entrance_count}/{requiredMin}
                   </div>
                   {isFail && (
                     <div className="space-y-1 text-xs text-muted-foreground">
                       {item.reasons.map((reason) => (
-                        <div key={reason}>{itemReasonLabels[reason] || reason}</div>
+                        <div key={reason}>{redlineReasonLabels[reason] || reason}</div>
                       ))}
                     </div>
                   )}

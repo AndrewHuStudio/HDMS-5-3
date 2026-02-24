@@ -20,8 +20,12 @@ export interface PedestrianEntranceCheckResponse {
     reasons: string[];
   };
   redlines: {
+    index: number;
     layer: string;
     point: [number, number, number];
+    entrance_count: number;
+    status: "pass" | "fail";
+    reasons: string[];
   }[];
   results: PedestrianEntranceResult[];
   warnings: string[];
