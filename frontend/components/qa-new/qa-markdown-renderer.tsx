@@ -51,6 +51,10 @@ function resolveImageSrc(src: string): string {
     return src;
   }
   if (src.startsWith("/api/")) return src;
+  // Keep document images on same-origin to avoid cross-origin/env drift.
+  if (/^\/rag\/documents\/[^/?#]+\/image(?:\?|$)/i.test(src)) {
+    return `/api${src}`;
+  }
   const base = src.startsWith("/rag/")
     ? normalizeApiBase(QA_API_BASE)
     : normalizeApiBase(API_BASE);
@@ -68,6 +72,31 @@ function flattenReactText(node: ReactNode): string {
     return flattenReactText(withChildren.props?.children);
   }
   return "";
+}
+
+/** Strip leading "FIGCAPTION " prefix from mixed ReactNode children (text + anchors). */
+function stripLeadingFigcaptionPrefix(children: ReactNode): ReactNode {
+  if (typeof children === "string") {
+    return children.replace(/^FIGCAPTION\s+/u, "");
+  }
+  if (!Array.isArray(children)) return children;
+  const result = [...children];
+  for (let i = 0; i < result.length; i++) {
+    const child = result[i];
+    if (typeof child === "string") {
+      const stripped = child.replace(/^FIGCAPTION\s+/u, "");
+      if (stripped !== child) {
+        result[i] = stripped;
+        return result;
+      }
+      // If this text node is non-empty but didn't have the prefix, stop looking.
+      if (child.trim()) break;
+    } else {
+      // Non-string node encountered before finding prefix — stop.
+      break;
+    }
+  }
+  return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -138,9 +167,14 @@ export function QAMarkdownRenderer({
 
       if (isFigureCaption) {
         const shown = (plain || flattened).replace(/^FIGCAPTION\s+/u, "");
+        // For mixed children (text + citation anchors), strip FIGCAPTION prefix
+        // from the leading text node so it doesn't render as visible text.
+        const strippedChildren = isPlainTextOnly
+          ? shown
+          : stripLeadingFigcaptionPrefix(children);
         return (
-          <p className="mt-1 mb-3 text-[11px] leading-snug text-left text-muted-foreground/75">
-            {isPlainTextOnly ? shown : children}
+          <p className="mt-1 mb-5 text-[11px] leading-snug text-center text-muted-foreground/75 italic">
+            {strippedChildren}
           </p>
         );
       }
@@ -200,14 +234,16 @@ export function QAMarkdownRenderer({
         <img
           src={resolved}
           alt={alt ?? "参考图片"}
-          className="my-2 max-h-80 cursor-zoom-in rounded border border-border object-contain transition-opacity hover:opacity-80"
+          className="my-4 max-h-80 cursor-zoom-in rounded border border-border object-contain transition-opacity hover:opacity-80"
           loading="lazy"
           onClick={() => onImageClick?.(resolved)}
           onError={(e) => {
             const img = e.target as HTMLImageElement;
-            img.alt = "";
+            img.removeAttribute("src");
+            img.alt = "图片暂不可用";
             img.title = "参考图片暂不可用";
-            img.style.display = "none";
+            img.style.cursor = "default";
+            img.className = "my-4 flex h-20 w-full items-center justify-center rounded border border-dashed border-border bg-muted/40 text-xs text-muted-foreground";
           }}
         />
       );

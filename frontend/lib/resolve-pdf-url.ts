@@ -1,5 +1,4 @@
 import type { SourceInfo } from "@/features/qa/types";
-import { QA_API_BASE, normalizeApiBase } from "./api-base";
 
 type SourceDetailsResponse = {
   chunk_id?: string;
@@ -50,9 +49,8 @@ function appendPageHash(url: string, page: number | null): string {
 }
 
 async function fetchSourceDetails(chunkId: string, query?: string): Promise<SourceDetailsResponse | null> {
-  const base = normalizeApiBase(QA_API_BASE);
   const qParam = query ? `?q=${encodeURIComponent(query)}` : "";
-  const url = `${base}/rag/sources/${encodeURIComponent(chunkId)}${qParam}`;
+  const url = `/api/rag/sources/${encodeURIComponent(chunkId)}${qParam}`;
 
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) return null;

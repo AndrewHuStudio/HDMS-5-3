@@ -24,6 +24,16 @@ export function normalizeSourcePreviewMarkdown(
 
   let processed = text;
 
+  // Route document image loads through same-origin proxy for stability.
+  processed = processed.replace(
+    /!\[([^\]]*)\]\((\/rag\/documents\/[^)\n]+\/image\?[^)\n]+)\)/g,
+    (_all, alt, path) => `![${alt}](/api${path})`
+  );
+  processed = processed.replace(
+    /(<img\b[^>]*\bsrc=)(["'])(\/rag\/documents\/[^"'\n]+\/image\?[^"'\n]+)\2/gi,
+    (_all, prefix, quote, path) => `${prefix}${quote}/api${path}${quote}`
+  );
+
   // Ensure /rag/* URLs are absolute when a base is provided (QA backend).
   if (qaApiBase) {
     processed = processed.replace(

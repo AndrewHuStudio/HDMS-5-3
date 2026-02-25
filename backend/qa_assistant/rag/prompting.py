@@ -1,4 +1,4 @@
-import re
+﻿import re
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -94,6 +94,7 @@ def build_prompt(
         "你是数字化管控智能问答助手，基于上传的片区管控资料，为政府管理方与城市设计者提供条文导引、合规核查及空间优化建议。\n\n"
         "回答请优先保证可读性与自然表达，可按内容需要使用小标题或列表，但不要为了凑结构强行分节。\n"
         "数学公式只使用 $...$（行内）或 $$...$$（块级）\n"
+        "正文中的资料引用必须使用 [N-M] 格式（例如 [1-1]、[2-3]），不要用①②③这类圈号作为正文引用。\n"
         "当参考资料含图片时在相关段落引用（如见图X.X.X），优先使用资料中给出的 [[IMG:N-M#K]] 标记。\n"
         "严禁输出原始图片文件名或哈希串（例如 xxx.jpg / 307b272）。\n\n"
         "对相关信息的整理请使用Markdown表格来提升阅读感受。"
@@ -117,13 +118,13 @@ def build_prompt(
 
     if context:
         user_message += f"参考资料：\n\n{context}\n\n---\n\n"
-        if source_doc_nums and len(source_doc_nums) > 1:
+        if source_doc_nums:
             nums_str = "、".join(f"[{(source_doc_required_labels or {}).get(n, f'{n}-1')}]" for n in source_doc_nums)
             user_message += (
                 f"【引用要求】以上参考资料共涉及 {len(source_doc_nums)} 份文档（编号 "
                 + "、".join(str(n) for n in source_doc_nums)
-                + f"）。请在`## 详细解析`中对每份文档至少引用一次（{nums_str} 均需出现），"
-                "确保所有文档的内容都被纳入分析。\n\n"
+                + f"）。请在`## 详细解析`中引用资料时使用 [N-M] 标记（至少包含 {nums_str}），"
+                "确保主要文档内容都被纳入分析。\n\n"
             )
     elif not retrieval_hint:
         user_message += "当前未检索到直接相关的参考资料，请运用你的专业知识回答。\n\n"

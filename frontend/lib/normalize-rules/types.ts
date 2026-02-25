@@ -1,4 +1,4 @@
-export type NormalizePhase = "streaming" | "final";
+export type NormalizePhase = "streaming" | "finalizing" | "final";
 
 export type NormalizationDiagnostics = {
   enabled: boolean;

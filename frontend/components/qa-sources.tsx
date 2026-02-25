@@ -25,6 +25,7 @@ import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
 
 interface QASourcesProps {
   sources: SourceInfo[];
+  messageId?: string;
   query?: string;
   activeCitation?: string | null;
   onCitationHover?: (citation: string | null) => void;
@@ -43,6 +44,7 @@ const resolveAssetLink = (rawUrl?: string | null) => {
   if (!rawUrl) return null;
   // Same-origin routes (Next.js) should not be rewritten to backend base URLs.
   if (rawUrl.startsWith("/api/")) return rawUrl;
+  if (/^\/rag\/documents\/[^/?#]+\/image(?:\?|$)/i.test(rawUrl)) return `/api${rawUrl}`;
   if (/^https?:\/\//i.test(rawUrl)) return rawUrl;
   // Use QA_API_BASE for /rag/ endpoints (served by QA backend on port 8002)
   const base = rawUrl.startsWith("/rag/")
@@ -110,6 +112,7 @@ export function buildPdfUrl(source: SourceInfo, page?: number): string | null {
 
 export function QASources({
   sources,
+  messageId,
   query,
   activeCitation,
   onCitationHover,
@@ -151,7 +154,7 @@ export function QASources({
       if (prefetchingKeysRef.current.has(key)) return;
       prefetchingKeysRef.current.add(key);
 
-      void fetch(`${normalizeApiBase(QA_API_BASE)}/rag/sources/${chunkId}${qParam}`)
+      void fetch(`/api/rag/sources/${encodeURIComponent(chunkId)}${qParam}`)
         .then(async (res) => (res.ok ? ((await res.json()) as SourcePreview) : null))
         .then((preview) => {
           if (!preview) return;
@@ -191,6 +194,7 @@ export function QASources({
               key={source.chunk_id || `${source.name}-${index}`}
               source={source}
               label={label}
+              messageId={messageId}
               query={query}
               cachedPreviews={cacheKey ? previewCache[cacheKey] : undefined}
               onCachePreviews={(items) => {
@@ -254,6 +258,7 @@ export function QASources({
 function SourceCard({
   source,
   label,
+  messageId,
   query,
   cachedPreviews,
   onCachePreviews,
@@ -265,6 +270,7 @@ function SourceCard({
 }: {
   source: SourceInfo;
   label: string;
+  messageId?: string;
   query?: string;
   cachedPreviews?: SourcePreview[];
   onCachePreviews?: (items: SourcePreview[]) => void;
@@ -296,7 +302,7 @@ function SourceCard({
         allChunkIds.slice(0, 5).map(async (cid) => {
           try {
             const res = await fetch(
-              `${normalizeApiBase(QA_API_BASE)}/rag/sources/${cid}${qParam}`
+              `/api/rag/sources/${encodeURIComponent(cid)}${qParam}`
             );
             if (res.ok) return (await res.json()) as SourcePreview;
           } catch { /* skip failed */ }
@@ -366,7 +372,7 @@ function SourceCard({
           asChild
         >
           <div
-            id={`source-${label}`}
+            id={messageId ? `source-${messageId}-${label}` : `source-${label}`}
             role="button"
             tabIndex={0}
             className={cn(
@@ -376,7 +382,6 @@ function SourceCard({
             )}
             onFocus={() => onHover?.(label)}
             onBlur={() => onHover?.(null)}
-            onClick={() => onSelect?.(label)}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -605,16 +610,19 @@ function ChunkMarkdown({
           img: ({ src, alt }) => {
             const imgSrc = typeof src === "string" ? src : "";
             return (
-              <span className="block">
+              <span className="block my-2">
                 <img
                   src={imgSrc}
                   alt={typeof alt === "string" ? alt : "参考图片"}
-                  className="my-1 max-h-48 cursor-zoom-in rounded border border-border object-contain transition-opacity hover:opacity-80"
+                  className="max-h-48 cursor-zoom-in rounded border border-border object-contain transition-opacity hover:opacity-80"
                   loading="lazy"
                   onClick={() => imgSrc && onLightbox?.(imgSrc)}
                   onError={(e) => {
-                    const parent = (e.target as HTMLImageElement).parentElement;
-                    if (parent) parent.style.display = "none";
+                    const img = e.target as HTMLImageElement;
+                    img.removeAttribute("src");
+                    img.alt = "图片暂不可用";
+                    img.style.cursor = "default";
+                    img.className = "h-16 w-full rounded border border-dashed border-border bg-muted/40 text-[10px] text-muted-foreground";
                   }}
                 />
               </span>

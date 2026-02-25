@@ -1,5 +1,3 @@
-import { normalizeApiBase } from "./api-base";
-
 type SourceLike = {
   chunk_id?: string;
   chunk_ids?: string[];
@@ -16,7 +14,8 @@ type PrefetchSourcePreviewsArgs = {
   sources: SourceLike[];
   query?: string;
   limit?: number;
-  qaApiBase: string;
+  /** @deprecated No longer used — requests go through same-origin proxy. Kept for API compat. */
+  qaApiBase?: string;
   fetchFn?: typeof fetch;
   onPreview: (cacheKey: string, preview: unknown) => void;
 };
@@ -26,7 +25,6 @@ export async function prefetchSourcePreviews(args: PrefetchSourcePreviewsArgs): 
     sources,
     query,
     limit = 12,
-    qaApiBase,
     fetchFn = fetch,
     onPreview,
   } = args;
@@ -45,7 +43,7 @@ export async function prefetchSourcePreviews(args: PrefetchSourcePreviewsArgs): 
   await Promise.all(
     targets.map(async ({ chunkId, cacheKey }) => {
       try {
-        const res = await fetchFn(`${normalizeApiBase(qaApiBase)}/rag/sources/${chunkId}${qParam}`);
+        const res = await fetchFn(`/api/rag/sources/${encodeURIComponent(chunkId)}${qParam}`);
         if (!res.ok) return;
         const preview = await res.json();
         onPreview(cacheKey, preview);

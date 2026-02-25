@@ -13,8 +13,30 @@ export interface SSECallbacks {
   onError: (detail: string) => void;
 }
 
+/** Generate a short unique request ID for tracing. */
+function generateRequestId(): string {
+  return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** SSE retry delay in ms. */
+const SSE_RETRY_DELAY_MS = 1500;
+
+type SSEPhase = "connecting" | "streaming" | "done" | "error";
+
+/** Check if non-streaming fallback is enabled via env var. */
+function isStreamFallbackEnabled(): boolean {
+  try {
+    return process.env.NEXT_PUBLIC_QA_STREAM_FALLBACK_ENABLED === "true";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Stream a chat question via SSE and dispatch events through callbacks.
+ * Includes one automatic short retry on transient network errors (same request_id).
+ * If QA_STREAM_FALLBACK_ENABLED=true and SSE fails after retry, falls back to
+ * non-streaming /qa/chat endpoint.
  */
 export async function streamChat(
   question: string,
@@ -22,10 +44,122 @@ export async function streamChat(
   callbacks: SSECallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
+  const requestId = generateRequestId();
+  let attempt = 0;
+  const maxRetries = 1;
+
+  const log = (phase: SSEPhase, msg: string, extra?: Record<string, unknown>) => {
+    // eslint-disable-next-line no-console
+    console.debug(`[sse][${requestId}][${phase}]`, msg, extra ?? "");
+  };
+
+  let lastError: unknown;
+
+  while (attempt <= maxRetries) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    log("connecting", attempt > 0 ? `retry #${attempt}` : "initial");
+
+    try {
+      await _streamChatOnce(question, history, callbacks, signal, requestId, log);
+      return; // success
+    } catch (err) {
+      const aborted =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof Error && err.name === "AbortError");
+      if (aborted) throw err;
+
+      lastError = err;
+
+      if (attempt < maxRetries) {
+        log("error", `attempt ${attempt} failed, retrying in ${SSE_RETRY_DELAY_MS}ms`, {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        attempt++;
+        await new Promise((r) => setTimeout(r, SSE_RETRY_DELAY_MS));
+        continue;
+      }
+      break;
+    }
+  }
+
+  // SSE exhausted — try non-streaming fallback if enabled
+  if (isStreamFallbackEnabled()) {
+    log("connecting", "SSE exhausted, falling back to non-streaming /qa/chat");
+    try {
+      await _nonStreamingFallback(question, history, callbacks, signal, requestId, log);
+      return;
+    } catch (fallbackErr) {
+      const aborted =
+        (fallbackErr instanceof DOMException && fallbackErr.name === "AbortError") ||
+        (fallbackErr instanceof Error && fallbackErr.name === "AbortError");
+      if (aborted) throw fallbackErr;
+      log("error", "non-streaming fallback also failed", {
+        error: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+      });
+      // Fall through to throw the original SSE error
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Non-streaming fallback: POST to /qa/chat and synthesize SSE-like callbacks.
+ */
+async function _nonStreamingFallback(
+  question: string,
+  history: { role: string; content: string }[],
+  callbacks: SSECallbacks,
+  signal: AbortSignal | undefined,
+  requestId: string,
+  log: (phase: SSEPhase, msg: string, extra?: Record<string, unknown>) => void,
+): Promise<void> {
+  callbacks.onStatus("reasoning", "流式连接失败，正在使用备用通道...");
+
+  const res = await fetch("/qa/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Request-Id": requestId,
+    },
+    body: JSON.stringify({ question, history, request_id: requestId }),
+    signal,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Fallback request failed: ${res.status}`);
+  }
+
+  const data = await res.json();
+  log("done", "non-streaming fallback completed");
+
+  // Synthesize callback events from the non-streaming response
+  if (data.sources) {
+    callbacks.onSources(data.sources);
+  }
+  if (data.answer) {
+    callbacks.onAnswer(data.answer);
+  }
+  callbacks.onDone({ model: data.model, context_used: data.context_used });
+}
+
+async function _streamChatOnce(
+  question: string,
+  history: { role: string; content: string }[],
+  callbacks: SSECallbacks,
+  signal: AbortSignal | undefined,
+  requestId: string,
+  log: (phase: SSEPhase, msg: string, extra?: Record<string, unknown>) => void,
+): Promise<void> {
   const res = await fetch("/qa/chat/stream", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, history }),
+    headers: {
+      "Content-Type": "application/json",
+      "X-Request-Id": requestId,
+    },
+    body: JSON.stringify({ question, history, request_id: requestId }),
     signal,
   });
 
@@ -33,6 +167,8 @@ export async function streamChat(
     const text = await res.text();
     throw new Error(text || `Request failed: ${res.status}`);
   }
+
+  log("streaming", "connected");
 
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
@@ -98,11 +234,13 @@ export async function streamChat(
               flushTokenBuffers();
               callbacks.onDone(data);
               receivedDone = true;
+              log("done", "stream completed");
               break;
             case "error":
               flushTokenBuffers();
               callbacks.onError(data.detail || "Unknown error");
               receivedDone = true;
+              log("error", "server error event", { detail: data.detail });
               break;
           }
         } catch {
@@ -133,6 +271,7 @@ export async function streamChat(
 
   // Safety fallback: if we never received a done event, fire it
   if (!receivedDone) {
+    log("done", "stream ended without done event, firing fallback");
     callbacks.onDone({});
   }
 }

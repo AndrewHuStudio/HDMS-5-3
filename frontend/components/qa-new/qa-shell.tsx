@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ChevronDown, ImagePlus, Send, Square, X } from "lucide-react";
+import { ChevronDown, ChevronUp, ImagePlus, Send, Square, X } from "lucide-react";
 import { ThinkingProcess } from "@/components/qa-thinking";
 import { QAFeedback } from "@/components/qa-feedback";
 import { QAExportButton } from "@/components/qa-export-button";
@@ -69,7 +69,7 @@ function extractRecommendedQuestions(content: string): {
 const INPUT_MIN_LINES = 1;
 const INPUT_MAX_LINES = 3;
 const INPUT_LINE_HEIGHT_PX = 22;
-const INPUT_VERTICAL_PADDING_PX = 16;
+const INPUT_VERTICAL_PADDING_PX = 22; // py-[11px] top + bottom
 const MIN_TEXTAREA_HEIGHT = INPUT_MIN_LINES * INPUT_LINE_HEIGHT_PX + INPUT_VERTICAL_PADDING_PX;
 const MAX_TEXTAREA_HEIGHT = INPUT_MAX_LINES * INPUT_LINE_HEIGHT_PX + INPUT_VERTICAL_PADDING_PX;
 const INPUT_SCROLLBAR_ACTIVE_MS = 260;
@@ -97,12 +97,14 @@ export function QAShell({
   const inputScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingImagesRef = useRef<PendingUploadImage[]>([]);
   const userScrolledUpRef = useRef(false);
+  const programmaticScrollRef = useRef(false);
   const { lightboxSrc, open: openLightbox, close: closeLightbox } = useImageLightbox();
   const [pendingImages, setPendingImages] = useState<PendingUploadImage[]>([]);
   const [isInputScrollbarActive, setIsInputScrollbarActive] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
+  const [backScrollPos, setBackScrollPos] = useState<number | null>(null);
 
   // Detect if user has scrolled away from the bottom
   const syncScrollPositionState = useCallback(() => {
@@ -120,6 +122,10 @@ export function QAShell({
 
   const handleScroll = useCallback(() => {
     syncScrollPositionState();
+    // Only dismiss back-to-citation button on user-initiated scroll
+    if (!programmaticScrollRef.current) {
+      setBackScrollPos(null);
+    }
   }, [syncScrollPositionState]);
 
   const handleJumpToBottom = useCallback(() => {
@@ -129,6 +135,20 @@ export function QAShell({
     userScrolledUpRef.current = false;
     setShowJumpToBottom(false);
   }, []);
+
+  const handleCitationJump = useCallback((savedScrollTop: number) => {
+    programmaticScrollRef.current = true;
+    setBackScrollPos(savedScrollTop);
+    // Clear the flag after smooth scroll settles (~600ms)
+    setTimeout(() => { programmaticScrollRef.current = false; }, 600);
+  }, []);
+
+  const handleBackToCitation = useCallback(() => {
+    const el = scrollRef.current;
+    if (el === null || backScrollPos === null) return;
+    el.scrollTo({ top: backScrollPos, behavior: "smooth" });
+    setBackScrollPos(null);
+  }, [backScrollPos]);
 
   // When a new user message is sent, reset scroll lock so we follow the response
   useEffect(() => {
@@ -302,6 +322,17 @@ export function QAShell({
       )}
 
       <div className="relative flex-1 min-h-0">
+        {backScrollPos !== null && (
+          <button
+            type="button"
+            className="absolute left-1/2 top-3 z-30 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border/70 bg-white/95 px-3 py-1.5 text-xs text-muted-foreground shadow-sm transition-colors hover:bg-white hover:text-foreground dark:bg-card/95 dark:hover:bg-card"
+            onClick={handleBackToCitation}
+            aria-label="返回引用位置"
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+            返回引用位置
+          </button>
+        )}
         <div className="qa-scrollbar h-full overflow-x-hidden overflow-y-auto bg-white px-6 py-4 dark:bg-background" ref={scrollRef} onScroll={handleScroll}>
           <div className="space-y-4">
             {messages.map((message, idx) => {
@@ -339,6 +370,7 @@ export function QAShell({
                         onSend={onSend}
                         onFillInput={onInputChange}
                         onImageClick={openLightbox}
+                        onCitationJump={handleCitationJump}
                       />
                     ) : (
                       <p className="whitespace-pre-wrap">{message.content}</p>
@@ -433,7 +465,7 @@ export function QAShell({
             onBlur={() => setIsComposerFocused(false)}
             placeholder="有什么我能帮你的吗？"
             className={cn(
-              "min-h-[44px] max-h-[82px] resize-none overflow-y-auto border-0 bg-transparent pr-[88px] leading-[22px] shadow-none focus-visible:ring-0",
+              "min-h-[44px] max-h-[82px] resize-none overflow-y-auto border-0 bg-transparent py-[11px] pr-[88px] leading-[22px] shadow-none focus-visible:ring-0",
               "qa-input-scrollbar",
               isInputScrollbarActive && "qa-input-scrollbar--active"
             )}
@@ -455,7 +487,7 @@ export function QAShell({
               variant="ghost"
               size="icon"
               className={cn(
-                "pointer-events-auto h-8 w-8 cursor-pointer border text-muted-foreground transition-colors disabled:cursor-not-allowed",
+                "pointer-events-auto h-8 w-8 cursor-pointer border text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed",
                 hasPendingImages
                   ? "rounded-md border-border bg-muted/60 text-foreground hover:bg-muted/80"
                   : "rounded-full border-transparent hover:bg-muted/60"
@@ -468,9 +500,10 @@ export function QAShell({
             </Button>
             <Button
               type="button"
+              variant="ghost"
               size="icon"
               className={cn(
-                "pointer-events-auto h-8 w-8 cursor-pointer rounded-full bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed"
+                "pointer-events-auto h-8 w-8 cursor-pointer rounded-lg border-0 text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary disabled:cursor-not-allowed"
               )}
               onClick={handlePrimaryAction}
               disabled={isSending ? !onStop : !canSend}
@@ -509,6 +542,8 @@ function AssistantContent({
   onSend,
   onFillInput,
   onImageClick,
+  onCitationJump,
+  scrollRef,
 }: {
   message: ChatMessage;
   embedded?: boolean;
@@ -517,6 +552,8 @@ function AssistantContent({
   onSend?: (question?: string) => void;
   onFillInput?: (value: string) => void;
   onImageClick?: (src: string) => void;
+  onCitationJump?: (savedScrollTop: number) => void;
+  scrollRef?: React.RefObject<HTMLElement | null>;
 }) {
   const {
     content,
@@ -532,11 +569,9 @@ function AssistantContent({
   // --- Citation state (isolated module) ---
   const {
     sourcesNormalized,
-    activeCitationLabel,
-    setActiveCitationLabel,
     handleCitationSelect,
     citationAnchorComponent,
-  } = useCitationState({ sources, messageId: message.id });
+  } = useCitationState({ sources, messageId: message.id, scrollRef, onCitationJump });
 
   // --- Render state derivation ---
   const renderState = deriveAssistantRenderState(message);
@@ -617,9 +652,8 @@ function AssistantContent({
           {hasSourcePanel && (
             <QACitationSourcePanel
               sources={sourcesNormalized}
+              messageId={message.id}
               query={precedingQuestion}
-              activeCitation={activeCitationLabel}
-              onCitationHover={setActiveCitationLabel}
               onCitationSelect={handleCitationSelect}
               layout={useSidebarSourceLayout ? "sidebar" : "inline"}
             />

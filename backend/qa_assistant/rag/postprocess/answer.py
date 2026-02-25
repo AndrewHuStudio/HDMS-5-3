@@ -1,9 +1,65 @@
+import re
 from typing import Dict, Optional, Tuple
 
 from . import citations as pp_citations
 from . import markdown as pp_markdown
 from . import math as pp_math
 from . import images as pp_images
+
+
+# Match "## 检索综述" with optional trailing colon variants.
+_RETRIEVAL_OVERVIEW_HEADING_RE = re.compile(r"^##\s+检索综述\s*[:：]?\s*$")
+_H2_HEADING_RE = re.compile(r"^##\s+\S")
+
+
+def dedupe_retrieval_overview_heading(text: str) -> str:
+    """Keep only the first ``## 检索综述`` section; remove duplicate blocks.
+
+    The backend injects this heading as a prefix, but the LLM may regenerate
+    it in the body.  This idempotent guard ensures at most one retrieval
+    overview block remains and prevents duplicate body lines from leaking into
+    the next section.
+    """
+    if not text:
+        return text
+    lines = text.splitlines()
+    seen_first = False
+    changed = False
+    out: list[str] = []
+
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not _RETRIEVAL_OVERVIEW_HEADING_RE.match(stripped):
+            out.append(lines[i])
+            i += 1
+            continue
+
+        if not seen_first:
+            seen_first = True
+            out.append(lines[i])
+            i += 1
+            continue
+
+        # Drop duplicate retrieval overview section as a whole (heading + body
+        # until next level-2 heading) to avoid leaking overview lines into
+        # "相关概念" after heading-only dedupe.
+        changed = True
+        i += 1
+        while i < len(lines) and not _H2_HEADING_RE.match(lines[i].strip()):
+            i += 1
+
+        # Keep section boundaries tidy after block removal.
+        while out and not out[-1].strip():
+            out.pop()
+        if i < len(lines) and out and out[-1].strip():
+            out.append("")
+
+    if not changed:
+        return text
+    while out and not out[-1].strip():
+        out.pop()
+    return "\n".join(out)
 
 
 def sanitize_answer(text: str) -> str:
@@ -35,7 +91,6 @@ def postprocess_answer(text: str, valid_labels: Optional[set] = None) -> Tuple[s
       - convert_formulas_to_latex         (plain formula → LaTeX)
 
     Kept (data-layer, frontend cannot do these):
-      - _ensure_related_concepts_section  (structural section injection)
       - _SECTION_PAREN_RE / _CITE_WITH_SECTION_RE cleanup (data noise)
       - normalize_image_reference_markers (structured [[IMG:N-M]] protocol)
       - unescape_dollar_delimiters        (LLM output \\$ fix)
@@ -43,6 +98,8 @@ def postprocess_answer(text: str, valid_labels: Optional[set] = None) -> Tuple[s
     """
     # Data-layer structural cleanup (no rendering changes).
     text = pp_markdown.sanitize_answer_data_only(text)
+    # Idempotent guard: keep only the first "## 检索综述" heading.
+    text = dedupe_retrieval_overview_heading(text)
     # Structured image markers (frontend depends on this protocol).
     text = pp_images.normalize_image_reference_markers(text, valid_labels)
     # Fix escaped dollar delimiters from LLM output.

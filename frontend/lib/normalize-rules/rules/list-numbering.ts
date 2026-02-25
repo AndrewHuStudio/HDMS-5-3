@@ -5,16 +5,15 @@
  * sequentially numbered (1. 2. 3.) instead of all being "1.".
  */
 
-import {
-  parseMarkdownBlocks,
-} from "@/features/qa/formatting";
 import { registerRules } from "../registry";
 import type { NormalizeContext } from "../types";
 
-function normalizeListBlockContent(blockContent: string): string {
-  const lines = blockContent.split(/\r?\n/);
+function normalizeListContent(content: string): string {
+  const lines = content.split(/\r?\n/);
   let activeIndent = "";
   let orderedCounter = 0;
+  let changed = false;
+
   const isOrderedListInterludeLine = (trimmed: string): boolean => {
     const pipeCount = (trimmed.match(/\|/g) || []).length;
     return (
@@ -29,10 +28,48 @@ function normalizeListBlockContent(blockContent: string): string {
     );
   };
 
-  return lines
+  const normalized = lines
     .map((line) => {
       const trimmed = line.trim();
       if (!trimmed) return line;
+
+      const orderedMatch = line.match(/^(\s*)(\*{1,2})?\s*(\d+)([.)．])(\s*)(.+?)(?:\s*(\*{1,2}))?\s*$/);
+      if (orderedMatch) {
+        const indent = orderedMatch[1] ?? "";
+        const wrapperOpen = orderedMatch[2] ?? "";
+        const originalNum = parseInt(orderedMatch[3] ?? "1", 10);
+        const marker = (orderedMatch[4] ?? ".") as "." | ")" | "．";
+        const spacingAfterMarker = orderedMatch[5] ?? "";
+        const body = orderedMatch[6] ?? "";
+        const wrapperClose = orderedMatch[7] ?? "";
+        if (
+          (wrapperOpen && wrapperClose && wrapperOpen !== wrapperClose) ||
+          (!wrapperOpen && wrapperClose) ||
+          (wrapperOpen && !wrapperClose)
+        ) {
+          return line;
+        }
+        if (!spacingAfterMarker && /^\d/.test(body)) {
+          return line;
+        }
+
+        const sameTrack = indent === activeIndent && orderedCounter > 0;
+        const expectedNum = sameTrack ? orderedCounter + 1 : 1;
+
+        if (!sameTrack) {
+          activeIndent = indent;
+        }
+
+        if (originalNum > 1 && Math.abs(originalNum - expectedNum) > 2) {
+          orderedCounter = originalNum;
+          return line;
+        }
+
+        orderedCounter = expectedNum;
+        const rewritten = `${indent}${wrapperOpen}${orderedCounter}${marker} ${body}${wrapperClose}`;
+        if (rewritten !== line) changed = true;
+        return rewritten;
+      }
 
       const sectionBreak =
         /^#{1,6}\s+/.test(trimmed) ||
@@ -43,34 +80,8 @@ function normalizeListBlockContent(blockContent: string): string {
         activeIndent = "";
       }
 
-      const orderedMatch = line.match(/^(\s*)\d+\.\s+(.*)$/);
-      if (orderedMatch) {
-        const indent = orderedMatch[1] ?? "";
-        const body = orderedMatch[2] ?? "";
-        const originalNum = parseInt(line.match(/^\s*(\d+)\./)?.[1] ?? "1", 10);
-
-        if (indent === activeIndent && orderedCounter > 0) {
-          orderedCounter += 1;
-        } else {
-          orderedCounter = 1;
-          activeIndent = indent;
-        }
-
-        if (originalNum > 1 && Math.abs(originalNum - orderedCounter) > 2) {
-          orderedCounter = originalNum;
-          return line;
-        }
-
-        return `${indent}${orderedCounter}. ${body}`;
-      }
-
       const bulletMatch = line.match(/^(\s*)[-*+]\s+/);
       if (bulletMatch) {
-        const bulletIndent = bulletMatch[1] ?? "";
-        if (orderedCounter > 0 && bulletIndent.length <= activeIndent.length) {
-          const normalized = line.trimStart();
-          return `${activeIndent}  ${normalized}`;
-        }
         return line;
       }
 
@@ -86,22 +97,14 @@ function normalizeListBlockContent(blockContent: string): string {
       return line;
     })
     .join("\n");
+
+  return changed ? normalized : content;
 }
 
 /** Exported for external use (e.g. block parser). */
 export function normalizeMarkdownLists(content: string): string {
   if (!content) return content;
-
-  const blocks = parseMarkdownBlocks(content);
-  let changed = false;
-  const out = blocks.map((block) => {
-    if (block.type !== "list") return block.content;
-    const normalized = normalizeListBlockContent(block.content);
-    if (normalized !== block.content) changed = true;
-    return normalized;
-  });
-
-  return changed ? out.join("\n") : content;
+  return normalizeListContent(content);
 }
 
 export const listNumbering = {

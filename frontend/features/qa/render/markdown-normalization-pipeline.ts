@@ -1,15 +1,22 @@
 import type { AnswerRenderPhase } from "@/features/qa/render/assistant-render-state-machine";
-import { normalizeAnswerMarkdownArtifacts } from "@/lib/normalize-answer-markdown-artifacts";
+import { runNormalizationPipeline } from "@/lib/normalize-rules";
+import type { NormalizePhase } from "@/lib/normalize-rules/types";
 
 export interface NormalizeAnswerMarkdownByPhaseArgs {
   content: string;
   renderPhase: AnswerRenderPhase;
 }
 
+/** Map the render-layer phase to the normalize-rules phase (1:1 now). */
+function toNormalizePhase(renderPhase: AnswerRenderPhase): NormalizePhase {
+  return renderPhase; // "streaming" | "finalizing" | "final"
+}
+
 /**
  * Phase-aware markdown normalization:
- * - streaming/finalizing: light mode (stability first, avoid aggressive rewrites)
- * - final: full mode (completeness/readability cleanup)
+ * - streaming:   lightweight safety rules only
+ * - finalizing:  medium-weight rewrite rules (heading/list normalization)
+ * - final:       full rule set (scaffold, promotion, conclusion)
  */
 export function normalizeAnswerMarkdownByPhase(
   args: NormalizeAnswerMarkdownByPhaseArgs,
@@ -17,8 +24,7 @@ export function normalizeAnswerMarkdownByPhase(
   const { content, renderPhase } = args;
   if (!content) return content;
 
-  const lightMode = renderPhase === "streaming" || renderPhase === "finalizing";
-  return normalizeAnswerMarkdownArtifacts(content, {
-    streaming: lightMode,
+  return runNormalizationPipeline(content, {
+    phase: toNormalizePhase(renderPhase),
   });
 }

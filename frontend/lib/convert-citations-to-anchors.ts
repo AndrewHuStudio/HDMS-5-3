@@ -1,1 +1,1 @@
-export { convertCitationsToAnchors } from "@/features/qa/citations/convert-citations-to-anchors";
+export { convertCitationsToAnchors } from "@/features/qa/citation-engine/core/convert-citations-to-anchors";

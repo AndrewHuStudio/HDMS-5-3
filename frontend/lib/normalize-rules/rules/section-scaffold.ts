@@ -22,6 +22,125 @@ function collectHeadingCandidateLineIndexes(text: string): Set<number> {
   return indexes;
 }
 
+/**
+ * Idempotent guard: keep only the first `## 检索综述` heading.
+ * Runs in final phase as a fallback — the backend has its own guard,
+ * but streaming tokens may bypass it if the LLM regenerates the heading.
+ */
+export const dedupeRetrievalOverview = {
+  id: "dedupe-retrieval-overview",
+  order: 1750,
+  apply(text: string, _ctx: NormalizeContext): string {
+    const re = /^##\s+检索综述\s*[:：]?\s*$/gm;
+    let first = true;
+    return text.replace(re, (match) => {
+      if (first) {
+        first = false;
+        return match;
+      }
+      return "";
+    });
+  },
+};
+
+const RETRIEVAL_OVERVIEW_HEADING_RE = /^##\s+检索综述\s*[:：]?\s*$/;
+const RETRIEVAL_STATUS_LINE_RE = /^已检索\s*\d+\s*条候选\s*[，,]\s*融合\s*\d+\s*条结果[。.]?\s*$/;
+const H2_HEADING_RE = /^##\s+\S/;
+
+function trimBlankEdges(lines: string[]): string[] {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && !lines[start].trim()) start += 1;
+  while (end > start && !lines[end - 1].trim()) end -= 1;
+  return lines.slice(start, end);
+}
+
+/**
+ * Keep retrieval overview minimal:
+ * - drop "已检索 x 条候选，融合 y 条结果"
+ * - keep only blockquote-based retrieval container lines under "## 检索综述"
+ * - if no following H2 exists, preserve removed body by migrating it to "## 详细解析"
+ */
+export const retrievalOverviewCleanup = {
+  id: "retrieval-overview-cleanup",
+  order: 1760,
+  apply(text: string, _ctx: NormalizeContext): string {
+    const lines = text.split("\n");
+    const out: string[] = [];
+    let changed = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (!RETRIEVAL_OVERVIEW_HEADING_RE.test(trimmed)) {
+        out.push(line);
+        continue;
+      }
+
+      out.push(line);
+
+      const sectionLines: string[] = [];
+      while (i + 1 < lines.length && !H2_HEADING_RE.test(lines[i + 1].trim())) {
+        i += 1;
+        sectionLines.push(lines[i]);
+      }
+      const hasFollowingH2 = i + 1 < lines.length && H2_HEADING_RE.test(lines[i + 1].trim());
+
+      const hasQuoteContainer = sectionLines.some((entry) => /^\s*>/.test(entry));
+
+      if (!hasQuoteContainer) {
+        for (const entry of sectionLines) {
+          if (RETRIEVAL_STATUS_LINE_RE.test(entry.trim())) {
+            changed = true;
+            continue;
+          }
+          out.push(entry);
+        }
+      } else {
+        const detailRemainder: string[] = [];
+        for (const entry of sectionLines) {
+          const entryTrimmed = entry.trim();
+          if (!entryTrimmed) {
+            if (out.length > 0 && out[out.length - 1].trim()) out.push(entry);
+            continue;
+          }
+          if (RETRIEVAL_STATUS_LINE_RE.test(entryTrimmed)) {
+            changed = true;
+            continue;
+          }
+          if (/^\s*>/.test(entry)) {
+            out.push(entry);
+            continue;
+          }
+          detailRemainder.push(entry);
+          changed = true;
+        }
+        while (out.length > 0 && !out[out.length - 1].trim()) out.pop();
+
+        if (!hasFollowingH2) {
+          const migrated = trimBlankEdges(detailRemainder);
+          if (migrated.length > 0) {
+            if (out.length > 0 && out[out.length - 1].trim()) out.push("");
+            if (!H2_HEADING_RE.test(migrated[0].trim())) {
+              out.push("## 详细解析", "");
+            }
+            out.push(...migrated);
+          }
+        }
+      }
+
+      if (hasFollowingH2) {
+        while (out.length > 0 && !out[out.length - 1].trim()) out.pop();
+        if (out.length > 0 && out[out.length - 1].trim()) out.push("");
+      }
+    }
+
+    while (out.length > 0 && !out[out.length - 1].trim()) out.pop();
+    return changed ? out.join("\n") : text;
+  },
+};
+
 export const sectionScaffold = {
   id: "section-scaffold",
   order: 1800,
@@ -102,4 +221,4 @@ export const headingSequence = {
   },
 };
 
-registerRules(sectionScaffold, headingSequence);
+registerRules(dedupeRetrievalOverview, retrievalOverviewCleanup, sectionScaffold, headingSequence);

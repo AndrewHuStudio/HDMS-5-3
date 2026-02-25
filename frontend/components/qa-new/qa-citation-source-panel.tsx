@@ -8,7 +8,7 @@ import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
 import {
   buildCitationLabelIndexMap,
   CitationLink,
-} from "@/features/qa/citations";
+} from "@/features/qa/citation-engine";
 import { QASources } from "@/components/qa-sources";
 import { cn } from "@/lib/utils";
 
@@ -19,20 +19,23 @@ import { cn } from "@/lib/utils";
 interface UseCitationStateArgs {
   sources: SourceInfo[] | undefined;
   messageId: string;
+  scrollRef?: React.RefObject<HTMLElement | null>;
+  onCitationJump?: (savedScrollTop: number) => void;
 }
 
 export interface CitationState {
   sourcesNormalized: SourceInfo[];
   labelIndexMap: Map<string, number>;
-  activeCitationLabel: string | null;
-  setActiveCitationLabel: (label: string | null) => void;
+  /** instanceId of the currently hovered pill (not citation label) */
+  activeInstanceId: string | null;
+  setActiveInstanceId: (id: string | null) => void;
   handleCitationSelect: (label: string) => void;
   /** Ready-made `a` component override for QAMarkdownRenderer */
   citationAnchorComponent: Components["a"];
 }
 
-export function useCitationState({ sources, messageId }: UseCitationStateArgs): CitationState {
-  const [activeCitationLabel, setActiveCitationLabel] = useState<string | null>(null);
+export function useCitationState({ sources, messageId, scrollRef, onCitationJump }: UseCitationStateArgs): CitationState {
+  const [activeInstanceId, setActiveInstanceId] = useState<string | null>(null);
 
   const sourcesNormalized = useMemo(
     () => normalizeCitationSources(sources ?? []),
@@ -46,18 +49,28 @@ export function useCitationState({ sources, messageId }: UseCitationStateArgs): 
 
   // Reset on message change
   useEffect(() => {
-    setActiveCitationLabel(null);
+    setActiveInstanceId(null);
   }, [messageId]);
 
   const handleCitationSelect = useCallback((label: string) => {
-    setActiveCitationLabel(label);
-    const target = document.getElementById(`source-${label}`);
-    if (target) {
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-      target.classList.add("qa-source-flash");
-      setTimeout(() => target.classList.remove("qa-source-flash"), 1200);
-    }
-  }, []);
+    const container = scrollRef?.current ?? (document.querySelector(".qa-scrollbar") as HTMLElement | null);
+    if (!container) return;
+    const savedScrollTop = container.scrollTop;
+    const target = document.getElementById(`source-${messageId}-${label}`);
+    if (!target) return;
+
+    // Calculate target's offset relative to the scroll container
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const targetOffsetInContainer = targetRect.top - containerRect.top + container.scrollTop;
+    // Center the target in the container
+    const scrollTo = targetOffsetInContainer - container.clientHeight / 2 + target.offsetHeight / 2;
+
+    onCitationJump?.(savedScrollTop);
+    container.scrollTo({ top: scrollTo, behavior: "smooth" });
+    target.classList.add("qa-source-flash");
+    setTimeout(() => target.classList.remove("qa-source-flash"), 1200);
+  }, [messageId, scrollRef, onCitationJump]);
 
   const citationAnchorComponent: Components["a"] = useMemo(() => {
     const AnchorComponent = ({ href, children }: { href?: string; children?: ReactNode }) => (
@@ -65,8 +78,8 @@ export function useCitationState({ sources, messageId }: UseCitationStateArgs): 
         href={href}
         sources={sourcesNormalized}
         labelIndexMap={labelIndexMap}
-        activeCitationLabel={activeCitationLabel}
-        onCitationHover={setActiveCitationLabel}
+        activeInstanceId={activeInstanceId}
+        onCitationHover={setActiveInstanceId}
         onCitationSelect={handleCitationSelect}
       >
         {children}
@@ -74,13 +87,13 @@ export function useCitationState({ sources, messageId }: UseCitationStateArgs): 
     );
     AnchorComponent.displayName = "CitationAnchor";
     return AnchorComponent;
-  }, [sourcesNormalized, labelIndexMap, activeCitationLabel, handleCitationSelect]);
+  }, [sourcesNormalized, labelIndexMap, activeInstanceId, handleCitationSelect]);
 
   return {
     sourcesNormalized,
     labelIndexMap,
-    activeCitationLabel,
-    setActiveCitationLabel,
+    activeInstanceId,
+    setActiveInstanceId,
     handleCitationSelect,
     citationAnchorComponent,
   };
@@ -92,9 +105,8 @@ export function useCitationState({ sources, messageId }: UseCitationStateArgs): 
 
 interface QACitationSourcePanelProps {
   sources: SourceInfo[];
+  messageId: string;
   query?: string;
-  activeCitation: string | null;
-  onCitationHover: (label: string | null) => void;
   onCitationSelect: (label: string) => void;
   layout: "inline" | "sidebar";
   className?: string;
@@ -102,9 +114,8 @@ interface QACitationSourcePanelProps {
 
 export function QACitationSourcePanel({
   sources,
+  messageId,
   query,
-  activeCitation,
-  onCitationHover,
   onCitationSelect,
   layout,
   className,
@@ -118,12 +129,13 @@ export function QACitationSourcePanel({
     )}>
       <QASources
         sources={sources}
+        messageId={messageId}
         query={query}
-        activeCitation={activeCitation}
-        onCitationHover={onCitationHover}
         onCitationSelect={onCitationSelect}
         layout={layout}
       />
     </aside>
   );
 }
+
+

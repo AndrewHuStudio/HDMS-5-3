@@ -1,1 +1,1 @@
-export { stripInlineCitationLabels } from "@/features/qa/citations/strip-inline-citation-labels";
+export { stripInlineCitationLabels } from "@/features/qa/citation-engine/core/strip-inline-citation-labels";

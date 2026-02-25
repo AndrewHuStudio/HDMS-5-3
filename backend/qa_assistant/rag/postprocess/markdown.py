@@ -20,6 +20,9 @@ _MAJOR_SECTION_TITLE_RE = re.compile(r"^(?:检索综述|详细解析|相关概�
 _SUB_HEADING_RE = re.compile(r"^(#{3,})\s+(.+?)\s*$")
 # Setext underline markers that can accidentally promote the previous body line to h2/h1.
 _SETEXT_UNDERLINE_RE = re.compile(r"^\s*(?:={3,}|-{3,})\s*$")
+_RETRIEVAL_STATUS_LINE_RE = re.compile(
+    r"^已检索\s*\d+\s*条候选\s*[，,]\s*融合\s*\d+\s*条结果[。.]?\s*$"
+)
 # Best-effort markdown table detection (header + separator line).
 _MD_TABLE_SEP_LINE_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
 
@@ -107,7 +110,11 @@ def _ensure_related_concepts_section(text: str) -> str:
                     insert_at = idx
                     break
                 continue
-            if stripped.startswith(">") or stripped.startswith("检索资料清单"):
+            if (
+                stripped.startswith(">")
+                or stripped.startswith("检索资料清单")
+                or bool(_RETRIEVAL_STATUS_LINE_RE.match(stripped))
+            ):
                 passed_overview_content = True
                 continue
             # Non-blank, non-blockquote line — this is concept content.
@@ -210,8 +217,13 @@ def _insert_blank_line_before_lists(text: str) -> str:
 def sanitize_answer(text: str) -> str:
     """Structural cleanup of LLM output before citation/math processing.
 
-    NOTE: This is the legacy entry point that includes rendering-layer changes.
-    New code should use sanitize_answer_data_only() instead.
+    NOTE: This is the legacy entry point.  New code should use
+    sanitize_answer_data_only() instead.
+
+    Rendering-layer operations (#6 h1→h2, #7 related-concepts body demotion,
+    #8 list blank-line insertion) have been removed — they are now handled
+    exclusively by the frontend normalize-rules pipeline to avoid
+    double-processing that breaks streaming ↔ final consistency.
     """
     if not text:
         return text
@@ -224,15 +236,11 @@ def sanitize_answer(text: str) -> str:
     # Remove leaked <think> / </think> tags.
     text = _THINK_TAG_RE.sub("", text)
 
-    # Demote h1 → h2 so the answer doesn't clash with the page title.
-    text = _H1_RE.sub("## ", text)
-    # Recover missing "相关概念" section heading for model outputs that skipped it.
-    text = _ensure_related_concepts_section(text)
-    # Ensure related concepts are presented as body text, not heading blocks.
-    text = _normalize_related_concepts_body(text)
-
-    # Ensure blank line before list items (markdown requires it for proper parsing).
-    text = _insert_blank_line_before_lists(text)
+    # Removed (now frontend-only via normalize-rules pipeline):
+    #   - related-concepts section injection → removed (no forced section title)
+    #   - h1 → h2 demotion              → heading-hierarchy rule
+    #   - related concepts body demotion → related-concepts rule
+    #   - list blank line insertion      → heading-blank-lines rule
 
     return text
 
@@ -243,9 +251,9 @@ def sanitize_answer_data_only(text: str) -> str:
     Keeps:
       - section-index noise removal (data noise)
       - mixed citation token normalization (data noise)
-      - _ensure_related_concepts_section (structural section injection)
 
     Removed (now frontend-only via normalize-rules pipeline):
+      - related-concepts section injection → removed (no forced section title)
       - <think> tag stripping          → strip-artifacts rule
       - h1 → h2 demotion              → heading-hierarchy rule
       - related concepts body demotion → related-concepts rule
@@ -258,9 +266,6 @@ def sanitize_answer_data_only(text: str) -> str:
     text = _SECTION_PAREN_RE.sub("", text)
     # Normalize mixed tokens like [1-1/3.0.3] → [1-1].
     text = _CITE_WITH_SECTION_RE.sub(r"[\1]", text)
-    # Recover missing "相关概念" section heading for model outputs that skipped it.
-    text = _ensure_related_concepts_section(text)
-
     return text
 
 

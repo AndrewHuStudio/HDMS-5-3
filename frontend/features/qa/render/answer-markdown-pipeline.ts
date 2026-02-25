@@ -1,4 +1,4 @@
-import { processAnswerCitations } from "@/features/qa/citations";
+import { processAnswerCitations } from "@/features/qa/citation-engine";
 import type { SourceInfo } from "@/features/qa/types";
 import type { AnswerRenderPhase } from "@/features/qa/render/assistant-render-state-machine";
 import { injectSourceTables } from "@/lib/inject-source-tables";
@@ -115,3 +115,4 @@ export function buildAnswerMarkdown(args: BuildAnswerMarkdownArgs): string {
     : withImages;
   return collapseFigureMentions(withTablesAndImages);
 }
+
