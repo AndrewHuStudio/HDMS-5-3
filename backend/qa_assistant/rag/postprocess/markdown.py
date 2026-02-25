@@ -208,7 +208,11 @@ def _insert_blank_line_before_lists(text: str) -> str:
 
 
 def sanitize_answer(text: str) -> str:
-    """Structural cleanup of LLM output before citation/math processing."""
+    """Structural cleanup of LLM output before citation/math processing.
+
+    NOTE: This is the legacy entry point that includes rendering-layer changes.
+    New code should use sanitize_answer_data_only() instead.
+    """
     if not text:
         return text
 
@@ -229,6 +233,33 @@ def sanitize_answer(text: str) -> str:
 
     # Ensure blank line before list items (markdown requires it for proper parsing).
     text = _insert_blank_line_before_lists(text)
+
+    return text
+
+
+def sanitize_answer_data_only(text: str) -> str:
+    """Data-layer cleanup only — no rendering/formatting changes.
+
+    Keeps:
+      - section-index noise removal (data noise)
+      - mixed citation token normalization (data noise)
+      - _ensure_related_concepts_section (structural section injection)
+
+    Removed (now frontend-only via normalize-rules pipeline):
+      - <think> tag stripping          → strip-artifacts rule
+      - h1 → h2 demotion              → heading-hierarchy rule
+      - related concepts body demotion → related-concepts rule
+      - list blank line insertion      → heading-blank-lines rule
+    """
+    if not text:
+        return text
+
+    # Remove leaked "section index" noise like （2.2）, (3.0.3).
+    text = _SECTION_PAREN_RE.sub("", text)
+    # Normalize mixed tokens like [1-1/3.0.3] → [1-1].
+    text = _CITE_WITH_SECTION_RE.sub(r"[\1]", text)
+    # Recover missing "相关概念" section heading for model outputs that skipped it.
+    text = _ensure_related_concepts_section(text)
 
     return text
 

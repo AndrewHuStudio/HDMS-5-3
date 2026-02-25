@@ -1,5 +1,5 @@
 import type { SetbackViolationResult } from "./types";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { resolveApiBase } from "@/lib/api-base";
 
 export interface SetbackCheckRequestParams {
   model_path: string;
@@ -11,7 +11,7 @@ export interface SetbackCheckRequestParams {
 export async function checkSetback(
   params: SetbackCheckRequestParams
 ): Promise<SetbackViolationResult> {
-  const apiBase = normalizeApiBase(API_BASE);
+  const apiBase = await resolveApiBase();
   const endpoint = `${apiBase}/setback-check`;
 
   const response = await fetch(endpoint, {

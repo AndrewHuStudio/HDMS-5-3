@@ -1,10 +1,10 @@
 import type { SightCorridorResult, SightCorridorCheckParams, CorridorCollisionResult, CorridorCollisionParams } from "./types";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { resolveApiBase } from "@/lib/api-base";
 
 export async function checkSightCorridor(
   params: SightCorridorCheckParams
 ): Promise<SightCorridorResult> {
-  const apiBase = normalizeApiBase(API_BASE);
+  const apiBase = await resolveApiBase();
   const endpoint = `${apiBase}/sight-corridor/check`;
 
   const response = await fetch(endpoint, {
@@ -29,7 +29,7 @@ export async function checkSightCorridor(
 export async function checkCorridorCollision(
   params: CorridorCollisionParams
 ): Promise<CorridorCollisionResult> {
-  const apiBase = normalizeApiBase(API_BASE);
+  const apiBase = await resolveApiBase();
   const endpoint = `${apiBase}/sight-corridor/collision`;
 
   const response = await fetch(endpoint, {

@@ -5,7 +5,6 @@ export function resolveThinkingHeaderState(input: {
   thinkingDone?: boolean;
   hasThinkingTokens: boolean;
 }): ThinkingHeaderState {
-  const shouldShowHistory =
-    input.hasThinkingTokens && (Boolean(input.thinkingDone) || !input.isStreaming);
+  const shouldShowHistory = input.hasThinkingTokens;
   return shouldShowHistory ? "history" : "thinking";
 }

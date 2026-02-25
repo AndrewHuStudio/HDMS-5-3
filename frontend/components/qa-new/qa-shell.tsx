@@ -1,32 +1,24 @@
 "use client";
 
-import { isValidElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent, ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
-import rehypeKatex from "rehype-katex";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ChevronDown, ImagePlus, Send, Square, X } from "lucide-react";
 import { ThinkingProcess } from "@/components/qa-thinking";
-import { QASources } from "@/components/qa-sources";
 import { QAFeedback } from "@/components/qa-feedback";
 import { QAExportButton } from "@/components/qa-export-button";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
-import type { ChatMessage, RetrievalStats, SourceInfo } from "@/features/qa/types";
+import type { ChatMessage } from "@/features/qa/types";
 import { cn } from "@/lib/utils";
-import { API_BASE, QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
-import { QA_REMARK_PLUGINS } from "@/lib/qa-markdown-plugins";
-import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
 import { buildAnswerMarkdown } from "@/features/qa/render/answer-markdown-pipeline";
 import {
   buildAssistantRenderModel,
   deriveAssistantRenderState,
   resolveAnswerRenderPhase,
 } from "@/features/qa/render/assistant-render-state-machine";
-import {
-  buildCitationLabelIndexMap,
-  CitationLink,
-} from "@/features/qa/citations";
+import { QAMarkdownRenderer } from "./qa-markdown-renderer";
+import { useCitationState, QACitationSourcePanel } from "./qa-citation-source-panel";
 
 interface QAShellProps {
   title?: string;
@@ -56,36 +48,6 @@ function useImageLightbox() {
   return { lightboxSrc, open, close };
 }
 
-const RETRIEVAL_DOC_NAME_PATTERN = /([A-Za-z0-9\u4e00-\u9fff_\-（）()《》【】·、]+\.pdf)/giu;
-
-function highlightRetrievalDocNames(node: ReactNode, keyPrefix = "doc"): ReactNode {
-  if (typeof node === "string") {
-    const parts: ReactNode[] = [];
-    let last = 0;
-    let index = 0;
-    RETRIEVAL_DOC_NAME_PATTERN.lastIndex = 0;
-    for (const match of node.matchAll(RETRIEVAL_DOC_NAME_PATTERN)) {
-      const start = match.index ?? 0;
-      const full = match[0];
-      if (start > last) parts.push(node.slice(last, start));
-      parts.push(
-        <span key={`${keyPrefix}-${index}`} className="italic text-sky-600/80">
-          {full}
-        </span>
-      );
-      last = start + full.length;
-      index += 1;
-    }
-    if (last === 0) return node;
-    if (last < node.length) parts.push(node.slice(last));
-    return parts;
-  }
-  if (Array.isArray(node)) {
-    return node.map((child, idx) => highlightRetrievalDocNames(child, `${keyPrefix}-${idx}`));
-  }
-  return node;
-}
-
 /** Extract recommended questions from <!--RECOMMENDED_QUESTIONS ... --> block */
 function extractRecommendedQuestions(content: string): {
   cleanContent: string;
@@ -102,56 +64,6 @@ function extractRecommendedQuestions(content: string): {
 
   const cleanContent = content.replace(pattern, "").trimEnd();
   return { cleanContent, questions };
-}
-
-function collectRetrievalDocNames(
-  sources: SourceInfo[],
-  preferredNames: string[] = [],
-): string[] {
-  const deduped: string[] = [];
-  const seen = new Set<string>();
-  const pushName = (raw: string) => {
-    const name = String(raw || "").trim();
-    if (!name) return;
-    const key = name.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    deduped.push(name);
-  };
-
-  preferredNames.forEach(pushName);
-  for (const src of sources) {
-    if (src.type !== "document") continue;
-    pushName(src.name);
-  }
-
-  return deduped;
-}
-
-/** Resolve image src: convert relative /rag/... paths to absolute URLs */
-function resolveImageSrc(src: string): string {
-  if (!src) return src;
-  if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("data:")) {
-    return src;
-  }
-  if (src.startsWith("/api/")) return src;
-  const base = src.startsWith("/rag/")
-    ? normalizeApiBase(QA_API_BASE)
-    : normalizeApiBase(API_BASE);
-  return src.startsWith("/") ? `${base}${src}` : `${base}/${src}`;
-}
-
-const FIGURE_CAPTION_TEXT_RE =
-  /^(?:FIGCAPTION\s+)?(?:图\s*\d+(?:[.\-]\d+){0,3}\s*[：:.]|[（(]?\s*(?:图示|图注|图例)\s*[：:])/u;
-
-function flattenReactText(node: ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map((child) => flattenReactText(child)).join("");
-  if (isValidElement(node)) {
-    const withChildren = node as { props?: { children?: ReactNode } };
-    return flattenReactText(withChildren.props?.children);
-  }
-  return "";
 }
 
 const INPUT_MIN_LINES = 1;
@@ -588,7 +500,7 @@ export function QAShell({
   );
 }
 
-/** Renders assistant message with thinking, retrieval stats, markdown, citations, sources, feedback, and recommended questions. */
+/** Renders assistant message: orchestrates markdown renderer, citation/source panel, thinking, graph, feedback. */
 function AssistantContent({
   message,
   embedded,
@@ -616,25 +528,17 @@ function AssistantContent({
     thinkingDone,
     finalizedByServer,
   } = message;
-  const [activeCitationLabel, setActiveCitationLabel] = useState<string | null>(null);
-  const markdownRef = useRef<HTMLDivElement>(null);
 
-  // Detect overflowing KaTeX display formulas and add scroll-hint class.
-  useEffect(() => {
-    const el = markdownRef.current;
-    if (!el) return;
-    const displays = el.querySelectorAll<HTMLElement>(".katex-display");
-    displays.forEach((d) => {
-      if (d.scrollWidth > d.clientWidth + 2) {
-        d.classList.add("katex-overflow");
-      } else {
-        d.classList.remove("katex-overflow");
-      }
-    });
-  }, [content, isStreaming]);
+  // --- Citation state (isolated module) ---
+  const {
+    sourcesNormalized,
+    activeCitationLabel,
+    setActiveCitationLabel,
+    handleCitationSelect,
+    citationAnchorComponent,
+  } = useCitationState({ sources, messageId: message.id });
 
-  const sourcesNormalized = useMemo(() => normalizeCitationSources(sources ?? []), [sources]);
-  const labelIndexMap = useMemo(() => buildCitationLabelIndexMap(sourcesNormalized), [sourcesNormalized]);
+  // --- Render state derivation ---
   const renderState = deriveAssistantRenderState(message);
   const answerRenderPhase = resolveAnswerRenderPhase({
     state: renderState,
@@ -657,13 +561,6 @@ function AssistantContent({
     });
   }, [cleanContent, sourcesNormalized, isStreaming, answerRenderPhase, precedingQuestion, finalizedByServer]);
 
-  const retrievalDocNames = useMemo(
-    () => collectRetrievalDocNames(
-      sourcesNormalized,
-      retrievalStats?.document_names || [],
-    ),
-    [sourcesNormalized, retrievalStats?.document_names],
-  );
   const hasThinkingTokens = Boolean((thinking || "").trim());
   const renderModel = buildAssistantRenderModel({
     state: renderState,
@@ -673,22 +570,9 @@ function AssistantContent({
     hasRetrievalStats: Boolean(retrievalStats),
   });
 
-  useEffect(() => {
-    setActiveCitationLabel(null);
-  }, [message.id]);
-
-  const handleCitationSelect = useCallback((label: string) => {
-    setActiveCitationLabel(label);
-    const target = document.getElementById(`source-${label}`);
-    if (target) {
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-      target.classList.add("qa-source-flash");
-      setTimeout(() => target.classList.remove("qa-source-flash"), 1200);
-    }
-  }, []);
-
   const hasSourcePanel = Boolean(sourcesNormalized && sourcesNormalized.length > 0 && !isStreaming);
   const useSidebarSourceLayout = hasSourcePanel && !embedded;
+
   return (
     <div>
       {renderModel.showThinking && (
@@ -721,157 +605,31 @@ function AssistantContent({
             useSidebarSourceLayout && "mt-1 grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]"
           )}
         >
-          <div ref={markdownRef} className="qa-markdown prose prose-sm max-w-none break-words dark:prose-invert">
-            <ReactMarkdown
-              remarkPlugins={QA_REMARK_PLUGINS}
-              rehypePlugins={[rehypeKatex]}
-              components={{
-                h2: ({ children }) => (
-                  <h2 className="qa-heading-1 mt-5 mb-2 text-base font-bold border-l-4 border-primary pl-2">
-                    {children}
-                  </h2>
-                ),
-                h3: ({ children }) => (
-                  <h3 className="qa-heading-2 mt-4 mb-1.5 text-[15px] font-semibold text-primary/85">
-                    {children}
-                  </h3>
-                ),
-                h4: ({ children }) => (
-                  <h4 className="qa-heading-3 mt-3 mb-1 text-sm font-medium text-foreground/80">
-                    {children}
-                  </h4>
-                ),
-                p: ({ children }) => {
-                  const flattened = flattenReactText(children).trim();
-                  const isPlainTextOnly =
-                    typeof children === "string" ||
-                    (Array.isArray(children) && children.every((c) => typeof c === "string"));
-                  const plain = isPlainTextOnly
-                    ? String(Array.isArray(children) ? children.join("") : children).trim()
-                    : "";
-                  const isFigureCaption = FIGURE_CAPTION_TEXT_RE.test(flattened);
+          {/* Markdown rendering (isolated module) */}
+          <QAMarkdownRenderer
+            markdown={answerMarkdown}
+            componentOverrides={{ a: citationAnchorComponent }}
+            showStreamingCursor={renderModel.showStreamingCursor}
+            onImageClick={onImageClick}
+          />
 
-                  if (isFigureCaption) {
-                    const shown = (plain || flattened).replace(/^FIGCAPTION\s+/u, "");
-                    return (
-                      <p className="mt-1 mb-3 text-[11px] leading-snug text-left text-muted-foreground/75">
-                        {isPlainTextOnly ? shown : children}
-                      </p>
-                    );
-                  }
-
-                  return <p className="mb-2 last:mb-0">{children}</p>;
-                },
-                ul: ({ children }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
-                ol: ({ children }) => <ol className="mb-2 list-decimal pl-5">{children}</ol>,
-                li: ({ children }) => {
-                  const plainText =
-                    typeof children === "string"
-                      ? children
-                      : Array.isArray(children)
-                        ? children.filter((c) => typeof c === "string").join("").trim()
-                        : "";
-                  const isRetrievalReason = plainText.startsWith("资料调用理由（");
-                  const isRetrievalList = plainText.startsWith("检索资料清单");
-                  const className = isRetrievalReason
-                    ? "mb-1 last:mb-0"
-                    : "mb-1 last:mb-0";
-                  const content = (isRetrievalReason || isRetrievalList)
-                    ? highlightRetrievalDocNames(children, "retrieval-doc")
-                    : children;
-                  return <li className={className}>{content}</li>;
-                },
-                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                em: ({ children }) => <em className="italic text-sky-700/80">{children}</em>,
-                code: ({ children, className }) => {
-                  const isBlock = className?.includes("language-");
-                  return isBlock ? (
-                    <code className={`${className ?? ""} block whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs`}>
-                      {children}
-                    </code>
-                  ) : (
-                    <code className="rounded bg-muted px-1 py-0.5 text-xs">{children}</code>
-                  );
-                },
-                pre: ({ children }) => <pre className="mb-2 whitespace-pre-wrap break-words">{children}</pre>,
-                blockquote: ({ children }) => (
-                  <blockquote className="rounded-md border border-border/55 bg-background/85 px-3 py-2 text-xs leading-relaxed text-muted-foreground shadow-sm">
-                    {children}
-                  </blockquote>
-                ),
-                table: ({ children }) => (
-                  <div className="qa-table-wrap mb-2 overflow-x-hidden rounded-md border border-border/80 bg-white/90 dark:bg-background/75">
-                    <table className="w-full table-fixed border-collapse text-xs">{children}</table>
-                  </div>
-                ),
-                th: ({ children }) => (
-                  <th className="border border-border bg-white/80 px-2 py-1 text-left font-semibold break-words dark:bg-muted/45">
-                    {children}
-                  </th>
-                ),
-                td: ({ children }) => (
-                  <td className="border border-border bg-white/55 px-2 py-1 break-words dark:bg-transparent">{children}</td>
-                ),
-                img: ({ src, alt }) => {
-                  const resolved = resolveImageSrc(typeof src === "string" ? src : "");
-                  return (
-                    <img
-                      src={resolved}
-                      alt={alt ?? "参考图片"}
-                      className="my-2 max-h-80 cursor-zoom-in rounded border border-border object-contain transition-opacity hover:opacity-80"
-                      loading="lazy"
-                      onClick={() => onImageClick?.(resolved)}
-                      onError={(e) => {
-                        const img = e.target as HTMLImageElement;
-                        img.alt = "";
-                        img.title = "参考图片暂不可用";
-                        // Hide broken-image icon and fallback alt text to keep layout clean.
-                        img.style.display = "none";
-                      }}
-                    />
-                  );
-                },
-                a: ({ href, children }) => {
-                  return (
-                    <CitationLink
-                      href={href}
-                      sources={sourcesNormalized}
-                      labelIndexMap={labelIndexMap}
-                      activeCitationLabel={activeCitationLabel}
-                      onCitationHover={setActiveCitationLabel}
-                      onCitationSelect={handleCitationSelect}
-                    >
-                      {children}
-                    </CitationLink>
-                  );
-                },
-              }}
-            >
-              {answerMarkdown}
-            </ReactMarkdown>
-            {renderModel.showStreamingCursor && (
-              <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-foreground" />
-            )}
-          </div>
-
-          {hasSourcePanel && sourcesNormalized && (
-            <aside className={cn(useSidebarSourceLayout ? "self-start xl:sticky xl:top-4" : "mt-2")}>
-              <QASources
-                sources={sourcesNormalized}
-                query={precedingQuestion}
-                activeCitation={activeCitationLabel}
-                onCitationHover={setActiveCitationLabel}
-                onCitationSelect={handleCitationSelect}
-                layout={useSidebarSourceLayout ? "sidebar" : "inline"}
-              />
-            </aside>
+          {/* Citation source panel (isolated module) */}
+          {hasSourcePanel && (
+            <QACitationSourcePanel
+              sources={sourcesNormalized}
+              query={precedingQuestion}
+              activeCitation={activeCitationLabel}
+              onCitationHover={setActiveCitationLabel}
+              onCitationSelect={handleCitationSelect}
+              layout={useSidebarSourceLayout ? "sidebar" : "inline"}
+            />
           )}
         </div>
       ) : renderModel.showStreamingCursor ? (
         <span className="inline-block h-4 w-0.5 animate-pulse bg-foreground" />
       ) : null}
 
-      {/* Recommended questions - subtle inline chips */}
+      {/* Recommended questions */}
       {!isStreaming && recommendedQuestions.length > 0 && (
         <div className="mt-3 pt-2">
           <p className="mb-1.5 text-xs text-muted-foreground">您可能还想了解：</p>
@@ -899,7 +657,6 @@ function AssistantContent({
           onFeedbackChange={(fb) => onFeedback(message.id, fb)}
         />
       )}
-
     </div>
   );
 }

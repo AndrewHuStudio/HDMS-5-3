@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2, Loader2, Eye, X } from "lucide-react";
 import type { HeightCheckSetbackVolume } from "@/lib/height-check-types";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { resolveApiBase } from "@/lib/api-base";
 
 interface HeightCheckPanelPureProps {
   modelFilePath: string | null;
@@ -56,7 +56,6 @@ export function HeightCheckPanelPure({
   onShowHeightCheckLabelsChange,
   onWarningsChange,
 }: HeightCheckPanelPureProps) {
-  const apiBase = normalizeApiBase(API_BASE);
   const [isChecking, setIsChecking] = useState(false);
   const [localResults, setLocalResults] = useState<BuildingResult[]>([]);
   const [localWarnings, setLocalWarnings] = useState<string[]>([]);
@@ -129,6 +128,7 @@ export function HeightCheckPanelPure({
 
         const formData = new FormData();
         formData.append("file", modelFile);
+        const apiBase = await resolveApiBase();
 
         const uploadUrl = `${apiBase}/models/import?skip_layers=true`;
         const uploadResponse = await fetch(uploadUrl, {
@@ -173,6 +173,7 @@ export function HeightCheckPanelPure({
       };
       console.log("[DEBUG] 请求体:", JSON.stringify(requestBody, null, 2));
 
+      const apiBase = await resolveApiBase();
       const checkUrl = `${apiBase}/height-check/pure-python`;
       const response = await fetch(checkUrl, {
         method: "POST",
@@ -222,6 +223,7 @@ export function HeightCheckPanelPure({
     } catch (error) {
       console.error("检测失败:", error);
       if (error instanceof TypeError && error.message.includes("Failed to fetch")) {
+        const apiBase = await resolveApiBase({ forceRefresh: true });
         setError(`无法连接后端服务，请确认后端已启动（${apiBase}）`);
       } else {
         setError(error instanceof Error ? error.message : "未知错误");

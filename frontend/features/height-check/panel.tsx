@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2, Loader2, Eye, X } from "lucide-react";
 import { useModelStore } from "@/lib/stores/model-store";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { resolveApiBase } from "@/lib/api-base";
 import { checkHeight } from "./api";
 import { useHeightCheckStore } from "./store";
 
@@ -19,7 +19,6 @@ const DEFAULT_LAYERS = {
 };
 
 export function HeightCheckPanel() {
-  const apiBase = normalizeApiBase(API_BASE);
   const modelFilePath = useModelStore((state) => state.modelFilePath);
   const modelFile = useModelStore((state) => state.externalModelFile);
   const setModelFilePath = useModelStore((state) => state.setModelFilePath);
@@ -62,6 +61,7 @@ export function HeightCheckPanel() {
 
         const formData = new FormData();
         formData.append("file", modelFile);
+        const apiBase = await resolveApiBase();
 
         const uploadUrl = `${apiBase}/models/import?skip_layers=true`;
         const uploadResponse = await fetch(uploadUrl, {
@@ -106,6 +106,7 @@ export function HeightCheckPanel() {
       setShowHeightCheckLabels(true);
     } catch (err) {
       if (err instanceof TypeError && err.message.includes("Failed to fetch")) {
+        const apiBase = await resolveApiBase({ forceRefresh: true });
         setError(`无法连接后端服务，请确认后端已启动（${apiBase}）`);
       } else {
         setError(err instanceof Error ? err.message : "未知错误");

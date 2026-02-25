@@ -1,5 +1,5 @@
 import type { HeightCheckResponse } from "./types";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { resolveApiBase } from "@/lib/api-base";
 
 export interface HeightCheckRequestParams {
   model_path: string;
@@ -11,7 +11,7 @@ export interface HeightCheckRequestParams {
 export async function checkHeight(
   params: HeightCheckRequestParams
 ): Promise<HeightCheckResponse> {
-  const apiBase = normalizeApiBase(API_BASE);
+  const apiBase = await resolveApiBase();
   const endpoint = `${apiBase}/height-check/pure-python`;
 
   const response = await fetch(endpoint, {

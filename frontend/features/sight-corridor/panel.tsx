@@ -4,12 +4,10 @@ import * as THREE from "three";
 import { PlanViewport } from "@/components/city-scene";
 import { SightCorridorPanel } from "@/components/sight-corridor-panel";
 import { useModelStore } from "@/lib/stores/model-store";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { resolveApiBase } from "@/lib/api-base";
 import { useSightCorridorStore } from "./store";
 
 export function SightCorridorPanelAdapter() {
-  const apiBase = normalizeApiBase(API_BASE);
-
   const modelFilePath = useModelStore((state) => state.modelFilePath);
   const modelFile = useModelStore((state) => state.externalModelFile);
   const setModelFilePath = useModelStore((state) => state.setModelFilePath);
@@ -41,6 +39,7 @@ export function SightCorridorPanelAdapter() {
     setCollisionResult(null);
     setShowCorridorLayer(true);
     try {
+      const apiBase = await resolveApiBase();
       const checkUrl = `${apiBase}/sight-corridor/collision`;
       const response = await fetch(checkUrl, {
         method: "POST",

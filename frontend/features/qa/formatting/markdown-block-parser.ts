@@ -193,6 +193,21 @@ export function parseMarkdownBlocks(text: string): MarkdownBlock[] {
       while (index < lines.length) {
         const nextLine = lines[index] ?? "";
         if (!nextLine.trim()) {
+          // Blank line: peek ahead to see if the list continues after it.
+          // If the next non-blank line is a list item or indented continuation,
+          // absorb the blank line(s) and keep going; otherwise end the block.
+          let peek = index + 1;
+          while (peek < lines.length && !(lines[peek] ?? "").trim()) peek++;
+          const afterBlank = lines[peek] ?? "";
+          if (isListStart(afterBlank) || LIST_CONTINUATION_RE.test(afterBlank)) {
+            // Absorb blank lines and continue the list block
+            while (index < peek) {
+              blockLines.push(lines[index] ?? "");
+              index += 1;
+            }
+            continue;
+          }
+          // List ends here — absorb the trailing blank line and stop
           blockLines.push(nextLine);
           index += 1;
           break;

@@ -21,13 +21,32 @@ def convert_formulas_to_latex(text: str) -> str:
 
 
 def postprocess_answer(text: str, valid_labels: Optional[set] = None) -> Tuple[str, Dict[str, str]]:
-    """Apply all post-processing steps to an LLM answer."""
-    text = sanitize_answer(text)
-    text = pp_markdown.normalize_markdown_image_syntax(text)
-    text = pp_markdown.strip_disallowed_markdown_images(text)
+    """Apply all post-processing steps to an LLM answer.
+
+    Data-layer only — all rendering/formatting is handled by the frontend
+    normalize-rules pipeline to avoid double-processing that breaks
+    streaming ↔ final consistency.
+
+    Removed (now frontend-only):
+      - sanitize_answer          (h1 demote, related-concepts body, list blank lines, think tags)
+      - normalize_markdown_image_syntax   (image math unwrap)
+      - strip_disallowed_markdown_images  (unrenderable image cleanup)
+      - normalize_math_delimiters         (\\[→$$, \\(→$)
+      - convert_formulas_to_latex         (plain formula → LaTeX)
+
+    Kept (data-layer, frontend cannot do these):
+      - _ensure_related_concepts_section  (structural section injection)
+      - _SECTION_PAREN_RE / _CITE_WITH_SECTION_RE cleanup (data noise)
+      - normalize_image_reference_markers (structured [[IMG:N-M]] protocol)
+      - unescape_dollar_delimiters        (LLM output \\$ fix)
+      - normalize_citations               (chunk_id remap)
+    """
+    # Data-layer structural cleanup (no rendering changes).
+    text = pp_markdown.sanitize_answer_data_only(text)
+    # Structured image markers (frontend depends on this protocol).
     text = pp_images.normalize_image_reference_markers(text, valid_labels)
+    # Fix escaped dollar delimiters from LLM output.
     text = pp_math.unescape_dollar_delimiters(text)
+    # Citation dedup and index remap (needs chunk_id mapping).
     text, remap = pp_citations.normalize_citations(text, valid_labels)
-    text = pp_math.normalize_math_delimiters(text)
-    text = convert_formulas_to_latex(text)
     return text, remap

@@ -1,5 +1,5 @@
 import type { SkyBridgeCheckResponse } from "./types";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { resolveApiBase } from "@/lib/api-base";
 
 export interface SkyBridgeCheckParams {
   model_path: string;
@@ -13,7 +13,7 @@ export interface SkyBridgeCheckParams {
 export async function checkSkyBridge(
   params: SkyBridgeCheckParams
 ): Promise<SkyBridgeCheckResponse> {
-  const apiBase = normalizeApiBase(API_BASE);
+  const apiBase = await resolveApiBase();
   const primaryEndpoint = `${apiBase}/sky-bridge-check`;
   const fallbackEndpoint = `${apiBase}/sky-bridge/check`;
 

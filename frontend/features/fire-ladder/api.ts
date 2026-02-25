@@ -1,5 +1,5 @@
 import type { FireLadderCheckResponse } from "./types";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { resolveApiBase } from "@/lib/api-base";
 
 export interface FireLadderCheckParams {
   model_path: string;
@@ -16,7 +16,7 @@ export interface FireLadderCheckParams {
 export async function checkFireLadder(
   params: FireLadderCheckParams
 ): Promise<FireLadderCheckResponse> {
-  const apiBase = normalizeApiBase(API_BASE);
+  const apiBase = await resolveApiBase();
   const primaryEndpoint = `${apiBase}/fire-ladder-check`;
   const fallbackEndpoint = `${apiBase}/fire-ladder/check`;
 
