@@ -1,43 +1,57 @@
-import type { SkyBridgeCheckResponse } from "./types";
+import type { SkyBridgeCheckResponse, SkyBridgePrepareResponse } from "./types";
 import { resolveApiBase } from "@/lib/api-base";
 
-export interface SkyBridgeCheckParams {
+export interface SkyBridgePrepareParams {
   model_path: string;
-  corridor_layer?: string;
   plot_layer?: string;
+  corridor_layer?: string;
+  plot_name_key?: string;
+  connection_key?: string;
+}
+
+export interface SkyBridgeCheckParams extends SkyBridgePrepareParams {
+  elevation?: number;
   min_width?: number;
   min_height?: number;
-  min_clearance?: number;
+  connections?: [string, string][];
+}
+
+export async function prepareSkyBridge(
+  params: SkyBridgePrepareParams
+): Promise<SkyBridgePrepareResponse> {
+  const apiBase = await resolveApiBase();
+  const response = await fetch(`${apiBase}/sky-bridge-check/prepare`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || "空中连廊信息读取失败");
+  }
+
+  return (await response.json()) as SkyBridgePrepareResponse;
 }
 
 export async function checkSkyBridge(
   params: SkyBridgeCheckParams
 ): Promise<SkyBridgeCheckResponse> {
   const apiBase = await resolveApiBase();
-  const primaryEndpoint = `${apiBase}/sky-bridge-check`;
-  const fallbackEndpoint = `${apiBase}/sky-bridge/check`;
-
-  const doRequest = async (endpoint: string) =>
-    fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      body: JSON.stringify(params),
-    });
-
-  let response = await doRequest(primaryEndpoint);
-  if (response.status === 404) {
-    response = await doRequest(fallbackEndpoint);
-  }
+  const response = await fetch(`${apiBase}/sky-bridge-check`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(params),
+  });
 
   if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error(`检测接口未找到: ${primaryEndpoint}`);
-    }
-    const errorText = await response.text();
-    throw new Error(`空中连廊检测失败: ${errorText}`);
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || "空中连廊检测失败");
   }
 
-  return response.json();
+  return (await response.json()) as SkyBridgeCheckResponse;
 }

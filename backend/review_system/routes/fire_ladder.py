@@ -25,6 +25,7 @@ class FireLadderCheckRequest(BaseModel):
     min_distance: float = 5.0
     max_distance: float = 10.0
     length_ratio: float = 0.25
+    allow_outside_redline: bool = False
 
 
 def _resolve_model_path(model_path: str) -> Path:
@@ -51,6 +52,7 @@ def fire_ladder_check(request: FireLadderCheckRequest) -> Dict[str, Any]:
             min_distance=request.min_distance,
             max_distance=request.max_distance,
             length_ratio=request.length_ratio,
+            allow_outside_redline=request.allow_outside_redline,
         )
     except ValueError as exc:
         logger.warning(

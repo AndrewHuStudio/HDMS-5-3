@@ -1,0 +1,44 @@
+export interface PlazaSetbackBuildingResult {
+  building_name: string;
+  object_id?: string | null;
+  height: number;
+  is_violation: boolean;
+  reasons: string[];
+  plaza_name?: string | null;
+}
+
+export interface PlazaSetbackSummary {
+  total_buildings: number;
+  checked_buildings: number;
+  ignored_buildings: number;
+  violations: number;
+  compliant: number;
+}
+
+export interface PlazaSetbackArea {
+  name?: string;
+  outer: [number, number, number][];
+  holes: [number, number, number][][];
+  base_z?: number;
+}
+
+export interface PlazaSetbackAreaResult {
+  name: string;
+  status: "pass" | "fail";
+  checked_buildings: number;
+  violations: number;
+}
+
+export interface PlazaSetbackCheckResponse {
+  status: "ok";
+  summary: PlazaSetbackSummary;
+  results: PlazaSetbackBuildingResult[];
+  area_results: PlazaSetbackAreaResult[];
+  plaza_areas: PlazaSetbackArea[];
+  warnings: string[];
+  parameters: {
+    plaza_setback_layer: string;
+    building_layer: string;
+    ignore_height: number;
+  };
+}

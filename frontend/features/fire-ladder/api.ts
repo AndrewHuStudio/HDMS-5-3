@@ -11,6 +11,7 @@ export interface FireLadderCheckParams {
   min_distance?: number;
   max_distance?: number;
   length_ratio?: number;
+  allow_outside_redline?: boolean;
 }
 
 export async function checkFireLadder(

@@ -1,6 +1,7 @@
 "use client";
 
 import { Html } from "@react-three/drei";
+import { useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useSceneSnapshot } from "@/components/scene/scene-context";
@@ -23,8 +24,71 @@ export function SkyBridgeSceneLayer() {
   const modelTransform = useModelStore((state) => state.modelTransform);
   const results = useSkyBridgeStore((state) => state.results);
   const showLabels = useSkyBridgeStore((state) => state.showLabels);
+
   const meshList = sceneSnapshot?.meshList ?? [];
-  const originalMaterials = useRef<Map<string, THREE.Material | THREE.Material[]>>(new Map());
+  const hiddenMeshState = useRef<Map<string, boolean>>(new Map());
+  const hiddenLineState = useRef<Map<THREE.Object3D, boolean>>(new Map());
+  const { scene } = useThree();
+
+  useEffect(() => {
+    if (!meshList.length) return;
+
+    const normalize = (value?: string | null) => (value ?? "").trim().toLowerCase();
+    const hiddenLayers = ["模型_空中连廊"].map(normalize);
+
+    meshList.forEach((meshInfo) => {
+      const layerName = normalize(meshInfo.layerName);
+      if (!layerName) return;
+      const isHiddenLayer = hiddenLayers.some(
+        (layer) => layerName === layer || layerName.endsWith(`::${layer}`)
+      );
+      if (!isHiddenLayer) return;
+      if (!hiddenMeshState.current.has(meshInfo.id)) {
+        hiddenMeshState.current.set(meshInfo.id, meshInfo.mesh.visible);
+      }
+      meshInfo.mesh.visible = false;
+    });
+
+    return () => {
+      hiddenMeshState.current.forEach((wasVisible, meshId) => {
+        const meshInfo = meshList.find((mesh) => mesh.id === meshId);
+        if (meshInfo?.mesh) {
+          meshInfo.mesh.visible = wasVisible;
+        }
+      });
+      hiddenMeshState.current.clear();
+    };
+  }, [meshList]);
+
+  useEffect(() => {
+    if (!scene) return;
+    const normalize = (value?: string | null) => (value ?? "").trim().toLowerCase();
+    const hiddenLayers = ["模型_空中连廊"].map(normalize);
+    const layers = (scene.userData?.layers ?? []) as Array<{ name?: string }>;
+
+    scene.traverse((child) => {
+      if (!(child instanceof THREE.Line || child instanceof THREE.LineSegments)) return;
+      const attributes = child.userData?.attributes as { layerIndex?: number } | undefined;
+      if (typeof attributes?.layerIndex !== "number") return;
+      const layerName = normalize(layers[attributes.layerIndex]?.name);
+      if (!layerName) return;
+      const isHiddenLayer = hiddenLayers.some(
+        (layer) => layerName === layer || layerName.endsWith(`::${layer}`)
+      );
+      if (!isHiddenLayer) return;
+      if (!hiddenLineState.current.has(child)) {
+        hiddenLineState.current.set(child, child.visible);
+      }
+      child.visible = false;
+    });
+
+    return () => {
+      hiddenLineState.current.forEach((wasVisible, obj) => {
+        obj.visible = wasVisible;
+      });
+      hiddenLineState.current.clear();
+    };
+  }, [scene]);
 
   const applyModelTransform = (position: THREE.Vector3) => {
     if (!modelTransform) return position;
@@ -71,89 +135,86 @@ export function SkyBridgeSceneLayer() {
     });
   }, [results, showLabels, modelTransform]);
 
-  const corridorStatusByObjectId = useMemo(() => {
-    const map = new Map<string, "pass" | "fail">();
+  const corridorFaces = useMemo(() => {
+    if (results.length === 0) return [];
+    const faces: {
+      key: string;
+      shape: THREE.Shape;
+      baseZ: number;
+      color: number;
+    }[] = [];
+
     results.forEach((result) => {
       result.corridors.forEach((corridor) => {
-        if (!corridor.object_id) return;
-        const status = corridor.status === "pass" ? "pass" : "fail";
-        const existing = map.get(corridor.object_id);
-        if (!existing || status === "pass") {
-          map.set(corridor.object_id, status);
+        const points = corridor.outline_points ?? [];
+        let shapePoints = points;
+        if (shapePoints.length < 3) {
+          const bbox = corridor.bbox;
+          shapePoints = [
+            [bbox.min[0], bbox.min[1], bbox.min[2]],
+            [bbox.min[0], bbox.max[1], bbox.min[2]],
+            [bbox.max[0], bbox.max[1], bbox.min[2]],
+            [bbox.max[0], bbox.min[1], bbox.min[2]],
+          ];
         }
+
+        if (shapePoints.length < 3) return;
+
+        const shape = new THREE.Shape();
+        shape.moveTo(shapePoints[0][0], shapePoints[0][1]);
+        for (let i = 1; i < shapePoints.length; i += 1) {
+          shape.lineTo(shapePoints[i][0], shapePoints[i][1]);
+        }
+        shape.closePath();
+
+        const avgZ = shapePoints.reduce((sum, pt) => sum + pt[2], 0) / shapePoints.length;
+        const color = corridor.status === "pass" ? 0x22c55e : 0xef4444;
+
+        faces.push({
+          key: `sky-bridge-face-${result.connection_id}-${corridor.index}`,
+          shape,
+          baseZ: avgZ,
+          color,
+        });
       });
     });
-    return map;
+
+    return faces;
   }, [results]);
-
-  const passMaterial = useMemo(
-    () =>
-      new THREE.MeshStandardMaterial({
-        color: 0x22c55e,
-        metalness: 0,
-        roughness: 0.8,
-        transparent: true,
-        opacity: 0.55,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-    []
-  );
-  const failMaterial = useMemo(
-    () =>
-      new THREE.MeshStandardMaterial({
-        color: 0xef4444,
-        metalness: 0,
-        roughness: 0.8,
-        transparent: true,
-        opacity: 0.55,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-    []
-  );
-
-  useEffect(() => {
-    return () => {
-      passMaterial.dispose();
-      failMaterial.dispose();
-    };
-  }, [passMaterial, failMaterial]);
-
-  useEffect(() => {
-    originalMaterials.current.forEach((material, meshId) => {
-      const meshInfo = meshList.find((mesh) => mesh.id === meshId);
-      if (meshInfo?.mesh) {
-        meshInfo.mesh.material = material;
-        delete (meshInfo.mesh.userData as { persistentHighlight?: boolean }).persistentHighlight;
-      }
-    });
-    originalMaterials.current.clear();
-
-    if (corridorStatusByObjectId.size === 0) return;
-
-    meshList.forEach((meshInfo) => {
-      const layerName = (meshInfo.layerName ?? "").trim().toLowerCase();
-      const isCorridorLayer =
-        layerName === "模型_空中连廊" || layerName.endsWith("::模型_空中连廊");
-      if (!isCorridorLayer) return;
-
-      const objectId =
-        meshInfo.objectId ?? (meshInfo.mesh.userData?.objectId as string | undefined | null);
-      const status = objectId ? corridorStatusByObjectId.get(objectId) : undefined;
-      if (!status) return;
-      if (!originalMaterials.current.has(meshInfo.id)) {
-        originalMaterials.current.set(meshInfo.id, meshInfo.mesh.material);
-      }
-      (meshInfo.mesh.userData as { persistentHighlight?: boolean }).persistentHighlight = true;
-      meshInfo.mesh.material = status === "pass" ? passMaterial : failMaterial;
-    });
-  }, [meshList, corridorStatusByObjectId, passMaterial, failMaterial]);
 
   if (results.length === 0) return null;
 
   return (
     <>
+      {modelTransform &&
+        corridorFaces.map((face) => (
+          <group
+            key={face.key}
+            position={new THREE.Vector3(
+              modelTransform.position[0],
+              modelTransform.position[1],
+              modelTransform.position[2]
+            )}
+            quaternion={new THREE.Quaternion(
+              modelTransform.quaternion[0],
+              modelTransform.quaternion[1],
+              modelTransform.quaternion[2],
+              modelTransform.quaternion[3]
+            )}
+            scale={new THREE.Vector3(modelTransform.scale[0], modelTransform.scale[1], modelTransform.scale[2])}
+          >
+            <mesh position={[0, 0, face.baseZ]}>
+              <shapeGeometry args={[face.shape]} />
+              <meshBasicMaterial
+                color={face.color}
+                transparent
+                opacity={0.45}
+                depthWrite={false}
+                side={THREE.DoubleSide}
+              />
+            </mesh>
+          </group>
+        ))}
       {showLabels &&
         labels.map((label) => (
           <Html key={label.key} position={label.position} center sprite style={{ pointerEvents: "none" }}>
