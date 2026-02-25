@@ -10,7 +10,7 @@ interface MergeThinkingArgs {
   heading?: string;
 }
 
-const FIGURE_MENTION_RE = /[（(]?\s*(?:见)?图\s*(\d{1,2})\s*[)）]?/gu;
+const FIGURE_MENTION_RE = /[（(]?\s*(?:见)?图\s*([0-9]{1,2}(?:[.\-][0-9]{1,2}){0,3})\s*[)）]?/gu;
 const FIGURE_CAPTION_LINE_RE = /^\s*(?:FIGCAPTION\s+)?图\s*\d+(?:[.\-]\d+){0,3}\s*[：:.]/u;
 const FIGURE_LEGEND_LINE_RE = /^\s*[（(]?\s*(?:图示|图注|图例)\s*[：:]/u;
 

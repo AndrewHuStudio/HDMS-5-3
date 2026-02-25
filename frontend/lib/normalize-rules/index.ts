@@ -13,6 +13,7 @@ import { bumpIfChanged, createDiagnostics } from "./utils";
 // -- Batch 1: simple, dependency-free rules --
 import "./rules/strip-artifacts";
 import "./rules/text-cleanup";
+import "./rules/line-artifacts";
 import "./rules/heading-blank-lines";
 import "./rules/numeric-range";
 

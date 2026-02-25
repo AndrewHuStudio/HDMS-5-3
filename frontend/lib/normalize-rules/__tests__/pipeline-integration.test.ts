@@ -265,3 +265,62 @@ describe("three-phase normalization snapshots", () => {
     });
   });
 });
+
+describe("loose pipe tables normalization", () => {
+  it("normalizes single-line pseudo table rows with ASCII pipes", () => {
+    const input =
+      "| 公共空间网络 | 空中花园/屋顶平台/下沉广场 | 开放时长>=12h/天，绿化率≥30% | （图4）（花园标高） |";
+
+    const out = runNormalizationPipeline(input, { phase: "final" });
+
+    expect(out).toContain("| 要素 | 内容 |");
+    expect(out).toContain("| --- | --- |");
+    expect(out).toContain(
+      "| 公共空间网络 | 空中花园/屋顶平台/下沉广场；开放时长>=12h/天，绿化率≥30%；（图4）（花园标高） |",
+    );
+  });
+
+  it("normalizes single-line pseudo table rows with fullwidth pipes near images", () => {
+    const input = [
+      "![图4](/api/rag/documents/demo/image?ref=3-1)",
+      "",
+      "｜ 公共空间网络 ｜ 空中花园/屋顶平台/下沉广场 ｜ 开放时长>=12h/天，绿化率≥30% ｜ （图4）（花园标高） ｜",
+    ].join("\n");
+
+    const out = runNormalizationPipeline(input, { phase: "final" });
+
+    expect(out).toContain("![图4](/api/rag/documents/demo/image?ref=3-1)");
+    expect(out).toContain("| 要素 | 内容 |");
+    expect(out).toContain("| --- | --- |");
+    expect(out).toContain(
+      "| 公共空间网络 | 空中花园/屋顶平台/下沉广场；开放时长>=12h/天，绿化率≥30%；（图4）（花园标高） |",
+    );
+  });
+
+  it("does not rewrite fullwidth pipes inside fenced code blocks", () => {
+    const input = [
+      "```text",
+      "｜ 公共空间网络 ｜ 空中花园/屋顶平台/下沉广场 ｜ 开放时长>=12h/天 ｜",
+      "```",
+    ].join("\n");
+
+    const out = runNormalizationPipeline(input, { phase: "final" });
+
+    expect(out).toContain("```text");
+    expect(out).toContain("｜ 公共空间网络 ｜ 空中花园/屋顶平台/下沉广场 ｜ 开放时长>=12h/天 ｜");
+    expect(out).not.toContain("| 要素 | 内容 |");
+  });
+
+  it("does not rewrite fullwidth pipes inside math blocks", () => {
+    const input = [
+      "$$",
+      "f(x)=｜x｜+1",
+      "$$",
+    ].join("\n");
+
+    const out = runNormalizationPipeline(input, { phase: "final" });
+
+    expect(out).toContain("f(x)=｜x｜+1");
+    expect(out).not.toContain("| 要素 | 内容 |");
+  });
+});

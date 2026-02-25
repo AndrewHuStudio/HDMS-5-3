@@ -23,6 +23,7 @@ const ORDERED_LIST_RE = /^\s{0,3}\d+[.)]\s+/;
 const LIST_CONTINUATION_RE = /^\s{2,}\S/;
 const TABLE_SEPARATOR_LINE_RE = /^[\s|:\-]+$/;
 const TABLE_BOUNDARY_NOTE_RE = /^(?:注|备注|说明|注释|提示|注意)\s*[：:]/;
+const FULLWIDTH_PIPE_RE = /｜/g;
 
 function buildBlock(type: MarkdownBlockType, start: number, end: number, lines: string[]): MarkdownBlock {
   return {
@@ -40,8 +41,12 @@ function parseCodeFenceMarker(line: string): string | null {
   return match[2] ?? null;
 }
 
+function normalizePipeDelimiters(line: string): string {
+  return (line || "").replace(FULLWIDTH_PIPE_RE, "|");
+}
+
 function looksLikeTableBoundaryNoteRow(trimmedLine: string): boolean {
-  const normalized = (trimmedLine || "").trim();
+  const normalized = normalizePipeDelimiters(trimmedLine || "").trim();
   if (!normalized.includes("|")) return false;
 
   const cells = normalized
@@ -57,7 +62,7 @@ function looksLikeTableBoundaryNoteRow(trimmedLine: string): boolean {
 }
 
 function isLikelyTableRow(line: string): boolean {
-  const trimmed = (line || "").trim();
+  const trimmed = normalizePipeDelimiters(line || "").trim();
   if (!trimmed || (!trimmed.includes("|") && !TABLE_SEPARATOR_LINE_RE.test(trimmed))) return false;
   if (looksLikeTableBoundaryNoteRow(trimmed)) return false;
 

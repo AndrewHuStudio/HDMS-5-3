@@ -11,15 +11,16 @@ const FIGURE_REF_RE = /图\s*([0-9]+(?:[.\-][0-9]+){1,3})/g;
 const GUIDE_HINT_RE = /(如下图|下图|见下图|如图所示|流程图如下|示意图如下)/;
 const IMAGE_MENTION_RE = /(控制图|示意图|图示|图注|剖面|总图|平面图|流程图|附图|配图)/;
 const IMAGE_INTENT_RE = /(见图|如图|下图|配图|附图|流程图|示意图|剖面图|平面图|控制图)/u;
+const INLINE_FIGURE_TOKEN = "(?:\\d+(?:[.\\-]\\d+){0,3}|X(?:[.\\-]X){1,3})";
 // Matches user-facing inline refs like:
 // - （见图1）
 // - （见图3.0.1）
 // - （见图3.0.3流程图）
 // Also tolerates missing parentheses to avoid partial replacements that leave ".0.1）" fragments.
 const INLINE_SEE_FIGURE_RE =
-  /[（(]?\s*(?:见)?图\s*\d+(?:[.\-]\d+){0,3}(?:[^)）]{0,20})?\s*[)）]?/u;
+  new RegExp(`[（(]?\\s*(?:见)?图\\s*${INLINE_FIGURE_TOKEN}(?:[^)）]{0,20})?\\s*[)）]?`, "u");
 const INLINE_SEE_FIGURE_GLOBAL_RE =
-  /[（(]?\s*(?:见)?图\s*\d+(?:[.\-]\d+){0,3}(?:[^)）]{0,20})?\s*[)）]?/gu;
+  new RegExp(`[（(]?\\s*(?:见)?图\\s*${INLINE_FIGURE_TOKEN}(?:[^)）]{0,20})?\\s*[)）]?`, "gu");
 const IMAGE_PLACEHOLDER_RE =
   /\[([^\]]{2,80})\][（(][^)\n]*?(此处应插入|未见附图)[^)\n]*[)）]?/;
 const MARKDOWN_IMAGE_DEST_RE = /!\[[^\]]*\]\(([^)\n]+)\)/g;
@@ -674,7 +675,7 @@ export function injectSourceImages(
   // dangling references that confuse users.
   if (allCandidates.length === 0) {
     out = out
-      .replace(/[（(]\s*(?:见)?图\s*\d{1,2}\s*[)）]/g, "")
+      .replace(new RegExp(`[（(]\\s*(?:见)?图\\s*${INLINE_FIGURE_TOKEN}\\s*[)）]`, "gu"), "")
       .replace(/[ \t]{2,}/g, " ")
       .replace(/\s+\n/g, "\n");
     return out;
@@ -687,7 +688,7 @@ export function injectSourceImages(
   // 3.1) Cleanup legacy/partial replacements like:
   // "（见图1）.0.1）" or "（见图2）.0.3流程图）" -> keep only "（见图N）".
   out = out.replace(
-    /(（见图\d+）)[.\-]\d+(?:[.\-]\d+){0,3}[^)）]{0,24}[)）]/g,
+    new RegExp(`(（见图${INLINE_FIGURE_TOKEN}）)[.\\-]\\d+(?:[.\\-]\\d+){0,3}[^)）]{0,24}[)）]`, "gu"),
     "$1"
   );
 

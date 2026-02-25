@@ -24,6 +24,8 @@ export const PHASE_MATRIX: Record<string, Set<NormalizePhase>> = {
   "fullwidth-asterisks":        ALL,
   "bold-whitespace":            ALL,
   "star-run-placeholders":      ALL,
+  "strip-horizontal-rules":     ALL,
+  "strip-strikethrough-markers": ALL,
   "split-run-on-items":         ALL,
   "split-inline-heading":       ALL,
   "loose-pipe-tables":          ALL,

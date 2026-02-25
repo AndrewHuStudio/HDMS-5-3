@@ -13,6 +13,7 @@ import type { NormalizeContext } from "../types";
 import { bumpCounter } from "../utils";
 
 const TABLE_BOUNDARY_NOTE_RE = /^(?:注|备注|说明|注释|提示|注意)\s*[：:]/;
+const FULLWIDTH_PIPE_RE = /｜/g;
 
 function stripInlineMdWrappers(value: string): string {
   let s = (value || "").trim();
@@ -24,6 +25,14 @@ function stripInlineMdWrappers(value: string): string {
   return s;
 }
 
+function escapeTableCell(value: string): string {
+  return String(value || "").replace(/\|/g, "\\|").trim();
+}
+
+function normalizePipeDelimiters(line: string): string {
+  return (line || "").replace(FULLWIDTH_PIPE_RE, "|");
+}
+
 export const loosePipeTables = {
   id: "loose-pipe-tables",
   order: 900,
@@ -33,8 +42,9 @@ export const loosePipeTables = {
     if (streaming && !/[|｜]/.test(text)) return text;
 
     const parsePipeCells = (line: string): string[] | null => {
-      if (!line.includes("|")) return null;
-      const trimmed = line.trim();
+      const normalized = normalizePipeDelimiters(line);
+      if (!normalized.includes("|")) return null;
+      const trimmed = normalized.trim();
       if (!trimmed) return null;
       const cells = trimmed
         .replace(/^\|/, "")
@@ -90,7 +100,7 @@ export const loosePipeTables = {
       const separatorRowRe = /^:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)+$/;
 
       for (const rawLine of lines) {
-        const trimmed = (rawLine || "").trim();
+        const trimmed = normalizePipeDelimiters(rawLine || "").trim();
         if (!trimmed.includes("||")) { out.push(rawLine); continue; }
         const totalPipeCount = (trimmed.match(/\|/g) || []).length;
         if (totalPipeCount < 5) { out.push(rawLine); continue; }
@@ -128,7 +138,30 @@ export const loosePipeTables = {
       }
 
       const nonSeparatorRows = typedRows.filter((row) => !row.separator).map((row) => row.cells);
-      if (nonSeparatorRows.length < 2) return { lines, changed: false, detachedNotes: 0 };
+      if (nonSeparatorRows.length < 2) {
+        // Common LLM artifact: a single "row-like" pipe line with many cells
+        // (e.g. "| 指标 | 约束A | 约束B | 图示 |"). Promote it into a compact
+        // two-column table so markdown renderers can show it consistently.
+        if (typedRows.length === 1 && !typedRows[0].separator) {
+          const rowCells = typedRows[0].cells
+            .map((cell) => stripInlineMdWrappers(cell).trim())
+            .filter(Boolean);
+          if (rowCells.length >= 3) {
+            const key = escapeTableCell(rowCells[0]);
+            const value = escapeTableCell(rowCells.slice(1).join("；"));
+            return {
+              lines: [
+                "| 要素 | 内容 |",
+                "| --- | --- |",
+                `| ${key} | ${value} |`,
+              ],
+              changed: true,
+              detachedNotes: 0,
+            };
+          }
+        }
+        return { lines, changed: false, detachedNotes: 0 };
+      }
 
       const colCount = resolveColCount(nonSeparatorRows);
       const normalizedRows = typedRows.map((row) => padOrTrimRow(row.cells, colCount));
