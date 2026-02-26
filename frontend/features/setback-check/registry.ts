@@ -6,7 +6,7 @@ import { useSetbackCheckStore } from "./store";
 
 toolRegistry.register({
   id: "setback-check",
-  name: "退线检测",
+  name: "建筑退线检测",
   description: "检测建筑是否超出建筑退线",
   category: "building",
   status: "implemented",

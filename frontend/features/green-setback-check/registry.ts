@@ -7,7 +7,7 @@ import { useGreenSetbackStore } from "./store";
 
 toolRegistry.register({
   id: "green-setback-check",
-  name: "绿地退线控制检测",
+  name: "绿地退线检测",
   description: "检测绿地退线内是否存在超高建筑",
   category: "building",
   status: "implemented",

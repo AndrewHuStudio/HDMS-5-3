@@ -27,6 +27,8 @@ export interface FireLadderDetail {
 export interface FireLadderResult {
   redline_index: number;
   redline_name: string;
+  plot_name?: string;
+  display_name?: string;
   status: "pass" | "fail";
   reasons: FireLadderReason[];
   building: FireLadderBuildingInfo | null;

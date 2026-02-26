@@ -36,7 +36,7 @@ export async function checkPlazaSetback(
     }
     const errorData = await response.json().catch(() => ({}));
     throw new Error(
-      errorData.detail || "广场退线控制检测失败"
+      errorData.detail || "广场退线检测失败"
     );
   }
 

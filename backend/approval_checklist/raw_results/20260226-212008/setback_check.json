@@ -1,0 +1,229 @@
+{
+  "check_name": "setback_check",
+  "endpoint": "/setback-check",
+  "url": "http://127.0.0.1:8003/setback-check",
+  "ok": true,
+  "status_code": 200,
+  "started_at": "2026-02-26T21:20:09",
+  "finished_at": "2026-02-26T21:20:09",
+  "request": {
+    "model_path": "e545724085894aad9aa54a203a913d4e.3dm"
+  },
+  "response": {
+    "status": "ok",
+    "summary": {
+      "total_buildings": 20,
+      "exceeded_count": 11,
+      "compliant_count": 9,
+      "unmatched_buildings": 0
+    },
+    "buildings": [
+      {
+        "building_index": 0,
+        "building_name": "阿迪创意总部大厦",
+        "plot_name": "M-07",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "ca86ebc4-01c5-4a46-9c81-39184c016fa5",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 1,
+        "building_name": "加油站",
+        "plot_name": "M-15",
+        "is_exceeded": false,
+        "reason": null,
+        "object_id": "5b5a5627-6b48-4b7b-ac78-6253c0553e21",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 2,
+        "building_name": "阿里中心",
+        "plot_name": "N-07",
+        "is_exceeded": false,
+        "reason": null,
+        "object_id": "b37e7052-9d1d-4751-8b18-427748a5a44a",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 3,
+        "building_name": "阿里中心",
+        "plot_name": "N-06",
+        "is_exceeded": false,
+        "reason": null,
+        "object_id": "a89f5165-6471-462b-a66e-4127c1ece4ed",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 4,
+        "building_name": "深圳湾一号",
+        "plot_name": "N-08",
+        "is_exceeded": false,
+        "reason": null,
+        "object_id": "091b09dc-3a8d-4bc1-a0eb-9785111127fe",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 5,
+        "building_name": "喜之郎集团总部大厦",
+        "plot_name": "M-19",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "3c53eea7-e6e5-4ddd-95f7-ff898274c074",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 6,
+        "building_name": "中建科工大厦",
+        "plot_name": "M-17",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "c84a08a3-93f8-44d6-8ec7-e434acfd5bea",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 7,
+        "building_name": "16大厦",
+        "plot_name": "M-16",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "28ecbf8b-8107-4f02-9bf5-3701e021d535",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 8,
+        "building_name": "03办公楼",
+        "plot_name": "M-03",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "2db980e4-2314-452e-8954-ec6c6e44d222",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 9,
+        "building_name": "华强方特大厦",
+        "plot_name": "M-04",
+        "is_exceeded": false,
+        "reason": null,
+        "object_id": "4c7e35cc-4780-4392-8672-bddd1bc6a6f1",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 10,
+        "building_name": "深圳湾一号",
+        "plot_name": "N-10",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "5a085c25-9b5c-48a3-985d-f9c82530a87f",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 11,
+        "building_name": "海王星辰总部大厦",
+        "plot_name": "M-14",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "9f0a3118-980d-4ca6-bc1f-c67989c97128",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 12,
+        "building_name": "海能达全球总部大厦",
+        "plot_name": "M-05",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "6c2670fb-f558-493c-8975-238c033e5f33",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 13,
+        "building_name": "02大厦",
+        "plot_name": "M-02",
+        "is_exceeded": false,
+        "reason": null,
+        "object_id": "ae194a40-a921-4fab-b3b3-70b12405fa29",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 14,
+        "building_name": "百丽大厦",
+        "plot_name": "M-08",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "ad2d50cb-1d0a-49ba-8e59-9af94811f778",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 15,
+        "building_name": "12大厦",
+        "plot_name": "M-12",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "16c3ba13-9f7b-49e4-a147-e5a54d2a35cf",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 16,
+        "building_name": "后海云溪花园",
+        "plot_name": "M-01",
+        "is_exceeded": true,
+        "reason": null,
+        "object_id": "f6296cc0-840d-402f-8fd7-7fdea07f706d",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 17,
+        "building_name": "建筑18",
+        "plot_name": "M-21",
+        "is_exceeded": false,
+        "reason": null,
+        "object_id": "3148059a-bd2b-4370-ba18-e5fd02041b5d",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 18,
+        "building_name": "后海主变电站",
+        "plot_name": "M-22",
+        "is_exceeded": false,
+        "reason": null,
+        "object_id": "52941e74-9de8-41c1-987a-33470693f9a8",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      },
+      {
+        "building_index": 19,
+        "building_name": "后海二变电站",
+        "plot_name": "M-23",
+        "is_exceeded": false,
+        "reason": null,
+        "object_id": "8a8cec6a-f652-4b23-a222-537e95b9f60b",
+        "layer_name": "模型_建筑体块",
+        "layer_index": 3
+      }
+    ],
+    "warnings": [],
+    "parameters": {
+      "building_layer": "模型_建筑体块",
+      "setback_layer": "限制_建筑退线",
+      "plot_layer": "场景_地块"
+    }
+  }
+}

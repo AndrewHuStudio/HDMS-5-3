@@ -256,7 +256,9 @@ export function FireLadderPanel() {
                 }`}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-sm">{item.redline_name}</span>
+                  <span className="font-medium text-sm">
+                    {item.display_name || item.building?.name || item.redline_name}
+                  </span>
                   {item.status === "pass" ? (
                     <div className="flex items-center gap-1.5 text-green-700 dark:text-green-400">
                       <CheckCircle2 className="h-3.5 w-3.5" />

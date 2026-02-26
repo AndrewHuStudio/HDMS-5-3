@@ -27,7 +27,7 @@ export async function checkSetback(
       throw new Error(`检测接口未找到: ${endpoint}`);
     }
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || "退线检测失败");
+    throw new Error(errorData.detail || "建筑退线检测失败");
   }
 
   return response.json();

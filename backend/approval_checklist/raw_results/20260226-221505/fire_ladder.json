@@ -1,0 +1,775 @@
+{
+  "check_name": "fire_ladder",
+  "endpoint": "/fire-ladder-check",
+  "url": "http://127.0.0.1:8003/fire-ladder-check",
+  "ok": true,
+  "status_code": 200,
+  "started_at": "2026-02-26T22:15:05",
+  "finished_at": "2026-02-26T22:15:05",
+  "request": {
+    "model_path": "8287391d74c048c9ada48385564076bc.3dm"
+  },
+  "response": {
+    "status": "ok",
+    "method": "pure_python",
+    "summary": {
+      "total_redlines": 22,
+      "passed": 7,
+      "failed": 15,
+      "no_buildings": 2
+    },
+    "results": [
+      {
+        "redline_index": 0,
+        "redline_name": "M-23",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "后海二变电站",
+          "object_id": "8a8cec6a-f652-4b23-a222-537e95b9f60b",
+          "perimeter": 151.10872551743827
+        },
+        "label_position": [
+          -78.31647275354437,
+          -181.61423337618388,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 1,
+        "redline_name": "M-22",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "后海主变电站",
+          "object_id": "52941e74-9de8-41c1-987a-33470693f9a8",
+          "perimeter": 118.62780223310172
+        },
+        "label_position": [
+          -66.9554981214937,
+          -141.308013038077,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 2,
+        "redline_name": "M-03",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "03办公楼",
+          "object_id": "2db980e4-2314-452e-8954-ec6c6e44d222",
+          "perimeter": 169.59444228355628
+        },
+        "label_position": [
+          -250.45530130411984,
+          130.9753702422894,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 3,
+        "redline_name": "M-02",
+        "status": "fail",
+        "reasons": [
+          "outside_redline",
+          "distance_out_of_range"
+        ],
+        "building": {
+          "name": "02大厦",
+          "object_id": "ae194a40-a921-4fab-b3b3-70b12405fa29",
+          "perimeter": 180.59236157816528
+        },
+        "label_position": [
+          -324.3210889233791,
+          130.88138796254705,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [
+          {
+            "index": 2,
+            "width": 15.0,
+            "length": 47.142264810704376,
+            "distance": 4.248853969911036,
+            "inside_redline": false,
+            "object_id": "095ae4c2-3fb3-4c81-bf7f-31099cc68e29",
+            "building_object_id": "ae194a40-a921-4fab-b3b3-70b12405fa29",
+            "building_name": "02大厦",
+            "outline_points": [
+              [
+                -358.6459845599945,
+                107.24950255076271,
+                4.350968711815174e-07
+              ],
+              [
+                -343.6459845599945,
+                107.24950255076271,
+                4.350968711815174e-07
+              ],
+              [
+                -343.6459845599945,
+                154.3917673614671,
+                4.350968711815174e-07
+              ],
+              [
+                -358.6459845599945,
+                154.3917673614671,
+                4.350968711815174e-07
+              ]
+            ]
+          }
+        ],
+        "length_sum": 47.142264810704376,
+        "length_required": 45.14809039454132
+      },
+      {
+        "redline_index": 4,
+        "redline_name": "M-01",
+        "status": "pass",
+        "reasons": [],
+        "building": {
+          "name": "后海云溪花园",
+          "object_id": "f6296cc0-840d-402f-8fd7-7fdea07f706d",
+          "perimeter": 629.3693853202931
+        },
+        "label_position": [
+          -289.0271816617096,
+          232.82353815256758,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [
+          {
+            "index": 6,
+            "width": 10.0,
+            "length": 47.76761793274312,
+            "distance": 4.999979108192045,
+            "inside_redline": true,
+            "object_id": "51ae1b1a-c4c3-499b-9eee-a207b5db23a7",
+            "building_object_id": "f6296cc0-840d-402f-8fd7-7fdea07f706d",
+            "building_name": "后海云溪花园",
+            "outline_points": [
+              [
+                -327.82320371674973,
+                243.7752494612444,
+                0.0
+              ],
+              [
+                -317.82320371674973,
+                243.7752494612444,
+                0.0
+              ],
+              [
+                -317.82320371674973,
+                291.54286739398754,
+                0.0
+              ],
+              [
+                -327.82320371674973,
+                291.54286739398754,
+                0.0
+              ]
+            ]
+          },
+          {
+            "index": 7,
+            "width": 10.0,
+            "length": 128.49358685859977,
+            "distance": 6.249886926510634,
+            "inside_redline": true,
+            "object_id": "c4b44857-1308-4f00-98ef-6c614ef3e85e",
+            "building_object_id": "f6296cc0-840d-402f-8fd7-7fdea07f706d",
+            "building_name": "后海云溪花园",
+            "outline_points": [
+              [
+                -353.8222587836012,
+                187.2782535254572,
+                -1.1207561512441598e-11
+              ],
+              [
+                -353.8222587836012,
+                177.2782535254572,
+                -1.1207561512441598e-11
+              ],
+              [
+                -225.32867192500146,
+                177.2782535254572,
+                -1.1207561512441598e-11
+              ],
+              [
+                -225.32867192500146,
+                187.2782535254572,
+                -1.1207561512441598e-11
+              ]
+            ]
+          }
+        ],
+        "length_sum": 176.2612047913429,
+        "length_required": 157.34234633007327
+      },
+      {
+        "redline_index": 5,
+        "redline_name": "M-05",
+        "status": "fail",
+        "reasons": [
+          "distance_out_of_range"
+        ],
+        "building": {
+          "name": "海能达全球总部大厦",
+          "object_id": "6c2670fb-f558-493c-8975-238c033e5f33",
+          "perimeter": 279.65017227879133
+        },
+        "label_position": [
+          -250.3833835982919,
+          29.310534201070066,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [
+          {
+            "index": 1,
+            "width": 10.0,
+            "length": 106.49465452584707,
+            "distance": 4.000012127747169,
+            "inside_redline": true,
+            "object_id": "83065dd1-fd5b-4360-8ab2-ab7d2ed8b70c",
+            "building_object_id": "6c2670fb-f558-493c-8975-238c033e5f33",
+            "building_name": "海能达全球总部大厦",
+            "outline_points": [
+              [
+                -272.3748574941049,
+                -22.832917940099406,
+                0.0
+              ],
+              [
+                -262.3748574941049,
+                -22.832917940099406,
+                0.0
+              ],
+              [
+                -262.3748574941049,
+                83.66173658574766,
+                0.0
+              ],
+              [
+                -272.3748574941049,
+                83.66173658574766,
+                0.0
+              ]
+            ]
+          }
+        ],
+        "length_sum": 106.49465452584707,
+        "length_required": 69.91254306969783
+      },
+      {
+        "redline_index": 6,
+        "redline_name": "M-15",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "加油站",
+          "object_id": "5b5a5627-6b48-4b7b-ac78-6253c0553e21",
+          "perimeter": 201.537642561354
+        },
+        "label_position": [
+          -151.47360335276375,
+          -161.2457890477941,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 7,
+        "redline_name": "M-14",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "海王星辰总部大厦",
+          "object_id": "9f0a3118-980d-4ca6-bc1f-c67989c97128",
+          "perimeter": 266.91880293423367
+        },
+        "label_position": [
+          -147.13410681906174,
+          -63.635579974047275,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 8,
+        "redline_name": "地块17",
+        "status": "pass",
+        "reasons": [
+          "no_buildings"
+        ],
+        "building": null,
+        "label_position": [
+          -289.71202416237054,
+          -165.55550656089133,
+          -9.98091020158225e-12
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 9,
+        "redline_name": "M-08",
+        "status": "pass",
+        "reasons": [],
+        "building": {
+          "name": "百丽大厦",
+          "object_id": "ad2d50cb-1d0a-49ba-8e59-9af94811f778",
+          "perimeter": 169.6720520820941
+        },
+        "label_position": [
+          -250.4604508109873,
+          -76.6384456864786,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [
+          {
+            "index": 3,
+            "width": 10.000016891563874,
+            "length": 49.99751522669558,
+            "distance": 5.999991376424531,
+            "inside_redline": true,
+            "object_id": "94d57cef-339f-4c88-bf8b-c34fd68795a8",
+            "building_object_id": "ad2d50cb-1d0a-49ba-8e59-9af94811f778",
+            "building_name": "百丽大厦",
+            "outline_points": [
+              [
+                -275.30006702462777,
+                -104.31571875501993,
+                -1.097901255336162e-11
+              ],
+              [
+                -225.30255179793218,
+                -104.31571875501993,
+                -1.097901255336162e-11
+              ],
+              [
+                -225.30255179793218,
+                -94.31570186345606,
+                -1.097901255336162e-11
+              ],
+              [
+                -275.30006702462777,
+                -94.31570186345606,
+                -1.097901255336162e-11
+              ]
+            ]
+          }
+        ],
+        "length_sum": 49.99751522669558,
+        "length_required": 42.418013020523524
+      },
+      {
+        "redline_index": 10,
+        "redline_name": "M-07",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "阿迪创意总部大厦",
+          "object_id": "ca86ebc4-01c5-4a46-9c81-39184c016fa5",
+          "perimeter": 225.5997712737854
+        },
+        "label_position": [
+          -324.00265585742636,
+          -76.47028923190935,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 11,
+        "redline_name": "M-06",
+        "status": "pass",
+        "reasons": [
+          "no_buildings"
+        ],
+        "building": null,
+        "label_position": [
+          -324.0054523480623,
+          -3.4802426414583403,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 12,
+        "redline_name": "M-04",
+        "status": "pass",
+        "reasons": [],
+        "building": {
+          "name": "华强方特大厦",
+          "object_id": "4c7e35cc-4780-4392-8672-bddd1bc6a6f1",
+          "perimeter": 169.991477414612
+        },
+        "label_position": [
+          -324.026160124392,
+          63.939394840419375,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [
+          {
+            "index": 0,
+            "width": 10.0,
+            "length": 44.997786095659194,
+            "distance": 7.999997344014786,
+            "inside_redline": true,
+            "object_id": "aa8b8cf3-aa34-434e-937e-10dd89679b83",
+            "building_object_id": "4c7e35cc-4780-4392-8672-bddd1bc6a6f1",
+            "building_name": "华强方特大厦",
+            "outline_points": [
+              [
+                -306.49102407709177,
+                38.9053913759368,
+                -1.0979012553338581e-11
+              ],
+              [
+                -296.49102407709177,
+                38.9053913759368,
+                -1.0979012553338581e-11
+              ],
+              [
+                -296.49102407709177,
+                83.903177471596,
+                -1.0979012553338581e-11
+              ],
+              [
+                -306.49102407709177,
+                83.903177471596,
+                -1.0979012553338581e-11
+              ]
+            ]
+          }
+        ],
+        "length_sum": 44.997786095659194,
+        "length_required": 42.497869353653
+      },
+      {
+        "redline_index": 13,
+        "redline_name": "M-21",
+        "status": "pass",
+        "reasons": [],
+        "building": {
+          "name": "建筑18",
+          "object_id": "3148059a-bd2b-4370-ba18-e5fd02041b5d",
+          "perimeter": 293.1736049236736
+        },
+        "label_position": [
+          -62.083348150625554,
+          -54.740129865265644,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [
+          {
+            "index": 8,
+            "width": 10.0,
+            "length": 98.18415150490284,
+            "distance": 5.0,
+            "inside_redline": true,
+            "object_id": "62dff184-ed1b-4201-a8f2-29722bacf9af",
+            "building_object_id": "3148059a-bd2b-4370-ba18-e5fd02041b5d",
+            "building_name": "建筑18",
+            "outline_points": [
+              [
+                -94.25008624952638,
+                -104.36854439570152,
+                -1.0979012553338581e-11
+              ],
+              [
+                -84.25008624952638,
+                -104.36854439570152,
+                -1.0979012553338581e-11
+              ],
+              [
+                -84.25008624952638,
+                -6.1843928907986765,
+                -1.0979012553338581e-11
+              ],
+              [
+                -94.25008624952638,
+                -6.1843928907986765,
+                -1.0979012553338581e-11
+              ]
+            ]
+          }
+        ],
+        "length_sum": 98.18415150490284,
+        "length_required": 73.2934012309184
+      },
+      {
+        "redline_index": 14,
+        "redline_name": "N-10",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "深圳湾一号",
+          "object_id": "5a085c25-9b5c-48a3-985d-f9c82530a87f",
+          "perimeter": 1499.6565249863934
+        },
+        "label_position": [
+          128.2370451950383,
+          -106.7410152231142,
+          -1.0406564850901715e-11
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 15,
+        "redline_name": "N-08",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "深圳湾一号",
+          "object_id": "091b09dc-3a8d-4bc1-a0eb-9785111127fe",
+          "perimeter": 817.7885456319503
+        },
+        "label_position": [
+          135.62206191597204,
+          110.89509638774297,
+          -9.383995681911294e-12
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 16,
+        "redline_name": "N-07",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "阿里中心",
+          "object_id": "b37e7052-9d1d-4751-8b18-427748a5a44a",
+          "perimeter": 462.32815275127115
+        },
+        "label_position": [
+          138.59158742187384,
+          197.99795634775256,
+          -4.5884491686588345e-12
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 17,
+        "redline_name": "N-06",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "阿里中心",
+          "object_id": "a89f5165-6471-462b-a66e-4127c1ece4ed",
+          "perimeter": 448.4966851596312
+        },
+        "label_position": [
+          138.73601356922333,
+          266.10726879178986,
+          -2.8836288577419893e-12
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 18,
+        "redline_name": "M-19",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "喜之郎集团总部大厦",
+          "object_id": "3c53eea7-e6e5-4ddd-95f7-ff898274c074",
+          "perimeter": 401.0109496222823
+        },
+        "label_position": [
+          -61.55653353060374,
+          111.44322519383257,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 19,
+        "redline_name": "M-17",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "中建科工大厦",
+          "object_id": "c84a08a3-93f8-44d6-8ec7-e434acfd5bea",
+          "perimeter": 218.9890733568887
+        },
+        "label_position": [
+          -61.556533530603744,
+          198.47570808769726,
+          -1.0979012553338581e-11
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 20,
+        "redline_name": "M-16",
+        "status": "fail",
+        "reasons": [
+          "missing_ladder"
+        ],
+        "building": {
+          "name": "16大厦",
+          "object_id": "28ecbf8b-8107-4f02-9bf5-3701e021d535",
+          "perimeter": 225.52905879401095
+        },
+        "label_position": [
+          -61.55653353060375,
+          266.9664204814295,
+          -5.489365817972277e-12
+        ],
+        "ladders": [],
+        "length_sum": 0.0,
+        "length_required": 0.0
+      },
+      {
+        "redline_index": 21,
+        "redline_name": "M-12",
+        "status": "pass",
+        "reasons": [],
+        "building": {
+          "name": "12大厦",
+          "object_id": "16c3ba13-9f7b-49e4-a147-e5a54d2a35cf",
+          "perimeter": 175.99784467351387
+        },
+        "label_position": [
+          -158.64301256961426,
+          266.90305704654355,
+          -5.489365817972277e-12
+        ],
+        "ladders": [
+          {
+            "index": 4,
+            "width": 10.0,
+            "length": 31.579801743421,
+            "distance": 5.16063514979524,
+            "inside_redline": true,
+            "object_id": "9e2bd836-aef4-4d56-9d23-d4335e7ee452",
+            "building_object_id": "16c3ba13-9f7b-49e4-a147-e5a54d2a35cf",
+            "building_name": "12大厦",
+            "outline_points": [
+              [
+                -194.4328847839735,
+                259.4039646073004,
+                0.0
+              ],
+              [
+                -184.4328847839735,
+                259.4039646073004,
+                0.0
+              ],
+              [
+                -184.4328847839735,
+                290.9837663507214,
+                0.0
+              ],
+              [
+                -194.4328847839735,
+                290.9837663507214,
+                0.0
+              ]
+            ]
+          },
+          {
+            "index": 5,
+            "width": 10.0,
+            "length": 35.9345615327459,
+            "distance": 6.581616864934745,
+            "inside_redline": true,
+            "object_id": "4ce65419-1897-4172-8615-d7cff5c6f645",
+            "building_object_id": "16c3ba13-9f7b-49e4-a147-e5a54d2a35cf",
+            "building_name": "12大厦",
+            "outline_points": [
+              [
+                -143.31214432084835,
+                242.82234774236565,
+                -1.0979012553338581e-11
+              ],
+              [
+                -143.31214432084835,
+                252.82234774236565,
+                -1.0979012553338581e-11
+              ],
+              [
+                -179.24670585359425,
+                252.82234774236565,
+                -1.0979012553338581e-11
+              ],
+              [
+                -179.24670585359425,
+                242.82234774236565,
+                -1.0979012553338581e-11
+              ]
+            ]
+          }
+        ],
+        "length_sum": 67.5143632761669,
+        "length_required": 43.99946116837847
+      }
+    ],
+    "warnings": [],
+    "parameters": {
+      "building_layer": "模型_建筑体块",
+      "fire_ladder_layer": "模型_消防登高面",
+      "redline_layer": "限制_建筑红线",
+      "plot_layer": "场景_地块",
+      "min_width": 10.0,
+      "min_distance": 5.0,
+      "max_distance": 10.0,
+      "length_ratio": 0.25
+    }
+  }
+}

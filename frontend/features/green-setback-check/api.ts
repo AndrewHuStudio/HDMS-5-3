@@ -35,7 +35,7 @@ export async function checkGreenSetback(
       throw new Error(`检测接口未找到: ${primaryEndpoint}`);
     }
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || "绿地退线控制检测失败");
+    throw new Error(errorData.detail || "绿地退线检测失败");
   }
 
   return response.json();

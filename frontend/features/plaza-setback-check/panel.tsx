@@ -123,8 +123,11 @@ export function PlazaSetbackPanel() {
   };
 
   const hasResults = Boolean(result);
-  const violations = result?.summary?.violations ?? 0;
-  const compliant = result?.summary?.compliant ?? 0;
+  const areaResults = result?.area_results ?? [];
+  const areaPassed = areaResults.filter((item) => item.status === "pass").length;
+  const areaFailed = areaResults.filter((item) => item.status === "fail").length;
+  const violations = areaResults.length > 0 ? areaFailed : result?.summary?.violations ?? 0;
+  const compliant = areaResults.length > 0 ? areaPassed : result?.summary?.compliant ?? 0;
 
   useEffect(() => {
     if (!selectedAreaName) return;

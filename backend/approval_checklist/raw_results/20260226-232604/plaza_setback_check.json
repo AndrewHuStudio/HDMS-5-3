@@ -1,0 +1,267 @@
+{
+  "check_name": "plaza_setback_check",
+  "endpoint": "/plaza-setback-check",
+  "url": "http://127.0.0.1:8003/plaza-setback-check",
+  "ok": true,
+  "status_code": 200,
+  "started_at": "2026-02-26T23:26:04",
+  "finished_at": "2026-02-26T23:26:04",
+  "request": {
+    "model_path": "916522536e544d2d9078525c3342bfaa.3dm"
+  },
+  "response": {
+    "status": "ok",
+    "summary": {
+      "total_buildings": 20,
+      "checked_buildings": 20,
+      "ignored_buildings": 0,
+      "violations": 1,
+      "compliant": 19
+    },
+    "results": [
+      {
+        "building_name": "阿迪创意总部大厦",
+        "object_id": "ca86ebc4-01c5-4a46-9c81-39184c016fa5",
+        "height": 75.0,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "加油站",
+        "object_id": "5b5a5627-6b48-4b7b-ac78-6253c0553e21",
+        "height": 11.999999999999998,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "阿里中心",
+        "object_id": "b37e7052-9d1d-4751-8b18-427748a5a44a",
+        "height": 74.00000008008541,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "阿里中心",
+        "object_id": "a89f5165-6471-462b-a66e-4127c1ece4ed",
+        "height": 84.00000047416296,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "深圳湾一号",
+        "object_id": "091b09dc-3a8d-4bc1-a0eb-9785111127fe",
+        "height": 130.00000977000292,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "喜之郎集团总部大厦",
+        "object_id": "3c53eea7-e6e5-4ddd-95f7-ff898274c074",
+        "height": 100.00000014153059,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "中建科工大厦",
+        "object_id": "c84a08a3-93f8-44d6-8ec7-e434acfd5bea",
+        "height": 103.85500000000006,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "16大厦",
+        "object_id": "28ecbf8b-8107-4f02-9bf5-3701e021d535",
+        "height": 103.85500000000003,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "03办公楼",
+        "object_id": "2db980e4-2314-452e-8954-ec6c6e44d222",
+        "height": 18.000000000000007,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "华强方特大厦",
+        "object_id": "4c7e35cc-4780-4392-8672-bddd1bc6a6f1",
+        "height": 150.0000000000001,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "深圳湾一号",
+        "object_id": "5a085c25-9b5c-48a3-985d-f9c82530a87f",
+        "height": 334.0000000084533,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "海王星辰总部大厦",
+        "object_id": "9f0a3118-980d-4ca6-bc1f-c67989c97128",
+        "height": 100.0000000000001,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "海能达全球总部大厦",
+        "object_id": "6c2670fb-f558-493c-8975-238c033e5f33",
+        "height": 198.80669922000016,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "02大厦",
+        "object_id": "ae194a40-a921-4fab-b3b3-70b12405fa29",
+        "height": 120.00000043510796,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "百丽大厦",
+        "object_id": "ad2d50cb-1d0a-49ba-8e59-9af94811f778",
+        "height": 140.00000033957883,
+        "is_violation": true,
+        "reasons": [
+          "inside_plaza_setback"
+        ],
+        "plaza_name": "广场2"
+      },
+      {
+        "building_name": "12大厦",
+        "object_id": "16c3ba13-9f7b-49e4-a147-e5a54d2a35cf",
+        "height": 153.85500000001105,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "后海云溪花园",
+        "object_id": "f6296cc0-840d-402f-8fd7-7fdea07f706d",
+        "height": 203.8550000000004,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "建筑18",
+        "object_id": "3148059a-bd2b-4370-ba18-e5fd02041b5d",
+        "height": 100.00000000000007,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "后海主变电站",
+        "object_id": "52941e74-9de8-41c1-987a-33470693f9a8",
+        "height": 11.999999999999998,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      },
+      {
+        "building_name": "后海二变电站",
+        "object_id": "8a8cec6a-f652-4b23-a222-537e95b9f60b",
+        "height": 11.999999999999996,
+        "is_violation": false,
+        "reasons": [],
+        "plaza_name": null
+      }
+    ],
+    "area_results": [
+      {
+        "name": "广场1",
+        "status": "pass",
+        "checked_buildings": 0,
+        "violations": 0
+      },
+      {
+        "name": "广场2",
+        "status": "fail",
+        "checked_buildings": 1,
+        "violations": 1
+      }
+    ],
+    "plaza_areas": [
+      {
+        "name": "广场1",
+        "outer": [
+          [
+            -194.12286376953122,
+            67.7979956196366,
+            0.0
+          ],
+          [
+            -122.69918060302734,
+            67.7979956196366,
+            0.0
+          ],
+          [
+            -122.69918060302734,
+            16.393470764160156,
+            0.0
+          ],
+          [
+            -194.12286376953125,
+            -22.48569107055664,
+            0.0
+          ]
+        ],
+        "holes": [],
+        "base_z": 0.0
+      },
+      {
+        "name": "广场2",
+        "outer": [
+          [
+            -269.96748156617286,
+            -48.340688119275114,
+            -1.0979012553338581e-11
+          ],
+          [
+            -254.50220864912245,
+            -48.340688119275114,
+            -1.0979012553338581e-11
+          ],
+          [
+            -254.50220864912245,
+            -68.78038505734135,
+            -1.0979012553338581e-11
+          ],
+          [
+            -275.7059941908942,
+            -68.78038505734139,
+            -1.0979012553338581e-11
+          ],
+          [
+            -275.7059941908942,
+            -53.986616238835154,
+            -1.0979012553338581e-11
+          ]
+        ],
+        "holes": [],
+        "base_z": -1.0979012553338581e-11
+      }
+    ],
+    "warnings": [],
+    "parameters": {
+      "plaza_setback_layer": "场地_广场退线",
+      "building_layer": "模型_建筑体块",
+      "ignore_height": 2.0
+    }
+  }
+}

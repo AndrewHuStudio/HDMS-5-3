@@ -132,7 +132,7 @@ export function FireLadderSceneLayer() {
           : ["通过"];
       return {
         key: `fire-ladder-${result.redline_index}`,
-        name: result.redline_name,
+        name: result.display_name || result.building?.name || result.redline_name,
         status: result.status,
         reasons,
         position: [position.x, position.y, position.z] as [number, number, number],

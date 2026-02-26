@@ -26,6 +26,12 @@ from routes import (
 
 logger = logging.getLogger(__name__)
 
+try:
+    from backend.approval_checklist.routes import router as approval_checklist_router
+except Exception as exc:  # noqa: BLE001
+    approval_checklist_router = None
+    logger.warning("approval_checklist router is unavailable: %s", exc)
+
 app = FastAPI(title="HDMS Review System API")
 
 app.add_middleware(
@@ -49,6 +55,8 @@ app.include_router(plaza_setback_check.router)
 app.include_router(setback_rate_check.router)
 app.include_router(vehicle_entrance_check.router)
 app.include_router(pedestrian_entrance_check.router)
+if approval_checklist_router is not None:
+    app.include_router(approval_checklist_router)
 
 
 @app.get("/health")

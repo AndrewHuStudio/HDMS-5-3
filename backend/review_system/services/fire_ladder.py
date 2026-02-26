@@ -798,6 +798,18 @@ def check_fire_ladder_pure_python(
     for redline in redlines:
         curve = redline["curve"]
         redline_buildings = [b for b in buildings if _point_in_curve_2d(b["center"], curve)]
+        nearest_redline_building = None
+        if redline_buildings:
+            nearest_redline_building = min(
+                redline_buildings,
+                key=lambda b: math.hypot(
+                    b["center"].X - redline["center"].X,
+                    b["center"].Y - redline["center"].Y,
+                ),
+            )
+        display_name = (
+            nearest_redline_building["name"] if nearest_redline_building is not None else redline["name"]
+        )
         redline_building_keys = {_building_key(b) for b in redline_buildings}
         if allow_outside_redline:
             redline_ladders = [
@@ -814,6 +826,8 @@ def check_fire_ladder_pure_python(
         result = {
             "redline_index": redline["index"],
             "redline_name": redline["name"],
+            "plot_name": redline["name"],
+            "display_name": display_name,
             "status": "pass",
             "reasons": [],
             "building": None,
@@ -834,7 +848,8 @@ def check_fire_ladder_pure_python(
             total_failed += 1
             result["status"] = "fail"
             result["reasons"].append("missing_ladder")
-            primary_building = redline_buildings[0]
+            primary_building = nearest_redline_building or redline_buildings[0]
+            result["display_name"] = primary_building["name"]
             result["building"] = {
                 "name": primary_building["name"],
                 "object_id": primary_building["object_id"],
@@ -892,11 +907,12 @@ def check_fire_ladder_pure_python(
                 inside_ok = False
 
         if primary_building is None:
-            primary_building = redline_buildings[0]
+            primary_building = nearest_redline_building or redline_buildings[0]
 
         length_required = primary_building["perimeter"] * length_ratio
         length_ok = ladder_length_sum >= length_required
 
+        result["display_name"] = primary_building["name"]
         result["building"] = {
             "name": primary_building["name"],
             "object_id": primary_building["object_id"],

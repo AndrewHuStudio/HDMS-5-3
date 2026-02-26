@@ -1,0 +1,225 @@
+{
+  "check_name": "sight_corridor_check",
+  "endpoint": "/sight-corridor/check",
+  "url": "http://127.0.0.1:8003/sight-corridor/check",
+  "ok": true,
+  "status_code": 200,
+  "started_at": "2026-02-26T22:18:34",
+  "finished_at": "2026-02-26T22:18:34",
+  "request": {
+    "model_path": "8287391d74c048c9ada48385564076bc.3dm",
+    "observer_position": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 1.7
+    },
+    "hemisphere_radius": 100.0
+  },
+  "response": {
+    "status": "ok",
+    "max_visible_distance": 312.5681438385558,
+    "visible_buildings": [
+      {
+        "building_name": "模型_建筑体块",
+        "distance": 23.73065412118096,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "深圳湾一号",
+        "distance": 66.18333468057426,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "喜之郎集团总部大厦",
+        "distance": 73.21299425910814,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "深圳湾一号",
+        "distance": 95.92104443036744,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "后海主变电站",
+        "distance": 140.94134042416334,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "中建科工大厦",
+        "distance": 177.9307555411619,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "后海二变电站",
+        "distance": 179.03403996427207,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "阿里中心",
+        "distance": 187.37473715975,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "海能达全球总部大厦",
+        "distance": 224.48585529916042,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "16大厦",
+        "distance": 244.33558429572264,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "03办公楼",
+        "distance": 249.3086034033879,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "阿里中心",
+        "distance": 254.30273175073987,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "后海云溪花园",
+        "distance": 295.6897760080064,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "02大厦",
+        "distance": 312.5681438385558,
+        "is_visible": true,
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      }
+    ],
+    "invisible_buildings": [
+      {
+        "building_name": "海王星辰总部大厦",
+        "distance": 122.91327023017972,
+        "is_visible": false,
+        "reason": "被遮挡",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "加油站",
+        "distance": 193.99393388584335,
+        "is_visible": false,
+        "reason": "被遮挡",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "百丽大厦",
+        "distance": 230.5610690144383,
+        "is_visible": false,
+        "reason": "被遮挡",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "12大厦",
+        "distance": 287.0249308842936,
+        "is_visible": false,
+        "reason": "被遮挡",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "阿迪创意总部大厦",
+        "distance": 297.0644374084209,
+        "is_visible": false,
+        "reason": "被遮挡",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "华强方特大厦",
+        "distance": 316.62842765521515,
+        "is_visible": false,
+        "reason": "被遮挡",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      }
+    ],
+    "blocking_buildings": [
+      {
+        "building_name": "阿里中心",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "深圳湾一号",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "喜之郎集团总部大厦",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "中建科工大厦",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "03办公楼",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "海能达全球总部大厦",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "模型_建筑体块",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      },
+      {
+        "building_name": "后海主变电站",
+        "layer_index": 3,
+        "layer_name": "模型_建筑体块"
+      }
+    ],
+    "hemisphere_radius": 100.0,
+    "observer_position": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 1.7
+    },
+    "summary": {
+      "total_buildings": 20,
+      "visible_count": 14,
+      "invisible_count": 6
+    }
+  }
+}

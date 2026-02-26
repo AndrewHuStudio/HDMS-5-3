@@ -1,0 +1,3003 @@
+{
+  "schema_version": "approval_checklist_v1",
+  "generated_at": "2026-02-26T21:24:38",
+  "source_run_id": "20260226-212054",
+  "project_id": "demo_project_001",
+  "document": {
+    "title": "城市规划管控要素审查表",
+    "number": "",
+    "plot_name": "未命名片区",
+    "review_time": "2026-02-26T21:24:38",
+    "selected_count": 10
+  },
+  "checks": [
+    {
+      "check_id": "fire-ladder",
+      "check_name": "消防登高面检测",
+      "selected": true,
+      "status": "fail",
+      "message": null,
+      "error_message": null,
+      "summary": {
+        "total": 22,
+        "passed": 7,
+        "failed": 15,
+        "unknown": 0
+      },
+      "passed_items": [
+        {
+          "item_id": "redline_4",
+          "title": "M-01",
+          "metrics": {
+            "length_sum": 176.2612047913429,
+            "length_required": 157.34234633007327
+          }
+        },
+        {
+          "item_id": "redline_8",
+          "title": "地块17",
+          "reasons": [
+            "no_buildings"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_9",
+          "title": "M-08",
+          "metrics": {
+            "length_sum": 49.99751522669558,
+            "length_required": 42.418013020523524
+          }
+        },
+        {
+          "item_id": "redline_11",
+          "title": "M-06",
+          "reasons": [
+            "no_buildings"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_12",
+          "title": "M-04",
+          "metrics": {
+            "length_sum": 44.997786095659194,
+            "length_required": 42.497869353653
+          }
+        },
+        {
+          "item_id": "redline_13",
+          "title": "M-21",
+          "metrics": {
+            "length_sum": 98.18415150490284,
+            "length_required": 73.2934012309184
+          }
+        },
+        {
+          "item_id": "redline_21",
+          "title": "M-12",
+          "metrics": {
+            "length_sum": 67.5143632761669,
+            "length_required": 43.99946116837847
+          }
+        }
+      ],
+      "failed_items": [
+        {
+          "item_id": "redline_0",
+          "title": "M-23",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_1",
+          "title": "M-22",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_2",
+          "title": "M-03",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_3",
+          "title": "M-02",
+          "reasons": [
+            "outside_redline",
+            "distance_out_of_range"
+          ],
+          "metrics": {
+            "length_sum": 47.142264810704376,
+            "length_required": 45.14809039454132
+          }
+        },
+        {
+          "item_id": "redline_5",
+          "title": "M-05",
+          "reasons": [
+            "distance_out_of_range"
+          ],
+          "metrics": {
+            "length_sum": 106.49465452584707,
+            "length_required": 69.91254306969783
+          }
+        },
+        {
+          "item_id": "redline_6",
+          "title": "M-15",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_7",
+          "title": "M-14",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_10",
+          "title": "M-07",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_14",
+          "title": "N-10",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_15",
+          "title": "N-08",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_16",
+          "title": "N-07",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_17",
+          "title": "N-06",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_18",
+          "title": "M-19",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_19",
+          "title": "M-17",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        },
+        {
+          "item_id": "redline_20",
+          "title": "M-16",
+          "reasons": [
+            "missing_ladder"
+          ],
+          "metrics": {
+            "length_sum": 0.0,
+            "length_required": 0.0
+          }
+        }
+      ],
+      "unknown_items": [],
+      "raw_summary": {
+        "total_redlines": 22,
+        "passed": 7,
+        "failed": 15,
+        "no_buildings": 2
+      },
+      "warnings": [],
+      "northeast_view": {
+        "status": "missing",
+        "image_path": null,
+        "message": "待接入检测结果东北视角图"
+      }
+    },
+    {
+      "check_id": "green-setback-check",
+      "check_name": "绿地退线控制检测",
+      "selected": true,
+      "status": "fail",
+      "message": null,
+      "error_message": null,
+      "summary": {
+        "total": 20,
+        "passed": 19,
+        "failed": 1,
+        "unknown": 0
+      },
+      "passed_items": [
+        {
+          "item_id": "ca86ebc4-01c5-4a46-9c81-39184c016fa5",
+          "title": "阿迪创意总部大厦",
+          "metrics": {
+            "height": 75.0,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "b37e7052-9d1d-4751-8b18-427748a5a44a",
+          "title": "阿里中心",
+          "metrics": {
+            "height": 74.00000008008541,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "a89f5165-6471-462b-a66e-4127c1ece4ed",
+          "title": "阿里中心",
+          "metrics": {
+            "height": 84.00000047416296,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "091b09dc-3a8d-4bc1-a0eb-9785111127fe",
+          "title": "深圳湾一号",
+          "metrics": {
+            "height": 130.00000977000292,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "3c53eea7-e6e5-4ddd-95f7-ff898274c074",
+          "title": "喜之郎集团总部大厦",
+          "metrics": {
+            "height": 100.00000014153059,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "c84a08a3-93f8-44d6-8ec7-e434acfd5bea",
+          "title": "中建科工大厦",
+          "metrics": {
+            "height": 103.85500000000006,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "28ecbf8b-8107-4f02-9bf5-3701e021d535",
+          "title": "16大厦",
+          "metrics": {
+            "height": 103.85500000000003,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "2db980e4-2314-452e-8954-ec6c6e44d222",
+          "title": "03办公楼",
+          "metrics": {
+            "height": 18.000000000000007,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "4c7e35cc-4780-4392-8672-bddd1bc6a6f1",
+          "title": "华强方特大厦",
+          "metrics": {
+            "height": 150.0000000000001,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "5a085c25-9b5c-48a3-985d-f9c82530a87f",
+          "title": "深圳湾一号",
+          "metrics": {
+            "height": 334.0000000084533,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "9f0a3118-980d-4ca6-bc1f-c67989c97128",
+          "title": "海王星辰总部大厦",
+          "metrics": {
+            "height": 100.0000000000001,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "6c2670fb-f558-493c-8975-238c033e5f33",
+          "title": "海能达全球总部大厦",
+          "metrics": {
+            "height": 198.80669922000016,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "ae194a40-a921-4fab-b3b3-70b12405fa29",
+          "title": "02大厦",
+          "metrics": {
+            "height": 120.00000043510796,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "ad2d50cb-1d0a-49ba-8e59-9af94811f778",
+          "title": "百丽大厦",
+          "metrics": {
+            "height": 140.00000033957883,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "16c3ba13-9f7b-49e4-a147-e5a54d2a35cf",
+          "title": "12大厦",
+          "metrics": {
+            "height": 153.85500000001105,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "f6296cc0-840d-402f-8fd7-7fdea07f706d",
+          "title": "后海云溪花园",
+          "metrics": {
+            "height": 203.8550000000004,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "3148059a-bd2b-4370-ba18-e5fd02041b5d",
+          "title": "建筑18",
+          "metrics": {
+            "height": 100.00000000000007,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "52941e74-9de8-41c1-987a-33470693f9a8",
+          "title": "后海主变电站",
+          "metrics": {
+            "height": 11.999999999999998,
+            "green_name": null
+          }
+        },
+        {
+          "item_id": "8a8cec6a-f652-4b23-a222-537e95b9f60b",
+          "title": "后海二变电站",
+          "metrics": {
+            "height": 11.999999999999996,
+            "green_name": null
+          }
+        }
+      ],
+      "failed_items": [
+        {
+          "item_id": "5b5a5627-6b48-4b7b-ac78-6253c0553e21",
+          "title": "加油站",
+          "reasons": [
+            "inside_green_setback"
+          ],
+          "metrics": {
+            "height": 11.999999999999998,
+            "green_name": "绿地5"
+          }
+        }
+      ],
+      "unknown_items": [],
+      "raw_summary": {
+        "total_buildings": 20,
+        "checked_buildings": 20,
+        "ignored_buildings": 0,
+        "violations": 1,
+        "compliant": 19
+      },
+      "warnings": [],
+      "northeast_view": {
+        "status": "missing",
+        "image_path": null,
+        "message": "待接入检测结果东北视角图"
+      }
+    },
+    {
+      "check_id": "height-check",
+      "check_name": "限高检测",
+      "selected": true,
+      "status": "fail",
+      "message": null,
+      "error_message": null,
+      "summary": {
+        "total": 18,
+        "passed": 12,
+        "failed": 6,
+        "unknown": 0
+      },
+      "passed_items": [
+        {
+          "item_id": "ca86ebc4-01c5-4a46-9c81-39184c016fa5",
+          "title": "阿迪创意总部大厦",
+          "metrics": {
+            "actual_height": 75.0,
+            "height_limit": 75.0,
+            "exceed_amount": 0,
+            "plot_name": "M-07"
+          }
+        },
+        {
+          "item_id": "b37e7052-9d1d-4751-8b18-427748a5a44a",
+          "title": "阿里中心",
+          "metrics": {
+            "actual_height": 74.00000000000024,
+            "height_limit": 85.0,
+            "exceed_amount": 0,
+            "plot_name": "N-07"
+          }
+        },
+        {
+          "item_id": "3c53eea7-e6e5-4ddd-95f7-ff898274c074",
+          "title": "喜之郎集团总部大厦",
+          "metrics": {
+            "actual_height": 100.00000007076012,
+            "height_limit": 150.0,
+            "exceed_amount": 0,
+            "plot_name": "M-19"
+          }
+        },
+        {
+          "item_id": "c84a08a3-93f8-44d6-8ec7-e434acfd5bea",
+          "title": "中建科工大厦",
+          "metrics": {
+            "actual_height": 103.85499999998908,
+            "height_limit": 150.0,
+            "exceed_amount": 0,
+            "plot_name": "M-17"
+          }
+        },
+        {
+          "item_id": "2db980e4-2314-452e-8954-ec6c6e44d222",
+          "title": "03办公楼",
+          "metrics": {
+            "actual_height": 17.99999999998903,
+            "height_limit": 250.0,
+            "exceed_amount": 0,
+            "plot_name": "M-03"
+          }
+        },
+        {
+          "item_id": "4c7e35cc-4780-4392-8672-bddd1bc6a6f1",
+          "title": "华强方特大厦",
+          "metrics": {
+            "actual_height": 149.99999999998914,
+            "height_limit": 150.0,
+            "exceed_amount": 0,
+            "plot_name": "M-04"
+          }
+        },
+        {
+          "item_id": "5a085c25-9b5c-48a3-985d-f9c82530a87f",
+          "title": "深圳湾一号",
+          "metrics": {
+            "actual_height": 333.99999999999426,
+            "height_limit": 350.0,
+            "exceed_amount": 0,
+            "plot_name": "N-10"
+          }
+        },
+        {
+          "item_id": "9f0a3118-980d-4ca6-bc1f-c67989c97128",
+          "title": "海王星辰总部大厦",
+          "metrics": {
+            "actual_height": 99.99999999998911,
+            "height_limit": 100.0,
+            "exceed_amount": 0,
+            "plot_name": "M-14"
+          }
+        },
+        {
+          "item_id": "6c2670fb-f558-493c-8975-238c033e5f33",
+          "title": "海能达全球总部大厦",
+          "metrics": {
+            "actual_height": 198.80669921998918,
+            "height_limit": 200.0,
+            "exceed_amount": 0,
+            "plot_name": "M-05"
+          }
+        },
+        {
+          "item_id": "ae194a40-a921-4fab-b3b3-70b12405fa29",
+          "title": "02大厦",
+          "metrics": {
+            "actual_height": 120.00000043509698,
+            "height_limit": 250.0,
+            "exceed_amount": 0,
+            "plot_name": "M-02"
+          }
+        },
+        {
+          "item_id": "f6296cc0-840d-402f-8fd7-7fdea07f706d",
+          "title": "后海云溪花园",
+          "metrics": {
+            "actual_height": 203.85499999998902,
+            "height_limit": 250.0,
+            "exceed_amount": 0,
+            "plot_name": "M-01"
+          }
+        },
+        {
+          "item_id": "3148059a-bd2b-4370-ba18-e5fd02041b5d",
+          "title": "模型_建筑体块",
+          "metrics": {
+            "actual_height": 99.99999999998907,
+            "height_limit": 100.0,
+            "exceed_amount": 0,
+            "plot_name": "M-21"
+          }
+        }
+      ],
+      "failed_items": [
+        {
+          "item_id": "5b5a5627-6b48-4b7b-ac78-6253c0553e21",
+          "title": "加油站",
+          "metrics": {
+            "actual_height": 12.000000000000124,
+            "height_limit": 12.0,
+            "exceed_amount": 1.2434497875801753e-13,
+            "plot_name": "M-15"
+          }
+        },
+        {
+          "item_id": "a89f5165-6471-462b-a66e-4127c1ece4ed",
+          "title": "阿里中心",
+          "metrics": {
+            "actual_height": 84.00000002024773,
+            "height_limit": 75.0,
+            "exceed_amount": 9.000000020247725,
+            "plot_name": "N-06"
+          }
+        },
+        {
+          "item_id": "091b09dc-3a8d-4bc1-a0eb-9785111127fe",
+          "title": "深圳湾一号",
+          "metrics": {
+            "actual_height": 130.0000000000002,
+            "height_limit": 100.0,
+            "exceed_amount": 30.0000000000002,
+            "plot_name": "N-08"
+          }
+        },
+        {
+          "item_id": "28ecbf8b-8107-4f02-9bf5-3701e021d535",
+          "title": "16大厦",
+          "metrics": {
+            "actual_height": 103.85499999998905,
+            "height_limit": 100.0,
+            "exceed_amount": 3.8549999999890474,
+            "plot_name": "M-16"
+          }
+        },
+        {
+          "item_id": "ad2d50cb-1d0a-49ba-8e59-9af94811f778",
+          "title": "百丽大厦",
+          "metrics": {
+            "actual_height": 139.99999999998911,
+            "height_limit": 100.0,
+            "exceed_amount": 39.999999999989114,
+            "plot_name": "M-08"
+          }
+        },
+        {
+          "item_id": "16c3ba13-9f7b-49e4-a147-e5a54d2a35cf",
+          "title": "12大厦",
+          "metrics": {
+            "actual_height": 153.85500000000008,
+            "height_limit": 150.0,
+            "exceed_amount": 3.855000000000075,
+            "plot_name": "M-12"
+          }
+        }
+      ],
+      "unknown_items": [],
+      "raw_summary": {
+        "total_buildings": 18,
+        "exceeded_count": 6,
+        "compliant_count": 12,
+        "unmatched_buildings": 0
+      },
+      "warnings": [
+        "以下地块缺少限高信息: M-22, M-23, 地块17, 地块21, 地块25, 地块26, 地块6",
+        "1 栋建筑缺少 UserText '建筑名称'"
+      ],
+      "northeast_view": {
+        "status": "missing",
+        "image_path": null,
+        "message": "待接入检测结果东北视角图"
+      }
+    },
+    {
+      "check_id": "pedestrian-entrance-check",
+      "check_name": "人行出入口检测",
+      "selected": true,
+      "status": "pass",
+      "message": null,
+      "error_message": null,
+      "summary": {
+        "total": 59,
+        "passed": 59,
+        "failed": 0,
+        "unknown": 0
+      },
+      "passed_items": [
+        {
+          "item_id": "4a32d630-f38b-48a3-a190-9da3b61b47f0",
+          "title": "出入口1",
+          "metrics": {
+            "point": [
+              208.25293511356807,
+              -200.4960772022734,
+              -5.953165608841919e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "987bbd3d-5c06-4cdb-980e-972c82238a87",
+          "title": "出入口2",
+          "metrics": {
+            "point": [
+              208.25293511356807,
+              -108.21805644538516,
+              -8.279734893606278e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "120fc8ff-5b97-4dad-b358-6be39d768c8b",
+          "title": "出入口3",
+          "metrics": {
+            "point": [
+              208.25293511356804,
+              -56.02730658992642,
+              -9.595599652804274e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "c0eef240-e5d5-4ab4-a957-267aa36ab351",
+          "title": "出入口4",
+          "metrics": {
+            "point": [
+              208.25293511356804,
+              -6.521018370477243,
+              -1.0843782141216223e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "65ea1432-7417-4245-b838-58bef12be697",
+          "title": "出入口5",
+          "metrics": {
+            "point": [
+              107.72300470954715,
+              -1.1574150346524448,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "beefe991-d682-49a4-b2b4-5eacd69f75f2",
+          "title": "出入口6",
+          "metrics": {
+            "point": [
+              44.71304663519705,
+              -137.22929935974778,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "f8ea2d4e-a183-468e-bfe6-79ee1bb67999",
+          "title": "出入口7",
+          "metrics": {
+            "point": [
+              208.2529351135681,
+              115.8048447241771,
+              -6.23214965180745e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "a137f7ff-6017-4677-ba3b-72526a5229bc",
+          "title": "出入口8",
+          "metrics": {
+            "point": [
+              208.25293511356807,
+              105.68968654312921,
+              -6.1533821202198915e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "168c7371-18e4-4fb3-87b8-be5901ca5a30",
+          "title": "出入口9",
+          "metrics": {
+            "point": [
+              191.1024169531793,
+              63.774238338524015,
+              -6.468106678154636e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "934f9d86-44cf-4471-94e5-632e9d6d8bf2",
+          "title": "出入口10",
+          "metrics": {
+            "point": [
+              153.83741706064274,
+              63.774238338524015,
+              -7.86115293779138e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "83705828-379e-434a-992b-9ea81d432fdf",
+          "title": "出入口11",
+          "metrics": {
+            "point": [
+              136.32528820872716,
+              63.774238338524015,
+              -8.515794173959036e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "1e2bdcbe-845b-4470-aaf8-38cf17a7a4a0",
+          "title": "出入口12",
+          "metrics": {
+            "point": [
+              94.60218011731925,
+              63.774238338524015,
+              -1.0075494156107595e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "2fd58e4c-ca83-4f60-a6a3-feb1a6b167a5",
+          "title": "出入口13",
+          "metrics": {
+            "point": [
+              62.33125538519073,
+              113.53741475331617,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "2a992728-4599-491e-b6d5-96f148153654",
+          "title": "出入口14",
+          "metrics": {
+            "point": [
+              208.2529351135681,
+              199.2221462102832,
+              -4.528036974012621e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "8574775c-c5ea-485c-a6c3-42e5de70eef9",
+          "title": "出入口15",
+          "metrics": {
+            "point": [
+              68.93023973017947,
+              197.99795634775256,
+              -4.5884491686588345e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "d4995b14-888e-4047-9fd1-aa7a0ebac71a",
+          "title": "出入口16",
+          "metrics": {
+            "point": [
+              68.93023973017947,
+              264.6904612764696,
+              -1.2972598584741746e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "841012b0-3b3b-4527-84a9-ead12976ba95",
+          "title": "出入口17",
+          "metrics": {
+            "point": [
+              93.65252168280945,
+              290.9837663507214,
+              2.8091739402721727e-16
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "1a339a6b-85f5-4195-bfff-0d934f818ce0",
+          "title": "出入口18",
+          "metrics": {
+            "point": [
+              188.56310608919244,
+              290.9837663507214,
+              2.8091739402721727e-16
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "0b9ac203-6cfb-4ab3-9ff6-03c054b60751",
+          "title": "出入口19",
+          "metrics": {
+            "point": [
+              208.31790489177112,
+              264.3838213115308,
+              -2.7528604001190965e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "edab8e2f-1bef-45d8-804b-5e86a0b04e2a",
+          "title": "出入口20",
+          "metrics": {
+            "point": [
+              -28.862980811681098,
+              175.88916585451284,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "12d8cc05-5fbf-433c-afa3-7393c0d8dfaf",
+          "title": "出入口21",
+          "metrics": {
+            "point": [
+              -28.862980811681098,
+              154.38656900969306,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "35161f0d-437c-42e9-a402-918e810dfd6f",
+          "title": "出入口22",
+          "metrics": {
+            "point": [
+              -28.862980811681098,
+              115.8874978310394,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "ed35edfc-8d79-452b-847e-609ed3025e3b",
+          "title": "出入口23",
+          "metrics": {
+            "point": [
+              -57.354942395423414,
+              68.49988137797209,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "a2072739-6a32-4a4c-bb43-2b5091bd1c88",
+          "title": "出入口24",
+          "metrics": {
+            "point": [
+              -65.41483724552309,
+              -6.1843928907986765,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "09bf6dd2-ca1c-40d1-94c1-91e453297c33",
+          "title": "出入口25",
+          "metrics": {
+            "point": [
+              -29.17866254957563,
+              -48.77124572424024,
+              -1.0979012553338582e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "02c45926-b933-49aa-9dac-f23697061f1b",
+          "title": "出入口26",
+          "metrics": {
+            "point": [
+              -59.39835714671908,
+              290.9837663507214,
+              2.8091739402721727e-16
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "f8e2f077-3d92-4722-b2cd-86a9c6b2db63",
+          "title": "出入口27",
+          "metrics": {
+            "point": [
+              -28.86298081168109,
+              266.96642048142957,
+              -5.489365817972277e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "d296f512-5b3e-43df-b556-5f0e26d89dfd",
+          "title": "出入口28",
+          "metrics": {
+            "point": [
+              -94.25008624952638,
+              242.94907461213774,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "100cf25b-765c-4d38-a066-7cecf285c058",
+          "title": "出入口29",
+          "metrics": {
+            "point": [
+              -94.25008624952638,
+              221.06225032088173,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "784ea6e7-d303-4e39-bf45-f5bff228e15f",
+          "title": "出入口30",
+          "metrics": {
+            "point": [
+              -94.25008624952638,
+              -53.214039532697555,
+              -1.097901255333858e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "85d721aa-d057-4008-9fba-f70984a38364",
+          "title": "出入口31",
+          "metrics": {
+            "point": [
+              -94.25008624952638,
+              -87.50508578311681,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "dea87444-cd88-48f8-9644-2d7261d4701b",
+          "title": "出入口32",
+          "metrics": {
+            "point": [
+              -122.85314035525494,
+              -104.31571875501993,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "7f125370-940f-445f-8005-dccc4fbebd21",
+          "title": "出入口33",
+          "metrics": {
+            "point": [
+              -174.39129611133637,
+              -71.01630700592057,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "2f7e6822-edf5-49a9-bd39-3a6e2cbfae51",
+          "title": "出入口34",
+          "metrics": {
+            "point": [
+              -122.85314035525496,
+              -9.805795892689957,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "4826a083-3aa7-4eb8-a9da-6a252a6a88dd",
+          "title": "出入口35",
+          "metrics": {
+            "point": [
+              -225.20256094873767,
+              -76.74837781807878,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "f571be15-98ae-4e76-b9fa-a560cfed1f9a",
+          "title": "出入口36",
+          "metrics": {
+            "point": [
+              -272.1578063326241,
+              -50.49567443691457,
+              -1.097901255333858e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "b1c9187c-eb55-45ae-b06b-b9a0ea8c7d9f",
+          "title": "出入口37",
+          "metrics": {
+            "point": [
+              -296.4390890790933,
+              -51.17030823413353,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "bd7c2785-940f-40d2-a5aa-14be4681fd69",
+          "title": "出入口38",
+          "metrics": {
+            "point": [
+              -225.04443262268035,
+              -5.162992197069343,
+              -1.0979012553338582e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "91c43061-1496-4155-b9b4-a0aaf5f4ce41",
+          "title": "出入口39",
+          "metrics": {
+            "point": [
+              -275.7059941908942,
+              55.588344830497086,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "895e0d1b-e8df-405b-816a-4d957fa2aff5",
+          "title": "出入口40",
+          "metrics": {
+            "point": [
+              -293.2302998688439,
+              65.19801820589124,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "b5ee74d2-2103-4212-8dd0-7cf1556ec5d8",
+          "title": "出入口41",
+          "metrics": {
+            "point": [
+              -354.4890029736064,
+              63.29841781130416,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "34b928ae-f141-4f6e-91fd-e6dcf38b14a7",
+          "title": "出入口42",
+          "metrics": {
+            "point": [
+              -321.04122592887916,
+              38.90537921729947,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "186a9275-348e-4650-b6b5-d7329a670492",
+          "title": "出入口43",
+          "metrics": {
+            "point": [
+              -321.134409889658,
+              23.574330602243435,
+              -1.097901255333858e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "c93e40ec-f2de-497d-9a06-42b0644369aa",
+          "title": "出入口44",
+          "metrics": {
+            "point": [
+              -354.4890029736064,
+              -5.4607146911934645,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "2ef8c908-6755-43f7-b83a-81b5e37dac30",
+          "title": "出入口45",
+          "metrics": {
+            "point": [
+              -293.2302998688439,
+              -7.990321199037567,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "2e6f9423-4e0f-4f9a-b460-5c05b7dbbfd6",
+          "title": "出入口46",
+          "metrics": {
+            "point": [
+              -354.4890029736064,
+              -80.07323875359108,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "97a280a9-ba3d-42ee-a87d-d13cc382a480",
+          "title": "出入口47",
+          "metrics": {
+            "point": [
+              -272.8249264375838,
+              109.74938419333915,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "6aa39791-8e5a-4d51-bcf5-abd2c369c000",
+          "title": "出入口48",
+          "metrics": {
+            "point": [
+              -296.4000467091718,
+              109.74938419333915,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "2dad13b5-40e0-45f0-b5b0-3c5944690df0",
+          "title": "出入口49",
+          "metrics": {
+            "point": [
+              -225.3286643443595,
+              132.72966280008032,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "c558973d-59da-4bdc-9e02-3427d3004a27",
+          "title": "出入口50",
+          "metrics": {
+            "point": [
+              -354.39713318552253,
+              129.0417946428716,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "bd613b6d-fc95-4235-bd23-82495fbdd5e5",
+          "title": "出入口51",
+          "metrics": {
+            "point": [
+              -354.39713318552253,
+              200.213992446424,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "401bd0f5-2372-4984-9b99-eebb7ea5e6d5",
+          "title": "出入口52",
+          "metrics": {
+            "point": [
+              -341.9931617579372,
+              283.2953380036542,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "268412fb-88d8-4a9e-a828-3da2f2dba720",
+          "title": "出入口53",
+          "metrics": {
+            "point": [
+              -283.3537945535113,
+              291.5428857632487,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "caaff7b4-768f-44cf-b02c-41876972bf57",
+          "title": "出入口54",
+          "metrics": {
+            "point": [
+              -158.64301256961423,
+              290.9837663507214,
+              2.8091739402721727e-16
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "cd339dbb-74bc-4b9e-be21-cb176ec9d9d8",
+          "title": "出入口55",
+          "metrics": {
+            "point": [
+              -158.64301256961423,
+              242.82234774236565,
+              -1.0979012553338581e-11
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "5d8363d1-71cc-4e4d-b245-0ef46d56bcac",
+          "title": "出入口56",
+          "metrics": {
+            "point": [
+              141.39236467236543,
+              241.16646394968404,
+              -2.4581388600573373e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "74626c55-8d88-4a1b-b06c-fdf6d5bc4507",
+          "title": "出入口57",
+          "metrics": {
+            "point": [
+              148.52936884059636,
+              241.16646394968404,
+              -2.4581388600573377e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "ed4c192b-a222-41d3-97f8-83f9ae2eca96",
+          "title": "出入口58",
+          "metrics": {
+            "point": [
+              142.1100902941451,
+              223.09555217081584,
+              -3.3499151059108932e-12
+            ],
+            "distances": null
+          }
+        },
+        {
+          "item_id": "fb7078cf-1fb7-4ece-9181-109c3c386a85",
+          "title": "出入口59",
+          "metrics": {
+            "point": [
+              147.6640504028526,
+              223.09555217081584,
+              -3.3499151059108932e-12
+            ],
+            "distances": null
+          }
+        }
+      ],
+      "failed_items": [],
+      "unknown_items": [],
+      "raw_summary": {
+        "total": 22,
+        "passed": 18,
+        "failed": 4,
+        "required_min": 2,
+        "status": "fail",
+        "reasons": [
+          "insufficient_entrances"
+        ]
+      },
+      "warnings": [],
+      "northeast_view": {
+        "status": "missing",
+        "image_path": null,
+        "message": "待接入检测结果东北视角图"
+      }
+    },
+    {
+      "check_id": "plaza-setback-check",
+      "check_name": "广场退线控制检测",
+      "selected": true,
+      "status": "fail",
+      "message": null,
+      "error_message": null,
+      "summary": {
+        "total": 20,
+        "passed": 19,
+        "failed": 1,
+        "unknown": 0
+      },
+      "passed_items": [
+        {
+          "item_id": "ca86ebc4-01c5-4a46-9c81-39184c016fa5",
+          "title": "阿迪创意总部大厦",
+          "metrics": {
+            "height": 75.0,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "5b5a5627-6b48-4b7b-ac78-6253c0553e21",
+          "title": "加油站",
+          "metrics": {
+            "height": 11.999999999999998,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "b37e7052-9d1d-4751-8b18-427748a5a44a",
+          "title": "阿里中心",
+          "metrics": {
+            "height": 74.00000008008541,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "a89f5165-6471-462b-a66e-4127c1ece4ed",
+          "title": "阿里中心",
+          "metrics": {
+            "height": 84.00000047416296,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "091b09dc-3a8d-4bc1-a0eb-9785111127fe",
+          "title": "深圳湾一号",
+          "metrics": {
+            "height": 130.00000977000292,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "3c53eea7-e6e5-4ddd-95f7-ff898274c074",
+          "title": "喜之郎集团总部大厦",
+          "metrics": {
+            "height": 100.00000014153059,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "c84a08a3-93f8-44d6-8ec7-e434acfd5bea",
+          "title": "中建科工大厦",
+          "metrics": {
+            "height": 103.85500000000006,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "28ecbf8b-8107-4f02-9bf5-3701e021d535",
+          "title": "16大厦",
+          "metrics": {
+            "height": 103.85500000000003,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "2db980e4-2314-452e-8954-ec6c6e44d222",
+          "title": "03办公楼",
+          "metrics": {
+            "height": 18.000000000000007,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "4c7e35cc-4780-4392-8672-bddd1bc6a6f1",
+          "title": "华强方特大厦",
+          "metrics": {
+            "height": 150.0000000000001,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "5a085c25-9b5c-48a3-985d-f9c82530a87f",
+          "title": "深圳湾一号",
+          "metrics": {
+            "height": 334.0000000084533,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "9f0a3118-980d-4ca6-bc1f-c67989c97128",
+          "title": "海王星辰总部大厦",
+          "metrics": {
+            "height": 100.0000000000001,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "6c2670fb-f558-493c-8975-238c033e5f33",
+          "title": "海能达全球总部大厦",
+          "metrics": {
+            "height": 198.80669922000016,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "ae194a40-a921-4fab-b3b3-70b12405fa29",
+          "title": "02大厦",
+          "metrics": {
+            "height": 120.00000043510796,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "16c3ba13-9f7b-49e4-a147-e5a54d2a35cf",
+          "title": "12大厦",
+          "metrics": {
+            "height": 153.85500000001105,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "f6296cc0-840d-402f-8fd7-7fdea07f706d",
+          "title": "后海云溪花园",
+          "metrics": {
+            "height": 203.8550000000004,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "3148059a-bd2b-4370-ba18-e5fd02041b5d",
+          "title": "建筑18",
+          "metrics": {
+            "height": 100.00000000000007,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "52941e74-9de8-41c1-987a-33470693f9a8",
+          "title": "后海主变电站",
+          "metrics": {
+            "height": 11.999999999999998,
+            "plaza_name": null
+          }
+        },
+        {
+          "item_id": "8a8cec6a-f652-4b23-a222-537e95b9f60b",
+          "title": "后海二变电站",
+          "metrics": {
+            "height": 11.999999999999996,
+            "plaza_name": null
+          }
+        }
+      ],
+      "failed_items": [
+        {
+          "item_id": "ad2d50cb-1d0a-49ba-8e59-9af94811f778",
+          "title": "百丽大厦",
+          "reasons": [
+            "inside_plaza_setback"
+          ],
+          "metrics": {
+            "height": 140.00000033957883,
+            "plaza_name": "广场2"
+          }
+        }
+      ],
+      "unknown_items": [],
+      "raw_summary": {
+        "total_buildings": 20,
+        "checked_buildings": 20,
+        "ignored_buildings": 0,
+        "violations": 1,
+        "compliant": 19
+      },
+      "warnings": [],
+      "northeast_view": {
+        "status": "missing",
+        "image_path": null,
+        "message": "待接入检测结果东北视角图"
+      }
+    },
+    {
+      "check_id": "setback-check",
+      "check_name": "退线检测",
+      "selected": true,
+      "status": "fail",
+      "message": null,
+      "error_message": null,
+      "summary": {
+        "total": 20,
+        "passed": 9,
+        "failed": 11,
+        "unknown": 0
+      },
+      "passed_items": [
+        {
+          "item_id": "5b5a5627-6b48-4b7b-ac78-6253c0553e21",
+          "title": "加油站",
+          "metrics": {
+            "plot_name": "M-15"
+          }
+        },
+        {
+          "item_id": "b37e7052-9d1d-4751-8b18-427748a5a44a",
+          "title": "阿里中心",
+          "metrics": {
+            "plot_name": "N-07"
+          }
+        },
+        {
+          "item_id": "a89f5165-6471-462b-a66e-4127c1ece4ed",
+          "title": "阿里中心",
+          "metrics": {
+            "plot_name": "N-06"
+          }
+        },
+        {
+          "item_id": "091b09dc-3a8d-4bc1-a0eb-9785111127fe",
+          "title": "深圳湾一号",
+          "metrics": {
+            "plot_name": "N-08"
+          }
+        },
+        {
+          "item_id": "4c7e35cc-4780-4392-8672-bddd1bc6a6f1",
+          "title": "华强方特大厦",
+          "metrics": {
+            "plot_name": "M-04"
+          }
+        },
+        {
+          "item_id": "ae194a40-a921-4fab-b3b3-70b12405fa29",
+          "title": "02大厦",
+          "metrics": {
+            "plot_name": "M-02"
+          }
+        },
+        {
+          "item_id": "3148059a-bd2b-4370-ba18-e5fd02041b5d",
+          "title": "建筑18",
+          "metrics": {
+            "plot_name": "M-21"
+          }
+        },
+        {
+          "item_id": "52941e74-9de8-41c1-987a-33470693f9a8",
+          "title": "后海主变电站",
+          "metrics": {
+            "plot_name": "M-22"
+          }
+        },
+        {
+          "item_id": "8a8cec6a-f652-4b23-a222-537e95b9f60b",
+          "title": "后海二变电站",
+          "metrics": {
+            "plot_name": "M-23"
+          }
+        }
+      ],
+      "failed_items": [
+        {
+          "item_id": "ca86ebc4-01c5-4a46-9c81-39184c016fa5",
+          "title": "阿迪创意总部大厦",
+          "metrics": {
+            "plot_name": "M-07"
+          }
+        },
+        {
+          "item_id": "3c53eea7-e6e5-4ddd-95f7-ff898274c074",
+          "title": "喜之郎集团总部大厦",
+          "metrics": {
+            "plot_name": "M-19"
+          }
+        },
+        {
+          "item_id": "c84a08a3-93f8-44d6-8ec7-e434acfd5bea",
+          "title": "中建科工大厦",
+          "metrics": {
+            "plot_name": "M-17"
+          }
+        },
+        {
+          "item_id": "28ecbf8b-8107-4f02-9bf5-3701e021d535",
+          "title": "16大厦",
+          "metrics": {
+            "plot_name": "M-16"
+          }
+        },
+        {
+          "item_id": "2db980e4-2314-452e-8954-ec6c6e44d222",
+          "title": "03办公楼",
+          "metrics": {
+            "plot_name": "M-03"
+          }
+        },
+        {
+          "item_id": "5a085c25-9b5c-48a3-985d-f9c82530a87f",
+          "title": "深圳湾一号",
+          "metrics": {
+            "plot_name": "N-10"
+          }
+        },
+        {
+          "item_id": "9f0a3118-980d-4ca6-bc1f-c67989c97128",
+          "title": "海王星辰总部大厦",
+          "metrics": {
+            "plot_name": "M-14"
+          }
+        },
+        {
+          "item_id": "6c2670fb-f558-493c-8975-238c033e5f33",
+          "title": "海能达全球总部大厦",
+          "metrics": {
+            "plot_name": "M-05"
+          }
+        },
+        {
+          "item_id": "ad2d50cb-1d0a-49ba-8e59-9af94811f778",
+          "title": "百丽大厦",
+          "metrics": {
+            "plot_name": "M-08"
+          }
+        },
+        {
+          "item_id": "16c3ba13-9f7b-49e4-a147-e5a54d2a35cf",
+          "title": "12大厦",
+          "metrics": {
+            "plot_name": "M-12"
+          }
+        },
+        {
+          "item_id": "f6296cc0-840d-402f-8fd7-7fdea07f706d",
+          "title": "后海云溪花园",
+          "metrics": {
+            "plot_name": "M-01"
+          }
+        }
+      ],
+      "unknown_items": [],
+      "raw_summary": {
+        "total_buildings": 20,
+        "exceeded_count": 11,
+        "compliant_count": 9,
+        "unmatched_buildings": 0
+      },
+      "warnings": [],
+      "northeast_view": {
+        "status": "missing",
+        "image_path": null,
+        "message": "待接入检测结果东北视角图"
+      }
+    },
+    {
+      "check_id": "setback-rate-check",
+      "check_name": "贴线率检测",
+      "selected": true,
+      "status": "warning",
+      "message": null,
+      "error_message": null,
+      "summary": {
+        "total": 22,
+        "passed": 0,
+        "failed": 0,
+        "unknown": 22
+      },
+      "passed_items": [],
+      "failed_items": [],
+      "unknown_items": [
+        {
+          "item_id": "M-12",
+          "title": "M-12",
+          "metrics": {
+            "frontage_rate": 0.3720631089441403,
+            "required_rate": null,
+            "setback_length": 239.48232607414855,
+            "overlap_length": 89.10253877632206,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-16",
+          "title": "M-16",
+          "metrics": {
+            "frontage_rate": 1.000000000000003,
+            "required_rate": null,
+            "setback_length": 226.84359435285788,
+            "overlap_length": 226.8435943528586,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-17",
+          "title": "M-17",
+          "metrics": {
+            "frontage_rate": 0.7042918183548037,
+            "required_rate": null,
+            "setback_length": 221.1203798084283,
+            "overlap_length": 155.7332743705828,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-19",
+          "title": "M-19",
+          "metrics": {
+            "frontage_rate": 0.9999999999999981,
+            "required_rate": null,
+            "setback_length": 302.5475861391325,
+            "overlap_length": 302.5475861391319,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "N-06",
+          "title": "N-06",
+          "metrics": {
+            "frontage_rate": 0.02097151911729375,
+            "required_rate": null,
+            "setback_length": 379.34247303872667,
+            "overlap_length": 7.955387925333144,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "N-07",
+          "title": "N-07",
+          "metrics": {
+            "frontage_rate": 0.0,
+            "required_rate": null,
+            "setback_length": 379.0357740590304,
+            "overlap_length": 0.0,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "N-08",
+          "title": "N-08",
+          "metrics": {
+            "frontage_rate": 0.0,
+            "required_rate": null,
+            "setback_length": 470.95923069613525,
+            "overlap_length": 0.0,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "N-10",
+          "title": "N-10",
+          "metrics": {
+            "frontage_rate": 0.20003714240852485,
+            "required_rate": null,
+            "setback_length": 732.5097985962901,
+            "overlap_length": 146.52916689744595,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-21",
+          "title": "M-21",
+          "metrics": {
+            "frontage_rate": 0.6043473933043552,
+            "required_rate": null,
+            "setback_length": 323.1736049236736,
+            "overlap_length": 195.30912572039367,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-04",
+          "title": "M-04",
+          "metrics": {
+            "frontage_rate": 0.3910492690173634,
+            "required_rate": null,
+            "setback_length": 219.70359727819795,
+            "overlap_length": 85.9149311161245,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-06",
+          "title": "M-06",
+          "metrics": {
+            "frontage_rate": 0.0,
+            "required_rate": null,
+            "setback_length": 227.86724520066127,
+            "overlap_length": 0.0,
+            "building_count": 0
+          }
+        },
+        {
+          "item_id": "M-07",
+          "title": "M-07",
+          "metrics": {
+            "frontage_rate": 0.4830384478562764,
+            "required_rate": null,
+            "setback_length": 230.98530447082118,
+            "overlap_length": 111.57478294919488,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-08",
+          "title": "M-08",
+          "metrics": {
+            "frontage_rate": 0.16266938235901923,
+            "required_rate": null,
+            "setback_length": 206.20881314132242,
+            "overlap_length": 33.54386027068533,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "地块17",
+          "title": "地块17",
+          "metrics": {
+            "frontage_rate": 0.0,
+            "required_rate": null,
+            "setback_length": 451.3582534136574,
+            "overlap_length": 0.0,
+            "building_count": 0
+          }
+        },
+        {
+          "item_id": "M-14",
+          "title": "M-14",
+          "metrics": {
+            "frontage_rate": 0.769265872149854,
+            "required_rate": null,
+            "setback_length": 271.25757491988475,
+            "overlap_length": 208.6691949479995,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-15",
+          "title": "M-15",
+          "metrics": {
+            "frontage_rate": 0.0,
+            "required_rate": null,
+            "setback_length": 263.1336459418803,
+            "overlap_length": 0.0,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-05",
+          "title": "M-05",
+          "metrics": {
+            "frontage_rate": 0.3302277265661671,
+            "required_rate": null,
+            "setback_length": 327.94902528872433,
+            "overlap_length": 108.29786105068588,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-01",
+          "title": "M-01",
+          "metrics": {
+            "frontage_rate": 0.36107982102769226,
+            "required_rate": null,
+            "setback_length": 477.94456219734843,
+            "overlap_length": 172.5761369793773,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-02",
+          "title": "M-02",
+          "metrics": {
+            "frontage_rate": 0.6349463026253865,
+            "required_rate": null,
+            "setback_length": 210.5923852727646,
+            "overlap_length": 133.71485639000278,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-03",
+          "title": "M-03",
+          "metrics": {
+            "frontage_rate": 0.6692322443284081,
+            "required_rate": null,
+            "setback_length": 184.97488056955288,
+            "overlap_length": 123.79115446794113,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-22",
+          "title": "M-22",
+          "metrics": {
+            "frontage_rate": 0.0,
+            "required_rate": null,
+            "setback_length": 216.42951383423033,
+            "overlap_length": 0.0,
+            "building_count": 1
+          }
+        },
+        {
+          "item_id": "M-23",
+          "title": "M-23",
+          "metrics": {
+            "frontage_rate": 0.0,
+            "required_rate": null,
+            "setback_length": 255.27933777802065,
+            "overlap_length": 0.0,
+            "building_count": 1
+          }
+        }
+      ],
+      "raw_summary": {
+        "total_plots": 22,
+        "total_buildings": 20,
+        "total_setback_length": 6818.69890699549,
+        "total_overlap_length": 2102.1034523540798,
+        "overall_rate": 0.30828512609604664,
+        "unmatched_buildings": 0
+      },
+      "warnings": [],
+      "northeast_view": {
+        "status": "missing",
+        "image_path": null,
+        "message": "待接入检测结果东北视角图"
+      }
+    },
+    {
+      "check_id": "sight-corridor",
+      "check_name": "视线通廊检测",
+      "selected": true,
+      "status": "fail",
+      "message": null,
+      "error_message": null,
+      "summary": {
+        "total": 28,
+        "passed": 14,
+        "failed": 6,
+        "unknown": 8
+      },
+      "passed_items": [
+        {
+          "item_id": "visible_0",
+          "title": "模型_建筑体块",
+          "metrics": {
+            "distance": 23.73065412118096,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_1",
+          "title": "深圳湾一号",
+          "metrics": {
+            "distance": 66.18333468057426,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_2",
+          "title": "喜之郎集团总部大厦",
+          "metrics": {
+            "distance": 73.21299425910814,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_3",
+          "title": "深圳湾一号",
+          "metrics": {
+            "distance": 95.92104443036744,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_4",
+          "title": "后海主变电站",
+          "metrics": {
+            "distance": 140.94134042416334,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_5",
+          "title": "中建科工大厦",
+          "metrics": {
+            "distance": 177.9307555411619,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_6",
+          "title": "后海二变电站",
+          "metrics": {
+            "distance": 179.03403996427207,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_7",
+          "title": "阿里中心",
+          "metrics": {
+            "distance": 187.37473715975,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_8",
+          "title": "海能达全球总部大厦",
+          "metrics": {
+            "distance": 224.48585529916042,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_9",
+          "title": "16大厦",
+          "metrics": {
+            "distance": 244.33558429572264,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_10",
+          "title": "03办公楼",
+          "metrics": {
+            "distance": 249.3086034033879,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_11",
+          "title": "阿里中心",
+          "metrics": {
+            "distance": 254.30273175073987,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_12",
+          "title": "后海云溪花园",
+          "metrics": {
+            "distance": 295.6897760080064,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "visible_13",
+          "title": "02大厦",
+          "metrics": {
+            "distance": 312.5681438385558,
+            "layer_name": "模型_建筑体块"
+          }
+        }
+      ],
+      "failed_items": [
+        {
+          "item_id": "invisible_0",
+          "title": "海王星辰总部大厦",
+          "reasons": [
+            "被遮挡"
+          ],
+          "metrics": {
+            "distance": 122.91327023017972,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "invisible_1",
+          "title": "加油站",
+          "reasons": [
+            "被遮挡"
+          ],
+          "metrics": {
+            "distance": 193.99393388584335,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "invisible_2",
+          "title": "百丽大厦",
+          "reasons": [
+            "被遮挡"
+          ],
+          "metrics": {
+            "distance": 230.5610690144383,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "invisible_3",
+          "title": "12大厦",
+          "reasons": [
+            "被遮挡"
+          ],
+          "metrics": {
+            "distance": 287.0249308842936,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "invisible_4",
+          "title": "阿迪创意总部大厦",
+          "reasons": [
+            "被遮挡"
+          ],
+          "metrics": {
+            "distance": 297.0644374084209,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "invisible_5",
+          "title": "华强方特大厦",
+          "reasons": [
+            "被遮挡"
+          ],
+          "metrics": {
+            "distance": 316.62842765521515,
+            "layer_name": "模型_建筑体块"
+          }
+        }
+      ],
+      "unknown_items": [
+        {
+          "item_id": "blocking_0",
+          "title": "阿里中心",
+          "metrics": {
+            "distance": null,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "blocking_1",
+          "title": "深圳湾一号",
+          "metrics": {
+            "distance": null,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "blocking_2",
+          "title": "喜之郎集团总部大厦",
+          "metrics": {
+            "distance": null,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "blocking_3",
+          "title": "中建科工大厦",
+          "metrics": {
+            "distance": null,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "blocking_4",
+          "title": "03办公楼",
+          "metrics": {
+            "distance": null,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "blocking_5",
+          "title": "海能达全球总部大厦",
+          "metrics": {
+            "distance": null,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "blocking_6",
+          "title": "模型_建筑体块",
+          "metrics": {
+            "distance": null,
+            "layer_name": "模型_建筑体块"
+          }
+        },
+        {
+          "item_id": "blocking_7",
+          "title": "后海主变电站",
+          "metrics": {
+            "distance": null,
+            "layer_name": "模型_建筑体块"
+          }
+        }
+      ],
+      "raw_summary": {
+        "total_buildings": 20,
+        "visible_count": 14,
+        "invisible_count": 6
+      },
+      "warnings": [],
+      "northeast_view": {
+        "status": "missing",
+        "image_path": null,
+        "message": "待接入检测结果东北视角图"
+      }
+    },
+    {
+      "check_id": "sky-bridge",
+      "check_name": "空中连廊检测",
+      "selected": true,
+      "status": "fail",
+      "message": null,
+      "error_message": null,
+      "summary": {
+        "total": 2,
+        "passed": 1,
+        "failed": 1,
+        "unknown": 0
+      },
+      "passed_items": [
+        {
+          "item_id": "1",
+          "title": "M-02 -> M-04",
+          "metrics": {
+            "corridors_count": 1
+          }
+        }
+      ],
+      "failed_items": [
+        {
+          "item_id": "connection_0",
+          "title": "M-02 -> M-03",
+          "reasons": [
+            "missing_corridor"
+          ],
+          "metrics": {
+            "corridors_count": 1
+          }
+        }
+      ],
+      "unknown_items": [],
+      "raw_summary": {
+        "total_connections": 2,
+        "passed": 1,
+        "failed": 1,
+        "no_connections": 0
+      },
+      "warnings": [],
+      "northeast_view": {
+        "status": "missing",
+        "image_path": null,
+        "message": "待接入检测结果东北视角图"
+      }
+    },
+    {
+      "check_id": "vehicle-entrance-check",
+      "check_name": "车行出入口检测",
+      "selected": true,
+      "status": "fail",
+      "message": null,
+      "error_message": null,
+      "summary": {
+        "total": 32,
+        "passed": 11,
+        "failed": 21,
+        "unknown": 0
+      },
+      "passed_items": [
+        {
+          "item_id": "0dc52b51-ac15-4114-a9f7-33ffeb912f47",
+          "title": "出入口2",
+          "metrics": {
+            "point": [
+              -299.90243890981174,
+              -147.54867487852994,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 78.39649346665166
+            }
+          }
+        },
+        {
+          "item_id": "bc87ab99-6236-4912-9530-b50f1799e205",
+          "title": "出入口3",
+          "metrics": {
+            "point": [
+              -263.21437105592486,
+              -141.87917605826829,
+              -1.0979012553338582e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 54.50439079734544
+            }
+          }
+        },
+        {
+          "item_id": "d5a1c45f-3b02-46a9-9c1c-c28455d8a984",
+          "title": "出入口7",
+          "metrics": {
+            "point": [
+              -225.0444326226803,
+              39.271389556160386,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 59.66018269949712
+            }
+          }
+        },
+        {
+          "item_id": "b26034b1-a647-418e-8c3a-4a463f7f020d",
+          "title": "出入口11",
+          "metrics": {
+            "point": [
+              -122.85314035525495,
+              -31.084128122782243,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 84.75027344903256
+            }
+          }
+        },
+        {
+          "item_id": "803f682f-da5a-4f3f-8c69-24703562de1a",
+          "title": "出入口13",
+          "metrics": {
+            "point": [
+              -142.09959927256153,
+              5.832939807562582,
+              0.0
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 58.23738030887156
+            }
+          }
+        },
+        {
+          "item_id": "6b24c154-ccc3-4efb-ae7f-08f71959bfc9",
+          "title": "出入口14",
+          "metrics": {
+            "point": [
+              -185.4055287554998,
+              -17.740448823837568,
+              0.0
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 96.32095208841145
+            }
+          }
+        },
+        {
+          "item_id": "9a47fcf4-51e3-4be2-9f9f-1afe31ef64a0",
+          "title": "出入口21",
+          "metrics": {
+            "point": [
+              -29.935855164301934,
+              -69.75976167237243,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 78.1126790668885
+            }
+          }
+        },
+        {
+          "item_id": "3c5be9ae-7b9f-4919-a4f9-13d965138bc9",
+          "title": "出入口26",
+          "metrics": {
+            "point": [
+              49.596849680160204,
+              -107.33834813871641,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 113.76640930669399
+            }
+          }
+        },
+        {
+          "item_id": "e8c281b8-48b7-4372-bda3-0d7dd8bffaf7",
+          "title": "出入口29",
+          "metrics": {
+            "point": [
+              166.2917235964502,
+              223.0955521708158,
+              -3.349915105910893e-12
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 56.65125788687374
+            }
+          }
+        },
+        {
+          "item_id": "3fb2d897-8d61-4cae-a8f4-42c009df4898",
+          "title": "出入口31",
+          "metrics": {
+            "point": [
+              106.79718471861605,
+              241.16646394968404,
+              -2.4581388600573365e-12
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 53.169982949723774
+            }
+          }
+        },
+        {
+          "item_id": "e029c701-60bf-4a9f-a524-a700458b18af",
+          "title": "出入口32",
+          "metrics": {
+            "point": [
+              120.1517448201266,
+              223.09555217081584,
+              -3.3499151059108932e-12
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 66.51613996606046
+            }
+          }
+        }
+      ],
+      "failed_items": [
+        {
+          "item_id": "5220d5a9-3f91-43fe-b4fe-1f9bf8712e64",
+          "title": "出入口1",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -330.4882456607333,
+              -104.31571875501993,
+              -1.0979012553338582e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 42.541286116512254
+            }
+          }
+        },
+        {
+          "item_id": "6b220013-bdbc-4037-8e59-9542ab36620c",
+          "title": "出入口4",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -250.45427756981593,
+              -104.31571875501993,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 35.10877243008553
+            }
+          }
+        },
+        {
+          "item_id": "0ca703b0-e5e4-459f-b0e9-68760b5e124a",
+          "title": "出入口5",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -337.5962344273369,
+              -30.7950255889757,
+              -1.097901255333858e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 36.8051218753061
+            }
+          }
+        },
+        {
+          "item_id": "4b385414-4e69-4a16-bc3d-830dfe6af305",
+          "title": "出入口6",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -340.3048463327648,
+              89.24586448978437,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 33.589274403175054
+            }
+          }
+        },
+        {
+          "item_id": "5cdaca13-2609-4c4c-abf6-e10347da4288",
+          "title": "出入口8",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -336.41012856506626,
+              107.24950255076273,
+              -1.0979012553338582e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 38.238876113906926
+            }
+          }
+        },
+        {
+          "item_id": "8c779903-3cb1-4efe-bcaf-ce0351093186",
+          "title": "出入口9",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -225.32866434435954,
+              252.76598260485025,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 23.040908643449235
+            }
+          }
+        },
+        {
+          "item_id": "4aa58a59-189c-42ad-a243-faedbcb69bfe",
+          "title": "出入口10",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -122.85314035525495,
+              263.0854154545327,
+              -6.3596684090485485e-12
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 34.15034473627514
+            }
+          }
+        },
+        {
+          "item_id": "2db5a024-7a46-45d5-ba55-6da515811457",
+          "title": "出入口12",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -166.89718114558104,
+              -104.31571875501993,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 30.26992558440501
+            }
+          }
+        },
+        {
+          "item_id": "9e937c88-fe36-4565-be5b-960adb01e91f",
+          "title": "出入口15",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -122.69918060302734,
+              88.03641793440724,
+              0.0
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 34.842120080985964
+            }
+          }
+        },
+        {
+          "item_id": "75432250-1afd-47a2-87db-454e560e34cc",
+          "title": "出入口16",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -122.69918060302734,
+              190.10273394644258,
+              0.0
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 29.278631883481676
+            }
+          }
+        },
+        {
+          "item_id": "1dd9fe89-4c68-49bb-acdb-b8e16642025a",
+          "title": "出入口17",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -53.01991730240225,
+              175.88916585451284,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 40.95599959869177
+            }
+          }
+        },
+        {
+          "item_id": "a0bb3b5a-6182-4a53-a6c5-f0becfacea90",
+          "title": "出入口18",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -53.32410298626729,
+              242.94907461213774,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 40.712418539701474
+            }
+          }
+        },
+        {
+          "item_id": "5f1447c8-8b37-4f23-9036-41df67916bd2",
+          "title": "出入口19",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -75.26924818381255,
+              154.38656900969306,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 36.08376452974125
+            }
+          }
+        },
+        {
+          "item_id": "a18f4adf-e069-45cc-a6d6-7288468d26b4",
+          "title": "出入口20",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -70.41976845720137,
+              68.49988137797209,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 42.8561774041176
+            }
+          }
+        },
+        {
+          "item_id": "83a55ace-b86d-4562-82b3-606959faf1aa",
+          "title": "出入口22",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -132.03292958709181,
+              -151.897194053047,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 42.064113134229004
+            }
+          }
+        },
+        {
+          "item_id": "14cd748b-5c5e-410b-b2ee-bcbcff7a4496",
+          "title": "出入口23",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -110.28557757755038,
+              -160.13687185741242,
+              -1.097901255333858e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 45.06524933945868
+            }
+          }
+        },
+        {
+          "item_id": "a30a85d8-5f61-40df-b4dc-4019064a0619",
+          "title": "出入口24",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              -103.98033554993987,
+              -147.2094388817935,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 33.02341722540236
+            }
+          }
+        },
+        {
+          "item_id": "68537f85-5f99-47c3-b529-78be6a49693e",
+          "title": "出入口25",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              29.8432691875841,
+              -205.50081104809692,
+              -1.0979012553338581e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 33.30354045371121
+            }
+          }
+        },
+        {
+          "item_id": "b0ae48f7-295c-47eb-9a95-4a2649be22de",
+          "title": "出入口27",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              90.26886445594445,
+              158.0274820834885,
+              -1.0343121085206214e-11
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 37.04031797647411
+            }
+          }
+        },
+        {
+          "item_id": "08381072-ea20-44ac-be1e-8c53f99a4d89",
+          "title": "出入口28",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              185.2536555092895,
+              158.0274820834885,
+              -7.298221746892733e-12
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 37.61562753903694
+            }
+          }
+        },
+        {
+          "item_id": "4e3df445-2a0c-4023-8b8c-f45b2c2f8851",
+          "title": "出入口30",
+          "reasons": [
+            "too_close_branch_intersection"
+          ],
+          "metrics": {
+            "point": [
+              175.31936234970752,
+              241.16646394968404,
+              -2.458138860057338e-12
+            ],
+            "distances": {
+              "main": null,
+              "secondary": null,
+              "branch": 47.94528899194701
+            }
+          }
+        }
+      ],
+      "unknown_items": [],
+      "raw_summary": {
+        "total": 32,
+        "passed": 11,
+        "failed": 21
+      },
+      "warnings": [
+        "未找到主干路交叉口，已默认通过该项",
+        "未找到次干路交叉口，已默认通过该项"
+      ],
+      "northeast_view": {
+        "status": "missing",
+        "image_path": null,
+        "message": "待接入检测结果东北视角图"
+      }
+    }
+  ],
+  "totals": {
+    "checks_total": 10,
+    "checks_error": 0,
+    "checks_with_failures": 8,
+    "items_total": 243,
+    "items_passed": 151,
+    "items_failed": 62,
+    "items_unknown": 30
+  }
+}

@@ -1,0 +1,621 @@
+{
+  "check_name": "vehicle_entrance_check",
+  "endpoint": "/vehicle-entrance-check",
+  "url": "http://127.0.0.1:8003/vehicle-entrance-check",
+  "ok": true,
+  "status_code": 200,
+  "started_at": "2026-02-26T22:31:56",
+  "finished_at": "2026-02-26T22:31:56",
+  "request": {
+    "model_path": "8287391d74c048c9ada48385564076bc.3dm"
+  },
+  "response": {
+    "status": "ok",
+    "summary": {
+      "total": 32,
+      "passed": 11,
+      "failed": 21
+    },
+    "results": [
+      {
+        "index": 0,
+        "name": "出入口1",
+        "object_id": "5220d5a9-3f91-43fe-b4fe-1f9bf8712e64",
+        "point": [
+          -330.4882456607333,
+          -104.31571875501993,
+          -1.0979012553338582e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 42.541286116512254
+        }
+      },
+      {
+        "index": 1,
+        "name": "出入口2",
+        "object_id": "0dc52b51-ac15-4114-a9f7-33ffeb912f47",
+        "point": [
+          -299.90243890981174,
+          -147.54867487852994,
+          -1.0979012553338581e-11
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 78.39649346665166
+        }
+      },
+      {
+        "index": 2,
+        "name": "出入口3",
+        "object_id": "bc87ab99-6236-4912-9530-b50f1799e205",
+        "point": [
+          -263.21437105592486,
+          -141.87917605826829,
+          -1.0979012553338582e-11
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 54.50439079734544
+        }
+      },
+      {
+        "index": 3,
+        "name": "出入口4",
+        "object_id": "6b220013-bdbc-4037-8e59-9542ab36620c",
+        "point": [
+          -250.45427756981593,
+          -104.31571875501993,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 35.10877243008553
+        }
+      },
+      {
+        "index": 4,
+        "name": "出入口5",
+        "object_id": "0ca703b0-e5e4-459f-b0e9-68760b5e124a",
+        "point": [
+          -337.5962344273369,
+          -30.7950255889757,
+          -1.097901255333858e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 36.8051218753061
+        }
+      },
+      {
+        "index": 5,
+        "name": "出入口6",
+        "object_id": "4b385414-4e69-4a16-bc3d-830dfe6af305",
+        "point": [
+          -340.3048463327648,
+          89.24586448978437,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 33.589274403175054
+        }
+      },
+      {
+        "index": 6,
+        "name": "出入口7",
+        "object_id": "d5a1c45f-3b02-46a9-9c1c-c28455d8a984",
+        "point": [
+          -225.0444326226803,
+          39.271389556160386,
+          -1.0979012553338581e-11
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 59.66018269949712
+        }
+      },
+      {
+        "index": 7,
+        "name": "出入口8",
+        "object_id": "5cdaca13-2609-4c4c-abf6-e10347da4288",
+        "point": [
+          -336.41012856506626,
+          107.24950255076273,
+          -1.0979012553338582e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 38.238876113906926
+        }
+      },
+      {
+        "index": 8,
+        "name": "出入口9",
+        "object_id": "8c779903-3cb1-4efe-bcaf-ce0351093186",
+        "point": [
+          -225.32866434435954,
+          252.76598260485025,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 23.040908643449235
+        }
+      },
+      {
+        "index": 9,
+        "name": "出入口10",
+        "object_id": "4aa58a59-189c-42ad-a243-faedbcb69bfe",
+        "point": [
+          -122.85314035525495,
+          263.0854154545327,
+          -6.3596684090485485e-12
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 34.15034473627514
+        }
+      },
+      {
+        "index": 10,
+        "name": "出入口11",
+        "object_id": "b26034b1-a647-418e-8c3a-4a463f7f020d",
+        "point": [
+          -122.85314035525495,
+          -31.084128122782243,
+          -1.0979012553338581e-11
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 84.75027344903256
+        }
+      },
+      {
+        "index": 11,
+        "name": "出入口12",
+        "object_id": "2db5a024-7a46-45d5-ba55-6da515811457",
+        "point": [
+          -166.89718114558104,
+          -104.31571875501993,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 30.26992558440501
+        }
+      },
+      {
+        "index": 12,
+        "name": "出入口13",
+        "object_id": "803f682f-da5a-4f3f-8c69-24703562de1a",
+        "point": [
+          -142.09959927256153,
+          5.832939807562582,
+          0.0
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 58.23738030887156
+        }
+      },
+      {
+        "index": 13,
+        "name": "出入口14",
+        "object_id": "6b24c154-ccc3-4efb-ae7f-08f71959bfc9",
+        "point": [
+          -185.4055287554998,
+          -17.740448823837568,
+          0.0
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 96.32095208841145
+        }
+      },
+      {
+        "index": 14,
+        "name": "出入口15",
+        "object_id": "9e937c88-fe36-4565-be5b-960adb01e91f",
+        "point": [
+          -122.69918060302734,
+          88.03641793440724,
+          0.0
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 34.842120080985964
+        }
+      },
+      {
+        "index": 15,
+        "name": "出入口16",
+        "object_id": "75432250-1afd-47a2-87db-454e560e34cc",
+        "point": [
+          -122.69918060302734,
+          190.10273394644258,
+          0.0
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 29.278631883481676
+        }
+      },
+      {
+        "index": 16,
+        "name": "出入口17",
+        "object_id": "1dd9fe89-4c68-49bb-acdb-b8e16642025a",
+        "point": [
+          -53.01991730240225,
+          175.88916585451284,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 40.95599959869177
+        }
+      },
+      {
+        "index": 17,
+        "name": "出入口18",
+        "object_id": "a0bb3b5a-6182-4a53-a6c5-f0becfacea90",
+        "point": [
+          -53.32410298626729,
+          242.94907461213774,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 40.712418539701474
+        }
+      },
+      {
+        "index": 18,
+        "name": "出入口19",
+        "object_id": "5f1447c8-8b37-4f23-9036-41df67916bd2",
+        "point": [
+          -75.26924818381255,
+          154.38656900969306,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 36.08376452974125
+        }
+      },
+      {
+        "index": 19,
+        "name": "出入口20",
+        "object_id": "a18f4adf-e069-45cc-a6d6-7288468d26b4",
+        "point": [
+          -70.41976845720137,
+          68.49988137797209,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 42.8561774041176
+        }
+      },
+      {
+        "index": 20,
+        "name": "出入口21",
+        "object_id": "9a47fcf4-51e3-4be2-9f9f-1afe31ef64a0",
+        "point": [
+          -29.935855164301934,
+          -69.75976167237243,
+          -1.0979012553338581e-11
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 78.1126790668885
+        }
+      },
+      {
+        "index": 21,
+        "name": "出入口22",
+        "object_id": "83a55ace-b86d-4562-82b3-606959faf1aa",
+        "point": [
+          -132.03292958709181,
+          -151.897194053047,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 42.064113134229004
+        }
+      },
+      {
+        "index": 22,
+        "name": "出入口23",
+        "object_id": "14cd748b-5c5e-410b-b2ee-bcbcff7a4496",
+        "point": [
+          -110.28557757755038,
+          -160.13687185741242,
+          -1.097901255333858e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 45.06524933945868
+        }
+      },
+      {
+        "index": 23,
+        "name": "出入口24",
+        "object_id": "a30a85d8-5f61-40df-b4dc-4019064a0619",
+        "point": [
+          -103.98033554993987,
+          -147.2094388817935,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 33.02341722540236
+        }
+      },
+      {
+        "index": 24,
+        "name": "出入口25",
+        "object_id": "68537f85-5f99-47c3-b529-78be6a49693e",
+        "point": [
+          29.8432691875841,
+          -205.50081104809692,
+          -1.0979012553338581e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 33.30354045371121
+        }
+      },
+      {
+        "index": 25,
+        "name": "出入口26",
+        "object_id": "3c5be9ae-7b9f-4919-a4f9-13d965138bc9",
+        "point": [
+          49.596849680160204,
+          -107.33834813871641,
+          -1.0979012553338581e-11
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 113.76640930669399
+        }
+      },
+      {
+        "index": 26,
+        "name": "出入口27",
+        "object_id": "b0ae48f7-295c-47eb-9a95-4a2649be22de",
+        "point": [
+          90.26886445594445,
+          158.0274820834885,
+          -1.0343121085206214e-11
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 37.04031797647411
+        }
+      },
+      {
+        "index": 27,
+        "name": "出入口28",
+        "object_id": "08381072-ea20-44ac-be1e-8c53f99a4d89",
+        "point": [
+          185.2536555092895,
+          158.0274820834885,
+          -7.298221746892733e-12
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 37.61562753903694
+        }
+      },
+      {
+        "index": 28,
+        "name": "出入口29",
+        "object_id": "e8c281b8-48b7-4372-bda3-0d7dd8bffaf7",
+        "point": [
+          166.2917235964502,
+          223.0955521708158,
+          -3.349915105910893e-12
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 56.65125788687374
+        }
+      },
+      {
+        "index": 29,
+        "name": "出入口30",
+        "object_id": "4e3df445-2a0c-4023-8b8c-f45b2c2f8851",
+        "point": [
+          175.31936234970752,
+          241.16646394968404,
+          -2.458138860057338e-12
+        ],
+        "status": "fail",
+        "reasons": [
+          "too_close_branch_intersection"
+        ],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 47.94528899194701
+        }
+      },
+      {
+        "index": 30,
+        "name": "出入口31",
+        "object_id": "3fb2d897-8d61-4cae-a8f4-42c009df4898",
+        "point": [
+          106.79718471861605,
+          241.16646394968404,
+          -2.4581388600573365e-12
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 53.169982949723774
+        }
+      },
+      {
+        "index": 31,
+        "name": "出入口32",
+        "object_id": "e029c701-60bf-4a9f-a524-a700458b18af",
+        "point": [
+          120.1517448201266,
+          223.09555217081584,
+          -3.3499151059108932e-12
+        ],
+        "status": "pass",
+        "reasons": [],
+        "distances": {
+          "main": null,
+          "secondary": null,
+          "branch": 66.51613996606046
+        }
+      }
+    ],
+    "warnings": [
+      "未找到主干路交叉口，已默认通过该项",
+      "未找到次干路交叉口，已默认通过该项"
+    ],
+    "parameters": {
+      "entrance_layer": "场地_车行出入口",
+      "main_intersection_layer": "场地_主干路交叉口",
+      "secondary_intersection_layer": "场地_次干路交叉口",
+      "branch_intersection_layer": "场地_支路交叉口",
+      "min_main_distance": 100.0,
+      "min_secondary_distance": 80.0,
+      "min_branch_distance": 50.0
+    }
+  }
+}

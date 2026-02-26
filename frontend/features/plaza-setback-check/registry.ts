@@ -7,7 +7,7 @@ import { usePlazaSetbackStore } from "./store";
 
 toolRegistry.register({
   id: "plaza-setback-check",
-  name: "广场退线控制检测",
+  name: "广场退线检测",
   description: "检测广场退线内是否存在超高建筑",
   category: "building",
   status: "implemented",
