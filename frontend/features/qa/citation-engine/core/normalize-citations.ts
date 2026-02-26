@@ -1,3 +1,9 @@
+/**
+ * 引用位置规范化
+ * 1) 将标点后的引用移到标点前：内容。[1-1] → 内容[1-1]。
+ * 2) 剥除 Markdown 表格行内的引用标签
+ * 3) 移除无效/重复的引用标签
+ */
 import type { SourceInfo } from "../../types";
 import { collectValidCitationLabels } from "./citation-utils";
 import { sanitizeAnswerCitations } from "./sanitize-answer-citations";

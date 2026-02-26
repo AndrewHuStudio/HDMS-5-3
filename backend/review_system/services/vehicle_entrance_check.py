@@ -1,3 +1,8 @@
+"""
+车行出入口与交叉口距离检测（纯 Python 实现）
+
+检测每个车行出入口与主干路/次干路/支路交叉口的水平距离是否满足最小间距要求。
+"""
 from __future__ import annotations
 
 import logging
@@ -16,10 +21,12 @@ Point3D = rhino3dm.Point3d
 
 
 def _normalize_layer_name(name: str) -> str:
+    """图层名称标准化：去首尾空格并转小写"""
     return name.strip().lower()
 
 
 def _expand_layer_name(name: str) -> set[str]:
+    """将图层名展开为候选集合，同时包含完整路径和末级名称"""
     normalized = _normalize_layer_name(name)
     if not normalized:
         return set()
@@ -32,6 +39,7 @@ def _expand_layer_name(name: str) -> set[str]:
 
 
 def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
+    """获取图层的所有候选名称，兼容 FullPath / Name 等不同属性名"""
     names: List[str] = []
     for attr in ("FullPath", "fullPath", "Name", "name"):
         value = getattr(layer, attr, None)
@@ -48,6 +56,7 @@ def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
 def _load_objects_from_layer(
     file3dm: rhino3dm.File3dm, layer_name: str
 ) -> List[Tuple[rhino3dm.File3dmObject, rhino3dm.CommonObject]]:
+    """从 File3dm 中按图层名加载所有对象，返回 (对象, 几何体) 列表"""
     target_layers = _expand_layer_name(layer_name)
     if not target_layers:
         return []
@@ -81,6 +90,7 @@ def _load_objects_from_layer(
 
 
 def _geometry_to_point(geometry: rhino3dm.CommonObject) -> Optional[Point3D]:
+    """从几何体中提取代表点，Point 取位置，其他类型取 BoundingBox 中心"""
     if isinstance(geometry, rhino3dm.Point):
         return geometry.Location
     if isinstance(geometry, rhino3dm.Point3d):
@@ -98,10 +108,12 @@ def _geometry_to_point(geometry: rhino3dm.CommonObject) -> Optional[Point3D]:
 
 
 def _distance_xy(a: Point3D, b: Point3D) -> float:
+    """计算两点在 XY 平面上的水平距离"""
     return math.hypot(a.X - b.X, a.Y - b.Y)
 
 
 def _min_distance_xy(point: Point3D, points: List[Point3D]) -> Optional[float]:
+    """计算点到点集中最近点的水平距离，点集为空时返回 None"""
     if not points:
         return None
     best = None
@@ -113,6 +125,7 @@ def _min_distance_xy(point: Point3D, points: List[Point3D]) -> Optional[float]:
 
 
 def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
+    """从对象 UserText 或 Attributes 中读取名称，找不到时返回 fallback"""
     name = _get_user_text(obj, "地块名称") or _get_user_text(obj, "名称")
     if name:
         return name
@@ -141,6 +154,12 @@ def check_vehicle_entrance_distance(
     min_secondary_distance: float = 80.0,
     min_branch_distance: float = 50.0,
 ) -> Dict:
+    """
+    车行出入口与交叉口距离检测主函数。
+    对每个车行出入口点，分别计算其与主干路/次干路/支路交叉口的最小水平距离，
+    若小于对应最小间距要求则标记为不合规。
+    交叉口图层为空时默认该项通过并记录警告。
+    """
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
         raise ValueError(f"Failed to read 3dm file: {model_path}")

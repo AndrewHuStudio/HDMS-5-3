@@ -1,3 +1,7 @@
+"""
+管控审查系统配置
+从环境变量读取路径、上传限制和 CORS 设置，开发环境自动允许局域网来源。
+"""
 from __future__ import annotations
 
 import os
@@ -20,6 +24,7 @@ CORS_ORIGINS = [
     for origin in os.getenv("CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",")
     if origin.strip()
 ]
+# 开发环境自动允许局域网私有地址
 CORS_ALLOW_PRIVATE_ORIGINS = os.getenv(
     "CORS_ALLOW_PRIVATE_ORIGINS", "1" if APP_ENV == "development" else "0"
 ).lower() in {"1", "true", "yes"}

@@ -1,3 +1,4 @@
+/** 绿地退线检测 - 注册到 toolRegistry */
 import { Leaf } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
 import { GreenSetbackPanel } from "./panel";

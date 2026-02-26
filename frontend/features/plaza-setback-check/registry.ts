@@ -1,3 +1,4 @@
+/** 广场退线检测 - 注册到 toolRegistry */
 import { Square } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
 import { PlazaSetbackPanel } from "./panel";

@@ -1,8 +1,9 @@
 /**
- * Rules: heading-blank-lines, list-blank-lines
+ * 规则：heading-blank-lines, list-blank-lines
  *
- * Ensure proper blank lines after headings and before list items
- * so markdown parsers treat them as separate blocks.
+ * 确保标题后和列表前有适当的空行，使 Markdown 解析器将它们视为独立块。
+ * heading-blank-lines: 标题后添加空行
+ * list-blank-lines: 列表前添加空行
  */
 
 import { registerRules } from "../registry";

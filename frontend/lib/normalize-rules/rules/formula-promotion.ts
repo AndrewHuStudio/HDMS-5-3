@@ -1,8 +1,8 @@
 /**
- * Rule: formula-promotion
+ * 规则：formula-promotion
  *
- * Promote obvious bare formula lines to display-math blocks ($$...$$)
- * so they render with dedicated KaTeX styles.
+ * 将明显的裸公式行提升为显示数学块（$$...$$），使其以专用 KaTeX 样式渲染。
+ * 识别包含 LaTeX 标记（\frac、\sum 等）和运算符（=、+、- 等）的行。
  */
 
 import {

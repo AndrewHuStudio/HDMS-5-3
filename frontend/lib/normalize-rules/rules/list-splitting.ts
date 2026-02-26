@@ -1,7 +1,8 @@
 /**
- * Rule: split-run-on-items
+ * 规则：split-run-on-items, split-inline-heading
  *
- * Split "1.xxx2.yyy3.zzz" run-on items into list-friendly lines.
+ * split-run-on-items: 拆分连写的列表项（"1.xxx2.yyy3.zzz" → 独立行）
+ * split-inline-heading: 拆分标题与正文混排的行（"### 标题|正文内容" → 独立的标题行和正文行）
  */
 
 import {

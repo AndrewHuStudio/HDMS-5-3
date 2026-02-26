@@ -1,3 +1,9 @@
+/**
+ * 城市场景主组件
+ * 基于 Three.js + React Three Fiber 的 3D 场景渲染器，
+ * 支持多视角切换（透视/等轴测/平面）、模型加载（3dm/glb/gltf）、
+ * 检测结果可视化（高度/退线/视线走廊等）、图层管理、测量工具等。
+ */
 "use client";
 
 import { Canvas, useThree } from "@react-three/fiber";
@@ -34,7 +40,7 @@ export type ModelFileType = "gltf" | "glb" | "3dm";
 // 视角配置 - zoom 值越大视野越小，显示越近
 // 演示模型范围约 280 单位，相机位置需要足够远才能看到全貌
 const viewConfigs: Record<ViewMode, { position: [number, number, number]; zoom?: number; label: string }> = {
-  "perspective": { position: [200, 150, 200], label: "透视" },
+  "perspective": { position: [200,100, 200], label: "透视" },
   "isometric-ne": { position: [200, 200, 200], zoom: 0.8, label: "东北" },
   "isometric-nw": { position: [-200, 200, 200], zoom: 0.8, label: "西北" },
   "isometric-se": { position: [200, 200, -200], zoom: 0.8, label: "东南" },
@@ -45,6 +51,7 @@ const viewConfigs: Record<ViewMode, { position: [number, number, number]; zoom?:
 const RHINO_LIBRARY_PATH = "/rhino3dm/";
 const GRID_PLANE_SIZE = 100000;
 const CAMERA_FIT_PADDING = 0.8;
+const CAMERA_FIT_UP_AXIS_FOCUS_RATIO = 0.1;
 const MIN_ORBIT_DISTANCE = 0.01;
 const MAX_ORBIT_DISTANCE = 1e7;
 const MIN_ORTHO_ZOOM = 0.01;
@@ -274,6 +281,18 @@ const computeClippingPlanes = (distance: number, radius: number) => {
   const near = Math.min(fitNear, maxNear);
   const far = Math.max(near + 1, distance + radius * CLIP_FAR_MARGIN, CLIP_MIN_FAR);
   return { near, far };
+};
+
+const getFitFocusPoint = (bounds: THREE.Box3, upAxis: UpAxis) => {
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const upIndex = AXIS_INDEX[upAxis];
+  const focus = center.clone();
+  focus.setComponent(
+    upIndex,
+    bounds.min.getComponent(upIndex) + size.getComponent(upIndex) * CAMERA_FIT_UP_AXIS_FOCUS_RATIO
+  );
+  return focus;
 };
 
 interface CityElementMeshProps {
@@ -1874,7 +1893,7 @@ function PlanViewportCameraController({
 
     const boundsSize = new THREE.Vector3();
     fitBounds.getSize(boundsSize);
-    const center = fitBounds.getCenter(new THREE.Vector3());
+    const center = getFitFocusPoint(fitBounds, sceneUpAxis);
     const horizontalWidth = boundsSize.x;
     const horizontalHeight = sceneUpAxis === "z" ? boundsSize.y : boundsSize.z;
 
@@ -2256,7 +2275,7 @@ function CameraController({
 
     if (fitBounds) {
       const bounds = fitBounds.clone();
-      const center = bounds.getCenter(new THREE.Vector3());
+      const center = getFitFocusPoint(bounds, upAxis);
       const sphere = bounds.getBoundingSphere(new THREE.Sphere());
       const radius = Math.max(sphere.radius, 0.001);
 

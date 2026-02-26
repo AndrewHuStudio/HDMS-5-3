@@ -1,3 +1,4 @@
+/** 空中连廊检测 API 封装 - 调用后端 /sky-bridge-check/prepare 和 /sky-bridge-check 端点 */
 import type { SkyBridgeCheckResponse, SkyBridgePrepareResponse } from "./types";
 import { resolveApiBase } from "@/lib/api-base";
 

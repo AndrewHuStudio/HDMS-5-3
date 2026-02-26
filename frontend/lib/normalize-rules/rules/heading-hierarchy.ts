@@ -1,8 +1,8 @@
 /**
- * Rule: heading-hierarchy
+ * 规则：heading-hierarchy
  *
- * Normalize markdown heading spacing/levels and demote sentence-like
- * pseudo-headings to plain text using the heading classifier.
+ * 规范化 Markdown 标题层级和间距，使用标题分类器将类句子的伪标题降级为普通文本。
+ * 确保标题层级不跳级（如 ## 后直接 ####），主要章节标题统一为 ##。
  */
 
 import {

@@ -1,4 +1,9 @@
-﻿from __future__ import annotations
+﻿"""
+消防登高面检测路由
+POST /fire-ladder-check - 检测消防登高面是否满足宽度、距离、长度比例要求
+POST /fire-ladder/check  - 同上（别名）
+"""
+from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -15,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class FireLadderCheckRequest(BaseModel):
+    """消防登高面检测请求参数"""
     model_config = ConfigDict(protected_namespaces=())
     model_path: str
     building_layer: str = "模型_建筑体块"
@@ -29,6 +35,7 @@ class FireLadderCheckRequest(BaseModel):
 
 
 def _resolve_model_path(model_path: str) -> Path:
+    """将相对路径解析为绝对路径，文件不存在时抛出 404"""
     path = Path(model_path)
     if not path.is_absolute():
         path = (config.MODEL_STORAGE_PATH / path).resolve()
@@ -40,6 +47,7 @@ def _resolve_model_path(model_path: str) -> Path:
 @router.post("/fire-ladder-check")
 @router.post("/fire-ladder/check")
 def fire_ladder_check(request: FireLadderCheckRequest) -> Dict[str, Any]:
+    """消防登高面检测接口，验证登高面宽度、距建筑距离及长度比例"""
     resolved_path = _resolve_model_path(request.model_path)
     try:
         return check_fire_ladder_pure_python(

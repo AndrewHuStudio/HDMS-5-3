@@ -1,3 +1,8 @@
+/**
+ * 知识图谱可视化组件
+ * 使用 react-force-graph-2d 渲染知识图谱，
+ * 支持节点类型过滤、悬停高亮、点击展开相关节点、自适应布局等功能。
+ */
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";

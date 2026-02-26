@@ -1,3 +1,7 @@
+/**
+ * 视角控制组件
+ * 提供透视、等轴测（东北/西北/东南/西南）、平面等多种视角切换功能。
+ */
 "use client";
 
 import React from "react"
@@ -141,9 +145,22 @@ export function ViewControls({ currentView, onViewChange }: ViewControlsProps) {
         size="sm" 
         className="gap-1"
         onClick={() => onViewChange("plan")}
+        title="平面视图快捷按钮"
       >
         <Grid3X3 className="h-4 w-4" />
         平面
+      </Button>
+
+      {/* 透视图按钮（保留原下拉中的透视入口，同时提供快速切换） */}
+      <Button
+        variant={currentView === "perspective" ? "default" : "outline"}
+        size="sm"
+        className="gap-1"
+        onClick={() => onViewChange("perspective")}
+        title="透视视图快捷按钮"
+      >
+        <Eye className="h-4 w-4" />
+        透视
       </Button>
     </div>
   );

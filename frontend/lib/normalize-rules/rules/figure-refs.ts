@@ -1,7 +1,9 @@
 /**
- * Rules: figure-refs, table-refs, section-artifacts
+ * 规则：figure-refs, table-refs, section-artifacts
  *
- * Normalize figure/table references and strip section-number noise.
+ * figure-refs: 规范化图引用（"见图3.0.3" → "(见图1)"），按出现顺序重新编号
+ * table-refs: 规范化表引用（"见表3.2.6" → "(见表1)"），按出现顺序重新编号
+ * section-artifacts: 剥离章节编号噪声（如 "(3.2.1 说明)"），保留规范/标准上下文中的引用
  */
 
 import { registerRules } from "../registry";

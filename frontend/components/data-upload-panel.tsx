@@ -1,3 +1,8 @@
+/**
+ * 数据上传面板组件
+ * 管理 OCR 扫描、向量化处理、图谱化处理、验证检查四个阶段的数据上传流程，
+ * 展示各阶段的处理进度和状态。
+ */
 "use client";
 
 import { Badge } from "@/components/ui/badge";

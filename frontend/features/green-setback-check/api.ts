@@ -1,3 +1,4 @@
+/** 绿地退线检测 API 封装 - 调用后端 /green-setback-check 端点 */
 import type { GreenSetbackCheckResponse } from "./types";
 import { API_BASE, normalizeApiBase } from "@/lib/api-base";
 

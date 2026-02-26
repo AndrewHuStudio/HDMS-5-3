@@ -1,8 +1,10 @@
 /**
- * Rules: section-scaffold, heading-sequence
+ * 规则：section-scaffold, heading-sequence, dedupe-retrieval-overview, retrieval-overview-cleanup
  *
- * Inject stable two-layer scaffold (## 检索综述 / ## 详细解析) when only
- * level-3 headings exist, and fix repeated heading numbering.
+ * section-scaffold: 当仅存在三级标题时，注入稳定的两层脚手架（## 检索综述 / ## 详细解析）
+ * heading-sequence: 修复重复的标题编号，确保同一区块内的标题序号连续（1. 2. 3.）
+ * dedupe-retrieval-overview: 幂等守卫，仅保留第一个 "## 检索综述" 标题
+ * retrieval-overview-cleanup: 清理检索综述区块，仅保留引用块，移除状态行
  */
 
 import {

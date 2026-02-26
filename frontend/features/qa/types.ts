@@ -1,3 +1,5 @@
+/** 问答助手 - 核心类型定义（消息、来源、检索统计、图谱数据等） */
+
 export type ChatRole = "user" | "assistant";
 
 export interface SourceInfo {

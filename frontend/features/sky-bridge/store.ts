@@ -1,3 +1,4 @@
+/** 空中连廊检测 Zustand store - 管理地块列表、连接对、检测参数和结果 */
 import { create } from "zustand";
 import type { PlotInfo, SkyBridgeConnection, SkyBridgeResult } from "./types";
 

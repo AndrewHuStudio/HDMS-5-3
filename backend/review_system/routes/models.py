@@ -1,4 +1,9 @@
-﻿from __future__ import annotations
+﻿"""
+模型上传与图层提取路由
+POST /models/import  - 上传 .3dm 文件并提取图层信息
+GET  /models/{model_path}/layers - 单独获取已上传模型的图层信息
+"""
+from __future__ import annotations
 
 import asyncio
 import uuid
@@ -13,7 +18,7 @@ from services.rhino_model import extract_layer_info
 
 router = APIRouter(prefix="/models", tags=["models"])
 
-# 线程池用于运行阻塞的图层提取
+# 图层提取是 CPU 密集型阻塞操作，放入线程池避免阻塞事件循环
 _executor = ThreadPoolExecutor(max_workers=2)
 
 
@@ -22,8 +27,9 @@ async def import_model(
     file: UploadFile = File(...),
     skip_layers: bool = Query(False, description="跳过图层提取以加快上传速度"),
 ):
+    """上传 .3dm 模型文件，保存后异步提取图层信息"""
     if not file.filename.lower().endswith(".3dm"):
-        raise HTTPException(status_code=400, detail="Only .3dm files are supported")
+        raise HTTPException(status_code=400, detail="仅支持 .3dm 格式文件")
 
     model_id = uuid.uuid4().hex
     target_path = config.MODEL_STORAGE_PATH / f"{model_id}.3dm"

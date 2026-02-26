@@ -1,4 +1,10 @@
-﻿from __future__ import annotations
+﻿"""
+人行出入口数量检测（纯 Python 实现）
+
+检测每条建筑红线范围内的人行出入口数量是否满足最低要求（默认 >= 2 个）。
+出入口点需在红线曲线内部或边界容差范围内才计入。
+"""
+from __future__ import annotations
 
 import logging
 import math
@@ -19,10 +25,12 @@ MIN_REQUIRED_PEDESTRIAN_ENTRANCES = 2
 
 
 def _normalize_layer_name(name: str) -> str:
+    """图层名称标准化：去首尾空格并转小写"""
     return name.strip().lower()
 
 
 def _expand_layer_name(name: str) -> set[str]:
+    """将图层名展开为候选集合，同时包含完整路径和末级名称"""
     normalized = _normalize_layer_name(name)
     if not normalized:
         return set()
@@ -35,6 +43,7 @@ def _expand_layer_name(name: str) -> set[str]:
 
 
 def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
+    """获取图层的所有候选名称，兼容 FullPath / Name 等不同属性名"""
     names: List[str] = []
     for attr in ("FullPath", "fullPath", "Name", "name"):
         value = getattr(layer, attr, None)
@@ -51,6 +60,7 @@ def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
 def _load_objects_from_layer(
     file3dm: rhino3dm.File3dm, layer_name: str
 ) -> List[Tuple[rhino3dm.File3dmObject, rhino3dm.CommonObject]]:
+    """从 File3dm 中按图层名加载所有对象，返回 (对象, 几何体) 列表"""
     target_layers = _expand_layer_name(layer_name)
     if not target_layers:
         return []
@@ -84,6 +94,7 @@ def _load_objects_from_layer(
 
 
 def _geometry_to_point(geometry: rhino3dm.CommonObject) -> Optional[Point3D]:
+    """从几何体中提取点坐标，支持 Point / Point3d / PointCloud，失败时返回 BoundingBox 中心"""
     if isinstance(geometry, rhino3dm.Point):
         return geometry.Location
     if isinstance(geometry, rhino3dm.Point3d):
@@ -101,6 +112,7 @@ def _geometry_to_point(geometry: rhino3dm.CommonObject) -> Optional[Point3D]:
 
 
 def _points_are_close(a: rhino3dm.Point3d, b: rhino3dm.Point3d, tol: float = 1e-6) -> bool:
+    """判断两点是否在容差范围内重合"""
     return (
         math.isclose(a.X, b.X, abs_tol=tol)
         and math.isclose(a.Y, b.Y, abs_tol=tol)
@@ -109,6 +121,7 @@ def _points_are_close(a: rhino3dm.Point3d, b: rhino3dm.Point3d, tol: float = 1e-
 
 
 def _curve_to_points(curve: rhino3dm.Curve, sample_count: int = 120) -> List[rhino3dm.Point3d]:
+    """将曲线转换为点列表，优先取多段线顶点，否则均匀采样"""
     if hasattr(curve, "TryGetPolyline"):
         try:
             polyline = curve.TryGetPolyline()
@@ -145,10 +158,12 @@ def _curve_to_points(curve: rhino3dm.Curve, sample_count: int = 120) -> List[rhi
 
 
 def _points_to_2d(points: List[rhino3dm.Point3d]) -> List[Point2D]:
+    """将三维点列表投影到 XY 平面，返回二维坐标列表"""
     return [(float(pt.X), float(pt.Y)) for pt in points]
 
 
 def _polyline_segments(points: List[Point2D]) -> List[Segment2D]:
+    """将点列表转换为闭合折线的线段列表"""
     if len(points) < 2:
         return []
     segments: List[Segment2D] = []
@@ -161,6 +176,7 @@ def _polyline_segments(points: List[Point2D]) -> List[Segment2D]:
 
 
 def _distance_point_to_segment(point: Point2D, a: Point2D, b: Point2D) -> float:
+    """计算点到线段的最短距离"""
     px, py = point
     ax, ay = a
     bx, by = b
@@ -181,6 +197,7 @@ def _distance_point_to_segment(point: Point2D, a: Point2D, b: Point2D) -> float:
 
 
 def _min_distance_to_segments(point: Point2D, segments: List[Segment2D]) -> float:
+    """计算点到线段集合中最近线段的距离"""
     if not segments:
         return float("inf")
     best = float("inf")
@@ -194,6 +211,7 @@ def _min_distance_to_segments(point: Point2D, segments: List[Segment2D]) -> floa
 
 
 def _point_in_polygon_2d(point: Point2D, polygon: List[Point2D]) -> bool:
+    """射线法判断点是否在多边形内（XY 平面投影）"""
     if len(polygon) < 3:
         return False
     px, py = point
@@ -211,6 +229,7 @@ def _point_in_polygon_2d(point: Point2D, polygon: List[Point2D]) -> bool:
 def _point_inside_or_on_curve(
     point: Point3D, curve: rhino3dm.Curve, on_tol: float
 ) -> bool:
+    """判断点是否在闭合曲线内部或边界容差范围内"""
     if not curve.IsClosed:
         return False
 
@@ -228,6 +247,7 @@ def _point_inside_or_on_curve(
 
 
 def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
+    """从对象 UserText 或 Attributes 中读取地块/名称，找不到时返回 fallback"""
     name = _get_user_text(obj, "地块名称") or _get_user_text(obj, "名称")
     if name:
         return name
@@ -246,6 +266,7 @@ def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
 
 
 def _extract_boundary_curves(geometry: rhino3dm.CommonObject) -> List[rhino3dm.Curve]:
+    """从几何体中提取边界曲线，支持 Curve / Brep / Extrusion 等类型"""
     if isinstance(geometry, rhino3dm.Curve):
         return [geometry]
 
@@ -275,6 +296,7 @@ def _extract_boundary_curves(geometry: rhino3dm.CommonObject) -> List[rhino3dm.C
 def _select_building_redline_layer(
     redline_layer: Optional[str], redline_layers: Optional[Sequence[str]]
 ) -> Optional[str]:
+    """从候选图层列表中选择建筑红线图层，优先选择包含"建筑红线"的图层"""
     if redline_layer and redline_layer.strip():
         return redline_layer
     if redline_layers:
@@ -288,6 +310,7 @@ def _select_building_redline_layer(
 
 
 def _curve_center(curve: rhino3dm.Curve) -> Optional[Point3D]:
+    """计算曲线采样点的几何中心"""
     points = _curve_to_points(curve)
     if not points:
         return None
@@ -299,6 +322,7 @@ def _curve_center(curve: rhino3dm.Curve) -> Optional[Point3D]:
 
 
 def _curve_anchor_point(curve: rhino3dm.Curve) -> Optional[Point3D]:
+    """获取曲线的锚点（优先几何中心，其次 BoundingBox 中心，最后首点）"""
     center = _curve_center(curve)
     if center is not None:
         return center
@@ -320,6 +344,11 @@ def check_pedestrian_entrance_count(
     on_curve_tolerance: float = 1.0,
     min_required_count: int = 2,
 ) -> Dict:
+    """
+    人行出入口数量检测主函数。
+    检测每条建筑红线范围内的人行出入口数量是否满足最低要求（默认 >= 2 个）。
+    出入口点需在红线曲线内部或边界容差范围内才计入。
+    """
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
         raise ValueError(f"Failed to read 3dm file: {model_path}")

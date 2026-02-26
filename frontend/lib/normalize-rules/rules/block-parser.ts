@@ -1,8 +1,8 @@
 /**
- * Rule: block-parser
+ * 规则：block-parser
  *
- * Parse text into structural blocks (code/math/table/heading/list/paragraph)
- * and serialize back. This normalizes whitespace and block boundaries.
+ * 将文本解析为结构化块（code/math/table/heading/list/paragraph），
+ * 然后序列化回文本。这会规范化空白和块边界。
  */
 
 import {

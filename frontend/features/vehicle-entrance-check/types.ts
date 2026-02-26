@@ -1,3 +1,5 @@
+/** 车行出入口检测 - 类型定义 */
+
 export type VehicleEntranceReason =
   | "too_close_main_intersection"
   | "too_close_secondary_intersection"

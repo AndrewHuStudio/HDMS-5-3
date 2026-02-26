@@ -1,3 +1,8 @@
+/**
+ * 模型上传器组件
+ * 支持拖拽上传 3dm/glb/gltf 格式的 3D 模型文件，
+ * 解析 Rhino 模型图层信息，提供模型加载和清除功能。
+ */
 "use client";
 
 import { useState, useCallback, useRef } from "react";

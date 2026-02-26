@@ -1,3 +1,7 @@
+"""
+问答助手配置
+从 .env 文件和环境变量读取数据库连接、LLM、嵌入模型、CORS、缓存等全局配置。
+"""
 from __future__ import annotations
 
 import os
@@ -5,6 +9,7 @@ from pathlib import Path
 
 
 def _parse_bool(value: str, default: bool) -> bool:
+    """将字符串解析为布尔值，空值返回 default"""
     text = (value or "").strip().lower()
     if not text:
         return default
@@ -12,6 +17,7 @@ def _parse_bool(value: str, default: bool) -> bool:
 
 
 def _parse_int(value: str, default: int, *, min_value: int | None = None, max_value: int | None = None) -> int:
+    """将字符串解析为整数，支持范围限制"""
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -30,6 +36,7 @@ def _parse_float(
     min_value: float | None = None,
     max_value: float | None = None,
 ) -> float:
+    """将字符串解析为浮点数，支持范围限制"""
     try:
         parsed = float(value)
     except (TypeError, ValueError):
@@ -42,6 +49,7 @@ def _parse_float(
 
 
 def _find_env_file() -> Path | None:
+    """向上遍历目录树，找到包含 .env 文件的目录"""
     for parent in Path(__file__).resolve().parents:
         candidate = parent / ".env"
         if candidate.exists():
@@ -50,6 +58,7 @@ def _find_env_file() -> Path | None:
 
 
 def _load_env_file() -> None:
+    """读取 .env 文件并将未设置的键写入 os.environ（不覆盖已有环境变量）"""
     env_path = _find_env_file()
     if not env_path:
         return

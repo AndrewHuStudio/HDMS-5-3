@@ -1,4 +1,12 @@
-// 导航配置文件 - 定义主导航结构和管控工具的元数据
+/**
+ * 导航配置文件
+ *
+ * 定义主导航结构和管控工具的元数据：
+ * - 资料上传
+ * - 问答助手
+ * - 管控审查系统（子菜单在主页面动态生成）
+ * - 审批清单
+ */
 
 import { MessageSquare, ClipboardCheck, Upload } from "lucide-react";
 import type { NavigationItem } from "./navigation-types";

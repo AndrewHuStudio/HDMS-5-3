@@ -1,3 +1,8 @@
+/**
+ * QA Markdown 渲染器
+ * 使用 ReactMarkdown + rehype-katex 渲染答案内容，
+ * 支持数学公式、图片灯箱、引用锚点、检索文档名高亮等功能。
+ */
 "use client";
 
 import { isValidElement, useEffect, useMemo, useRef } from "react";

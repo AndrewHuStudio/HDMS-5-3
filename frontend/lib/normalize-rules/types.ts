@@ -1,3 +1,10 @@
+/**
+ * Markdown 规范化规则系统 - 类型定义
+ * NormalizePhase: 三阶段策略（streaming/finalizing/final）
+ * NormalizeRule: 规则接口（id/order/apply）
+ * NormalizeContext: 规则执行上下文（phase/diagnostics/originalText）
+ */
+
 export type NormalizePhase = "streaming" | "finalizing" | "final";
 
 export type NormalizationDiagnostics = {

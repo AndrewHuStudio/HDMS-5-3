@@ -1,3 +1,9 @@
+/**
+ * 助手消息渲染状态机
+ * 定义 understanding → retrieving → reasoning → answering → finalizing → done/error 的状态流转。
+ * transitionAssistantRenderState: 根据 SSE 事件推进状态（只允许前进，不回退）。
+ * buildAssistantRenderModel: 根据当前状态决定各 UI 区块的显示策略。
+ */
 import type { AssistantRenderState, ChatMessage } from "@/features/qa/types";
 
 export type AssistantRenderEvent =

@@ -1,4 +1,8 @@
-﻿from __future__ import annotations
+﻿"""
+限高检测路由
+POST /height-check/pure-python - 纯 Python 实现的建筑限高检测
+"""
+from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -24,17 +28,18 @@ class HeightCheckPurePythonRequest(BaseModel):
 
 
 def _resolve_model_path(model_path: str) -> Path:
+    """将相对路径解析为绝对路径，文件不存在时抛出 404"""
     path = Path(model_path)
     if not path.is_absolute():
         path = (config.MODEL_STORAGE_PATH / path).resolve()
     if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Model not found: {path}")
+        raise HTTPException(status_code=404, detail=f"模型文件不存在: {path}")
     return path
 
 
 @router.post("/height-check/pure-python")
 def height_check_pure_python(request: HeightCheckPurePythonRequest) -> Dict[str, Any]:
-    """限高检测接口 - 纯Python实现，基于固定图层名称和UserText"""
+    """限高检测接口（纯 Python 实现），基于固定图层名称和 UserText 限高值"""
     resolved_path = _resolve_model_path(request.model_path)
     plot_layer = request.plot_layer or "场景_地块"
     setback_layer = request.setback_layer or "限制_建筑退线"
@@ -46,10 +51,11 @@ def height_check_pure_python(request: HeightCheckPurePythonRequest) -> Dict[str,
             plot_layer=plot_layer,
             default_height_limit=request.default_height_limit,
         )
-        logger.info(f"Height check result keys: {list(result.keys())}")
-        logger.info(f"Has setback_volumes: {'setback_volumes' in result}")
-        if 'setback_volumes' in result:
-            logger.info(f"setback_volumes count: {len(result['setback_volumes'])}")
+        logger.info("限高检测结果 keys: %s", list(result.keys()))
+        logger.info("包含 setback_volumes: %s", "setback_volumes" in result)
+        if "setback_volumes" in result:
+            logger.info("setback_volumes 数量: %s", len(result["setback_volumes"]))
+        # 兼容旧版驼峰命名
         if "setback_volumes" not in result:
             if "setbackVolumes" in result:
                 result["setback_volumes"] = result["setbackVolumes"]
@@ -58,11 +64,10 @@ def height_check_pure_python(request: HeightCheckPurePythonRequest) -> Dict[str,
         return result
     except ValueError as exc:
         logger.warning(
-            "Height check (pure Python) failed: %s (building_layer=%s, setback_layer=%s, plot_layer=%s, default_height_limit=%s)",
+            "限高检测失败: %s (building_layer=%s, setback_layer=%s, plot_layer=%s)",
             exc,
             request.building_layer,
             setback_layer,
             plot_layer,
-            request.default_height_limit,
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc

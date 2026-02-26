@@ -1,4 +1,13 @@
-﻿import { create } from "zustand";
+﻿/**
+ * 模型状态管理 Store (Zustand)
+ *
+ * 管理 3D 模型的全局状态：
+ * - 外部模型加载（URL、类型、文件）
+ * - 模型文件路径、图层信息
+ * - 模型边界、缩放、变换矩阵
+ * - 建筑物数据、错误信息
+ */
+import { create } from "zustand";
 import type { ModelFileType, ModelTransformSnapshot } from "@/components/city-scene";
 import type { LayerInfo } from "@/components/model-uploader";
 import type { PlanViewBuilding } from "@/lib/sight-corridor-types";

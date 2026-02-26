@@ -1,3 +1,4 @@
+/** 车行出入口检测 - 注册到 toolRegistry */
 import { Car } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
 import { VehicleEntrancePanel } from "./panel";

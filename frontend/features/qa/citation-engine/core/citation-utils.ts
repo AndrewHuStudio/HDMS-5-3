@@ -1,3 +1,9 @@
+/**
+ * 引用工具函数
+ * buildCitationLabelIndexMap: 构建 citation_label → source 索引映射
+ * parseCitationLabelFromHref: 从 #source-1-2 格式的 href 中解析标签
+ * collectValidCitationLabels: 收集所有有效的引用标签集合
+ */
 import type { SourceInfo } from "../../types";
 
 const CITATION_HREF_RE = /^#source-(\d{1,2}-\d{1,2})$/;

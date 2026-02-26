@@ -1,10 +1,9 @@
 /**
- * Rule: rag-image-fix
+ * 规则：rag-image-fix
  *
- * Recover known malformed RAG image URLs (e.g. "?$ref=images$/...")
- * so markdown image nodes remain renderable after server-side finalization.
- *
- * Backend rendering removed — this is now the sole handler.
+ * 修复已知的畸形 RAG 图片 URL（如 "?$ref=images$/..."），
+ * 使 Markdown 图片节点在服务端最终化后仍可渲染。
+ * 后端渲染已移除，现在由前端统一处理。
  */
 
 import { registerRules } from "../registry";

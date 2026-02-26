@@ -1,3 +1,8 @@
+/**
+ * 答案 Markdown 构建管线
+ * 按阶段依次执行：表格规范化 → Markdown 规范化 → 引用处理 → 图片注入 → 表格注入 → 图注折叠。
+ * buildAnswerMarkdown: 根据 renderPhase 选择合适的处理深度，避免流式阶段的视觉抖动。
+ */
 import { processAnswerCitations } from "@/features/qa/citation-engine";
 import type { SourceInfo } from "@/features/qa/types";
 import type { AnswerRenderPhase } from "@/features/qa/render/assistant-render-state-machine";

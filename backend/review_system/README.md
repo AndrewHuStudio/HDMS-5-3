@@ -11,7 +11,7 @@
 2) 安装依赖
    pip install -r requirements.txt
 3) 启动服务
-   uvicorn app:app --reload --port 8001
+   uvicorn app:app --reload --host 0.0.0.0 --port 8001
 
 ## 限高检测（纯Python）
 说明:

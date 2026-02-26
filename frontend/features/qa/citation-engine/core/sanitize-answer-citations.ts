@@ -1,3 +1,9 @@
+/**
+ * 引用标签净化
+ * 移除答案中无效（不在来源列表中）或重复的 [N-M] 引用标签。
+ * 跳过代码块和内联代码，保持代码示例不变。
+ */
+
 type SanitizeAnswerCitationsArgs = {
   text: string;
   validLabels: Set<string>;

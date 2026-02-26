@@ -1,3 +1,9 @@
+/**
+ * Markdown 规范化管线（阶段感知）
+ * streaming:  仅执行轻量安全规则，避免流式抖动
+ * finalizing: 中等权重重写（标题/列表规范化）
+ * final:      完整规则集（脚手架、晋升、结论）
+ */
 import type { AnswerRenderPhase } from "@/features/qa/render/assistant-render-state-machine";
 import { runNormalizationPipeline } from "@/lib/normalize-rules";
 import type { NormalizePhase } from "@/lib/normalize-rules/types";

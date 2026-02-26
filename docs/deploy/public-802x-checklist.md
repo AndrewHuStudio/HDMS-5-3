@@ -18,19 +18,19 @@ npm run dev -- -p 8021
 
 # qa
 cd ..\backend\qa_assistant
-python -m uvicorn app:app --reload --port 8022 --env-file ..\..\.env.external
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8022 --env-file ..\..\.env.external
 
 # review
 cd ..\review_system
-python -m uvicorn app:app --reload --port 8023 --env-file ..\..\.env.external
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8023 --env-file ..\..\.env.external
 
 # approval (optional)
 cd ..\approval_checklist
-python -m uvicorn app:app --reload --port 8024 --env-file ..\..\.env.external
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8024 --env-file ..\..\.env.external
 
 # data process
 cd ..\..\data_process
-python -m uvicorn main:app --reload --port 8025 --env-file ..\.env.external
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8025 --env-file ..\.env.external
 ```
 
 ## 3) Configure Nginx for your domain

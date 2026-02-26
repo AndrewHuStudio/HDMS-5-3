@@ -1,8 +1,8 @@
 /**
- * Rule: list-numbering
+ * 规则：list-numbering
  *
- * Fix ordered list numbering so items under the same heading are
- * sequentially numbered (1. 2. 3.) instead of all being "1.".
+ * 修复有序列表编号，使同一标题下的列表项按顺序编号（1. 2. 3.），而非全部为 "1."。
+ * 支持粗体包裹的列表项（**1. 内容**），跳过表格/图片/引用等插入内容。
  */
 
 import { registerRules } from "../registry";

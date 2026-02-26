@@ -1,3 +1,7 @@
+/**
+ * 空中连廊检测工具函数
+ * deriveConnectionReasons: 从检测结果中提取连接失败原因列表，优先返回 missing_corridor。
+ */
 import type { SkyBridgeReason, SkyBridgeResult } from "./types";
 
 const reasonOrder: SkyBridgeReason[] = [

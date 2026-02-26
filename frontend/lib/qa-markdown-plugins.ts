@@ -1,3 +1,10 @@
+/**
+ * QA Markdown 插件配置
+ *
+ * 共享的 remark 插件列表，用于 QA 答案渲染：
+ * - remarkGfm: GitHub Flavored Markdown（禁用 singleTilde 避免数值范围被误识别为删除线）
+ * - remarkMath: 数学公式支持
+ */
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { PluggableList } from "unified";

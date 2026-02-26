@@ -1,3 +1,9 @@
+/**
+ * 对话导出工具
+ *
+ * 将 QA 对话历史转换为 Markdown 格式，包含问题、答案、来源引用等信息，
+ * 支持导出为 .md 文件下载。
+ */
 import type { ChatMessage, SourceInfo } from "@/features/qa/types";
 
 function formatSource(source: SourceInfo, index: number): string {

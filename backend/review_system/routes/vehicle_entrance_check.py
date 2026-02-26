@@ -1,3 +1,8 @@
+"""
+车行出入口检测路由
+POST /vehicle-entrance-check - 检测车行出入口与道路交叉口的最小距离是否合规
+POST /vehicle-entrance/check  - 同上（别名）
+"""
 from __future__ import annotations
 
 import logging
@@ -15,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class VehicleEntranceCheckRequest(BaseModel):
+    """车行出入口检测请求参数"""
     model_config = ConfigDict(protected_namespaces=())
     model_path: str
     entrance_layer: str = "场地_车行出入口"
@@ -27,6 +33,7 @@ class VehicleEntranceCheckRequest(BaseModel):
 
 
 def _resolve_model_path(model_path: str) -> Path:
+    """将相对路径解析为绝对路径，文件不存在时抛出 404"""
     path = Path(model_path)
     if not path.is_absolute():
         path = (config.MODEL_STORAGE_PATH / path).resolve()
@@ -38,6 +45,7 @@ def _resolve_model_path(model_path: str) -> Path:
 @router.post("/vehicle-entrance-check")
 @router.post("/vehicle-entrance/check")
 def vehicle_entrance_check(request: VehicleEntranceCheckRequest) -> Dict[str, Any]:
+    """车行出入口检测接口，验证出入口与各级道路交叉口的最小间距"""
     resolved_path = _resolve_model_path(request.model_path)
     try:
         return check_vehicle_entrance_distance(

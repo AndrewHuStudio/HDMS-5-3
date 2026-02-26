@@ -1,3 +1,4 @@
+/** 车行出入口检测 API 封装 - 调用后端 /vehicle-entrance-check 端点 */
 import type { VehicleEntranceCheckResponse } from "./types";
 import { API_BASE, normalizeApiBase } from "@/lib/api-base";
 

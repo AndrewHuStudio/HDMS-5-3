@@ -1,3 +1,9 @@
+"""
+广场退线违规检测（纯 Python 实现）
+
+检测建筑体块是否侵入广场退线范围。
+支持带洞多边形（外轮廓 + 内孔），高度低于 ignore_height 的建筑自动忽略。
+"""
 from __future__ import annotations
 
 import logging
@@ -16,10 +22,12 @@ Point2D = Tuple[float, float]
 
 
 def _normalize_layer_name(name: str) -> str:
+    """图层名称标准化：去首尾空格并转小写"""
     return name.strip().lower()
 
 
 def _expand_layer_name(name: str) -> set[str]:
+    """将图层名展开为候选集合，同时包含完整路径和末级名称"""
     normalized = _normalize_layer_name(name)
     if not normalized:
         return set()
@@ -32,6 +40,7 @@ def _expand_layer_name(name: str) -> set[str]:
 
 
 def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
+    """获取图层的所有候选名称，兼容 FullPath / Name 等不同属性名"""
     names: List[str] = []
     for attr in ("FullPath", "fullPath", "Name", "name"):
         value = getattr(layer, attr, None)
@@ -48,6 +57,7 @@ def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
 def _load_objects_from_layer(
     file3dm: rhino3dm.File3dm, layer_name: str
 ) -> List[Tuple[rhino3dm.File3dmObject, rhino3dm.CommonObject]]:
+    """从 File3dm 中按图层名加载所有对象，返回 (对象, 几何体) 列表"""
     target_layers = _expand_layer_name(layer_name)
     if not target_layers:
         return []
@@ -80,6 +90,7 @@ def _load_objects_from_layer(
 
 
 def _points_are_close(a: rhino3dm.Point3d, b: rhino3dm.Point3d, tol: float = 1e-6) -> bool:
+    """判断两点是否在容差范围内重合"""
     return (
         math.isclose(a.X, b.X, abs_tol=tol)
         and math.isclose(a.Y, b.Y, abs_tol=tol)
@@ -88,6 +99,7 @@ def _points_are_close(a: rhino3dm.Point3d, b: rhino3dm.Point3d, tol: float = 1e-
 
 
 def _curve_to_points(curve: rhino3dm.Curve, sample_count: int = 120) -> List[rhino3dm.Point3d]:
+    """将曲线转换为点列表，优先取多段线顶点，否则均匀采样"""
     if hasattr(curve, "TryGetPolyline"):
         try:
             polyline = curve.TryGetPolyline()
@@ -124,10 +136,12 @@ def _curve_to_points(curve: rhino3dm.Curve, sample_count: int = 120) -> List[rhi
 
 
 def _points_to_2d(points: Iterable[rhino3dm.Point3d]) -> List[Point2D]:
+    """将三维点列表投影到 XY 平面，返回二维坐标列表"""
     return [(float(pt.X), float(pt.Y)) for pt in points]
 
 
 def _convex_hull(points: List[Point2D]) -> List[Point2D]:
+    """Andrew's Monotone Chain 算法计算二维凸包"""
     unique = sorted(set(points))
     if len(unique) < 3:
         return unique
@@ -151,6 +165,7 @@ def _convex_hull(points: List[Point2D]) -> List[Point2D]:
 
 
 def _polygon_points_from_geometry(geometry: rhino3dm.CommonObject) -> List[rhino3dm.Point3d]:
+    """从几何体中提取底面轮廓点（XY 平面），支持 Curve/Extrusion/Brep/Mesh，失败时退化为 BoundingBox"""
     if isinstance(geometry, rhino3dm.Curve):
         return _curve_to_points(geometry)
     if isinstance(geometry, rhino3dm.Extrusion):
@@ -194,6 +209,7 @@ def _polygon_points_from_geometry(geometry: rhino3dm.CommonObject) -> List[rhino
 
 
 def _polygon_area(points: List[Point2D]) -> float:
+    """用 Shoelace 公式计算二维多边形有符号面积"""
     if len(points) < 3:
         return 0.0
     area = 0.0
@@ -205,6 +221,7 @@ def _polygon_area(points: List[Point2D]) -> float:
 
 
 def _polygon_centroid(points: List[Point2D]) -> Optional[Point2D]:
+    """计算多边形重心（XY 平面），点数不足时返回 None"""
     if len(points) < 3:
         return None
     area = 0.0
@@ -226,6 +243,7 @@ def _polygon_centroid(points: List[Point2D]) -> Optional[Point2D]:
 
 
 def _point_on_segment(point: Point2D, a: Point2D, b: Point2D, tol: float = 1e-6) -> bool:
+    """判断点是否在线段上（叉积为零且点积非正）"""
     (px, py) = point
     (x1, y1) = a
     (x2, y2) = b
@@ -237,6 +255,7 @@ def _point_on_segment(point: Point2D, a: Point2D, b: Point2D, tol: float = 1e-6)
 
 
 def _point_in_polygon(point: Point2D, polygon: List[Point2D]) -> bool:
+    """射线法判断点是否在多边形内（边上的点视为在内部）"""
     if len(polygon) < 3:
         return False
     px, py = point
@@ -254,6 +273,7 @@ def _point_in_polygon(point: Point2D, polygon: List[Point2D]) -> bool:
 
 
 def _segments_intersect(a1: Point2D, a2: Point2D, b1: Point2D, b2: Point2D) -> bool:
+    """判断两条线段是否相交（含端点共线情况）"""
     def orient(p: Point2D, q: Point2D, r: Point2D) -> float:
         return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
 
@@ -281,6 +301,7 @@ def _segments_intersect(a1: Point2D, a2: Point2D, b1: Point2D, b2: Point2D) -> b
 
 
 def _polygons_intersect(poly_a: List[Point2D], poly_b: List[Point2D]) -> bool:
+    """判断两个多边形是否相交（含包含关系）"""
     if len(poly_a) < 3 or len(poly_b) < 3:
         return False
     for point in poly_a:
@@ -301,6 +322,7 @@ def _polygons_intersect(poly_a: List[Point2D], poly_b: List[Point2D]) -> bool:
 
 
 def _polygon_fully_inside(inner: List[Point2D], outer: List[Point2D]) -> bool:
+    """判断 inner 多边形是否完全在 outer 多边形内部"""
     if len(inner) < 3 or len(outer) < 3:
         return False
     for pt in inner:
@@ -319,6 +341,7 @@ def _polygon_fully_inside(inner: List[Point2D], outer: List[Point2D]) -> bool:
 
 
 def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
+    """从对象 UserText 或 Attributes 中读取建筑名称，找不到时返回 fallback"""
     name = _get_user_text(obj, "建筑名称") or _get_user_text(obj, "名称")
     if name:
         return name
@@ -337,6 +360,7 @@ def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
 
 
 def _resolve_plaza_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
+    """从对象 UserText 或 Attributes 中读取广场/地块名称，找不到时返回 fallback"""
     name = _get_user_text(obj, "地块名称") or _get_user_text(obj, "名称")
     if name:
         return name
@@ -355,6 +379,10 @@ def _resolve_plaza_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
 
 
 def _group_plaza_areas(entries: List[Dict]) -> List[Dict[str, List[Dict]]]:
+    """
+    将广场退线区域按包含关系分组为外轮廓和内孔。
+    面积大的区域包含面积小的区域时，小区域作为孔洞。
+    """
     entries_sorted = sorted(entries, key=lambda item: item["area"], reverse=True)
     areas: List[Dict[str, List[Dict]]] = []
 
@@ -382,6 +410,11 @@ def check_plaza_setback_violation(
     building_layer: str = "模型_建筑体块",
     ignore_height: float = 2.0,
 ) -> Dict:
+    """
+    广场退线违规检测主函数。
+    检测建筑体块是否侵入广场退线范围。
+    支持带洞多边形（外轮廓 + 内孔），高度低于 ignore_height 的建筑自动忽略。
+    """
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
         raise ValueError(f"Failed to read 3dm file: {model_path}")

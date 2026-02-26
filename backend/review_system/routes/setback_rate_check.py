@@ -1,3 +1,8 @@
+"""
+退线贴线率检测路由
+POST /setback-rate-check - 检测建筑贴线率是否满足要求（采样点法）
+POST /setback-rate/check  - 同上（别名）
+"""
 from __future__ import annotations
 
 import logging
@@ -15,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class SetbackRateCheckRequest(BaseModel):
+    """退线贴线率检测请求参数"""
     model_config = ConfigDict(protected_namespaces=())
     model_path: str
     building_layer: str = "模型_建筑体块"
@@ -26,6 +32,7 @@ class SetbackRateCheckRequest(BaseModel):
 
 
 def _resolve_model_path(model_path: str) -> Path:
+    """将相对路径解析为绝对路径，文件不存在时抛出 404"""
     path = Path(model_path)
     if not path.is_absolute():
         path = (config.MODEL_STORAGE_PATH / path).resolve()
@@ -37,6 +44,7 @@ def _resolve_model_path(model_path: str) -> Path:
 @router.post("/setback-rate-check")
 @router.post("/setback-rate/check")
 def setback_rate_check(request: SetbackRateCheckRequest) -> Dict[str, Any]:
+    """退线贴线率检测接口，通过采样点法计算建筑贴线率"""
     resolved_path = _resolve_model_path(request.model_path)
     try:
         return check_setback_rate_pure_python(

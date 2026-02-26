@@ -1,3 +1,7 @@
+/**
+ * QA 来源引用组件
+ * 展示答案的来源文档列表，支持预览、PDF 查看、图片展示、表格渲染等功能。
+ */
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

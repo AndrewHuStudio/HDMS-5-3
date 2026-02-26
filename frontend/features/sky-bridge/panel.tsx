@@ -1,3 +1,8 @@
+/**
+ * 空中连廊检测面板
+ * 支持从模型读取地块连接关系、手动编辑连接对，配置标高/净宽/净高参数后调用后端检测。
+ * 内嵌平面图视口，点击两个地块可新增或取消连接。
+ */
 "use client";
 
 import { useEffect, useMemo, useState } from "react";

@@ -1,8 +1,8 @@
 /**
- * Rule: conclusion-heading
+ * 规则：conclusion-heading
  *
- * Promote "核心结论：" / "结论：" markers into a top-level section heading
- * so it renders at the same level as "检索综述/详细解析".
+ * 将 "核心结论：" / "结论：" 标记提升为顶级章节标题（## 结论），
+ * 使其与 "检索综述/详细解析" 处于同一层级。
  */
 
 import { registerRules } from "../registry";

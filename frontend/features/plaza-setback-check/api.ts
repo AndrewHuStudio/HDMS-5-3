@@ -1,3 +1,4 @@
+/** 广场退线检测 API 封装 - 调用后端 /plaza-setback-check 端点 */
 import type { PlazaSetbackCheckResponse } from "./types";
 import { API_BASE, normalizeApiBase } from "@/lib/api-base";
 

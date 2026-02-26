@@ -1,4 +1,9 @@
-﻿from __future__ import annotations
+﻿"""
+人行出入口检测路由
+POST /pedestrian-entrance-check - 检测人行出入口数量是否满足最低要求
+POST /pedestrian-entrance/check  - 同上（别名）
+"""
+from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -15,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class PedestrianEntranceCheckRequest(BaseModel):
+    """人行出入口检测请求参数"""
     model_config = ConfigDict(protected_namespaces=())
     model_path: str
     entrance_layer: str = "场地_人行出入口"
@@ -25,6 +31,7 @@ class PedestrianEntranceCheckRequest(BaseModel):
 
 
 def _resolve_model_path(model_path: str) -> Path:
+    """将相对路径解析为绝对路径，文件不存在时抛出 404"""
     path = Path(model_path)
     if not path.is_absolute():
         path = (config.MODEL_STORAGE_PATH / path).resolve()
@@ -36,6 +43,7 @@ def _resolve_model_path(model_path: str) -> Path:
 @router.post("/pedestrian-entrance-check")
 @router.post("/pedestrian-entrance/check")
 def pedestrian_entrance_check(request: PedestrianEntranceCheckRequest) -> Dict[str, Any]:
+    """人行出入口检测接口，验证出入口数量是否满足最低要求"""
     resolved_path = _resolve_model_path(request.model_path)
     try:
         return check_pedestrian_entrance_count(

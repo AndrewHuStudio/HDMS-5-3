@@ -1,5 +1,6 @@
 """
-退线检测 API
+退线检测路由
+POST /setback-check - 检测建筑是否侵入退线范围（纯 Python 实现）
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class SetbackCheckRequest(BaseModel):
+    """退线检测请求参数"""
     model_config = ConfigDict(protected_namespaces=())
     model_path: str
     building_layer: str = "模型_建筑体块"

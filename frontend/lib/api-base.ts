@@ -1,3 +1,17 @@
+/**
+ * API 基础地址解析模块
+ *
+ * 功能：
+ * - 自动探测本地开发环境的后端服务端口（review: 8003/8023, qa: 8000/8022）
+ * - 支持环境变量配置（NEXT_PUBLIC_HDMS_API_BASE, NEXT_PUBLIC_HDMS_QA_BASE）
+ * - 非本地环境自动替换 hostname，避免 localhost 跨域问题
+ * - 健康检查探测（/health 端点）+ 缓存机制（30s TTL）
+ *
+ * 导出：
+ * - API_BASE: review_system 服务地址
+ * - QA_API_BASE: qa_assistant 服务地址
+ * - resolveApiBase: 异步解析服务地址
+ */
 type ApiService = "review" | "qa";
 
 type RuntimeInfo = {
@@ -29,6 +43,7 @@ type BuildLocalProbeCandidatesArgs = {
   configuredBase: string;
   runtime: Pick<RuntimeInfo, "isBrowser" | "hostname" | "origin">;
   ports: number[];
+  preferredBase?: string;
 };
 
 const DEFAULT_CACHE_TTL_MS = 30_000;
@@ -125,7 +140,15 @@ export const computePreferredApiBase = ({
     if (normalizedConfiguredBase && !isLoopbackBase(normalizedConfiguredBase)) {
       return normalizedConfiguredBase;
     }
-    return normalizeApiBase(runtime.origin);
+    // configuredBase 是 localhost:PORT 形式，把 hostname 替换为当前访问的 hostname
+    if (normalizedConfiguredBase) {
+      const configuredUrl = parseUrl(normalizedConfiguredBase);
+      if (configuredUrl?.port) {
+        return `${runtime.protocol}//${runtime.hostname}:${configuredUrl.port}`;
+      }
+    }
+    // 没有配置或无法解析端口，使用 fallbackPort
+    return `${runtime.protocol}//${runtime.hostname}:${fallbackPort}`;
   }
 
   return normalizedConfiguredBase || `http://localhost:${fallbackPort}`;
@@ -144,19 +167,21 @@ export const buildLocalProbeCandidates = ({
   configuredBase,
   runtime,
   ports,
+  preferredBase,
 }: BuildLocalProbeCandidatesArgs) => {
-  if (!runtime.isBrowser || !isLoopbackHostname(runtime.hostname)) {
+  if (!runtime.isBrowser) {
     return [];
   }
 
   const protocol = parseUrl(runtime.origin)?.protocol || "http:";
   const configured = normalizeApiBase(configuredBase || "");
+  const preferred = normalizeApiBase(preferredBase || "");
   const configuredPort = getPortFromBase(configured);
+  const preferredPort = getPortFromBase(preferred);
   const probePorts = unique(
-    [configuredPort, ...ports].filter((port): port is number => Number.isInteger(port))
-  );
-  const hosts = unique([runtime.hostname, "localhost", "127.0.0.1"]).filter((host) =>
-    isLoopbackHostname(host)
+    [configuredPort, preferredPort, ...ports].filter(
+      (port): port is number => Number.isInteger(port)
+    )
   );
 
   const candidates: string[] = [];
@@ -168,18 +193,30 @@ export const buildLocalProbeCandidates = ({
     candidates.push(normalized);
   };
 
-  if (configured && isLoopbackBase(configured)) {
+  if (preferred) {
+    pushCandidate(preferred);
+  }
+
+  if (configured) {
     pushCandidate(configured);
   }
 
-  const normalizedOrigin = normalizeApiBase(runtime.origin);
-  if (normalizedOrigin) {
-    pushCandidate(normalizedOrigin);
+  if (runtime.hostname) {
+    for (const port of probePorts) {
+      pushCandidate(`${protocol}//${runtime.hostname}:${port}`);
+    }
   }
 
-  for (const host of hosts) {
-    for (const port of probePorts) {
-      pushCandidate(`${protocol}//${host}:${port}`);
+  if (isLoopbackHostname(runtime.hostname) || isLoopbackBase(configured)) {
+    for (const host of ["localhost", "127.0.0.1"]) {
+      for (const port of probePorts) {
+        pushCandidate(`${protocol}//${host}:${port}`);
+      }
+    }
+
+    const normalizedOrigin = normalizeApiBase(runtime.origin);
+    if (normalizedOrigin) {
+      pushCandidate(normalizedOrigin);
     }
   }
 
@@ -269,12 +306,14 @@ export async function resolveApiBase(options?: {
     return setResolvedBase(service, preferred);
   }
 
-  if (!isLoopbackHostname(runtime.hostname)) {
-    return setResolvedBase(service, preferred);
-  }
-
   if (config.configuredBase && !isLoopbackBase(config.configuredBase)) {
     return setResolvedBase(service, config.configuredBase);
+  }
+
+  const shouldProbe =
+    isLoopbackHostname(runtime.hostname) || isLoopbackBase(config.configuredBase);
+  if (!shouldProbe) {
+    return setResolvedBase(service, preferred);
   }
 
   if (!forceRefresh && Date.now() - state.resolvedAt < DEFAULT_CACHE_TTL_MS) {
@@ -290,6 +329,7 @@ export async function resolveApiBase(options?: {
       configuredBase: config.configuredBase,
       runtime,
       ports: config.localPortCandidates,
+      preferredBase: preferred,
     });
     const healthy = await resolveByProbe(candidates);
     return setResolvedBase(service, healthy ?? preferred);

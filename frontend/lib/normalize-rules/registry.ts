@@ -1,3 +1,7 @@
+/**
+ * 规则注册表
+ * 收集所有规则并按 order 排序，供管线引擎按序执行。
+ */
 import type { NormalizeRule } from "./types";
 
 /**

@@ -1,3 +1,8 @@
+/**
+ * 问答视图主组件
+ * 管理消息列表、流式接收 SSE 事件（thinking/answer/sources/done），
+ * 并将状态通过 QAShell 渲染为聊天界面。
+ */
 "use client";
 
 import { useCallback, useRef, useState } from "react";

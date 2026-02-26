@@ -1,3 +1,4 @@
+/** 退线贴线率检测 Zustand store - 管理检测结果、高亮目标、标签开关和选中地块 */
 import { create } from "zustand";
 import type { SetbackCheckResult } from "@/lib/setback-check-types";
 

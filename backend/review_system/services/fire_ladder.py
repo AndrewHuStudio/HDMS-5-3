@@ -1,4 +1,13 @@
-﻿from __future__ import annotations
+﻿"""
+消防登高面检测（纯 Python 实现）
+
+检测每条建筑红线范围内的消防登高面是否满足：
+- 登高面宽度 >= min_width
+- 登高面与建筑距离在 [min_distance, max_distance] 范围内
+- 登高面总长度 >= 建筑周长 * length_ratio
+- 登高面在红线范围内（可选）
+"""
+from __future__ import annotations
 
 import logging
 import math
@@ -17,10 +26,12 @@ Segment2D = Tuple[Point2D, Point2D]
 
 
 def _normalize_layer_name(name: str) -> str:
+    """图层名称标准化：去首尾空格并转小写"""
     return name.strip().lower()
 
 
 def _expand_layer_name(name: str) -> set[str]:
+    """将图层名展开为候选集合，同时包含完整路径和末级名称"""
     normalized = _normalize_layer_name(name)
     if not normalized:
         return set()
@@ -33,6 +44,7 @@ def _expand_layer_name(name: str) -> set[str]:
 
 
 def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
+    """获取图层的所有候选名称，兼容 FullPath / Name 等不同属性名"""
     names: List[str] = []
     for attr in ("FullPath", "fullPath", "Name", "name"):
         value = getattr(layer, attr, None)
@@ -49,6 +61,7 @@ def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
 def _load_objects_from_layer(
     file3dm: rhino3dm.File3dm, layer_name: str
 ) -> List[Tuple[rhino3dm.File3dmObject, rhino3dm.CommonObject]]:
+    """从 File3dm 中按图层名加载所有对象，返回 (对象, 几何体) 列表"""
     target_layers = _expand_layer_name(layer_name)
     if not target_layers:
         return []
@@ -82,6 +95,7 @@ def _load_objects_from_layer(
 
 
 def _points_are_close(a: rhino3dm.Point3d, b: rhino3dm.Point3d, tol: float = 1e-6) -> bool:
+    """判断两点是否在容差范围内重合"""
     return (
         math.isclose(a.X, b.X, abs_tol=tol)
         and math.isclose(a.Y, b.Y, abs_tol=tol)
@@ -90,6 +104,7 @@ def _points_are_close(a: rhino3dm.Point3d, b: rhino3dm.Point3d, tol: float = 1e-
 
 
 def _curve_to_points(curve: rhino3dm.Curve, sample_count: int = 120) -> List[rhino3dm.Point3d]:
+    """将曲线转换为点列表，优先取多段线顶点，否则均匀采样"""
     if hasattr(curve, "TryGetPolyline"):
         try:
             polyline = curve.TryGetPolyline()
@@ -126,10 +141,12 @@ def _curve_to_points(curve: rhino3dm.Curve, sample_count: int = 120) -> List[rhi
 
 
 def _points_to_2d(points: Iterable[rhino3dm.Point3d]) -> List[Point2D]:
+    """将三维点列表投影到 XY 平面，返回二维坐标列表"""
     return [(float(pt.X), float(pt.Y)) for pt in points]
 
 
 def _polyline_segments(points: List[Point2D], closed: bool = True) -> List[Segment2D]:
+    """将点列表转换为线段列表，closed=True 时首尾相连"""
     if len(points) < 2:
         return []
     segments: List[Segment2D] = []
@@ -143,6 +160,7 @@ def _polyline_segments(points: List[Point2D], closed: bool = True) -> List[Segme
 
 
 def _polyline_length(points: List[Point2D]) -> float:
+    """计算折线总长度"""
     if len(points) < 2:
         return 0.0
     length = 0.0
@@ -154,6 +172,7 @@ def _polyline_length(points: List[Point2D]) -> float:
 
 
 def _distance_point_to_segment(point: Point2D, a: Point2D, b: Point2D) -> float:
+    """计算点到线段的最短距离"""
     px, py = point
     ax, ay = a
     bx, by = b
@@ -174,6 +193,7 @@ def _distance_point_to_segment(point: Point2D, a: Point2D, b: Point2D) -> float:
 
 
 def _min_distance_to_segments(point: Point2D, segments: List[Segment2D]) -> float:
+    """计算点到线段集合中最近线段的距离"""
     if not segments:
         return float("inf")
     best = float("inf")
@@ -187,6 +207,7 @@ def _min_distance_to_segments(point: Point2D, segments: List[Segment2D]) -> floa
 
 
 def _min_distance_between_segments(segments_a: List[Segment2D], segments_b: List[Segment2D]) -> float:
+    """计算两组线段之间的最小距离（取 A 中每段中点到 B 的最近距离）"""
     if not segments_a or not segments_b:
         return float("inf")
     best = float("inf")
@@ -201,6 +222,7 @@ def _min_distance_between_segments(segments_a: List[Segment2D], segments_b: List
 
 
 def _point_in_curve_2d(point: rhino3dm.Point3d, curve: rhino3dm.Curve) -> bool:
+    """射线法判断点是否在闭合曲线内（XY 平面投影）"""
     if not curve.IsClosed:
         return False
 
@@ -221,6 +243,7 @@ def _point_in_curve_2d(point: rhino3dm.Point3d, curve: rhino3dm.Curve) -> bool:
 
 
 def _point_in_polygon_2d(point: rhino3dm.Point3d, polygon: List[rhino3dm.Point3d]) -> bool:
+    """射线法判断点是否在多边形内（XY 平面投影）"""
     if len(polygon) < 3:
         return False
     px, py = point.X, point.Y
@@ -236,6 +259,7 @@ def _point_in_polygon_2d(point: rhino3dm.Point3d, polygon: List[rhino3dm.Point3d
 
 
 def _points_inside_curve(points: List[rhino3dm.Point3d], curve: rhino3dm.Curve, tol: float = 1e-6) -> bool:
+    """判断所有点是否都在闭合曲线内部或边界容差范围内"""
     if not points:
         return False
     curve_points = _curve_to_points(curve, sample_count=200)
@@ -250,6 +274,7 @@ def _points_inside_curve(points: List[rhino3dm.Point3d], curve: rhino3dm.Curve, 
 
 
 def _convex_hull(points: List[Point2D]) -> List[Point2D]:
+    """Andrew's Monotone Chain 算法计算二维凸包"""
     unique = sorted(set(points))
     if len(unique) < 3:
         return unique
@@ -273,6 +298,7 @@ def _convex_hull(points: List[Point2D]) -> List[Point2D]:
 
 
 def _curve_is_flat_at_z(curve: rhino3dm.Curve, target_z: float, tol: float) -> bool:
+    """判断曲线是否在指定 Z 高度处水平（所有采样点 Z 值在容差内）"""
     points = _curve_to_points(curve, sample_count=12)
     if not points:
         return False
@@ -280,6 +306,7 @@ def _curve_is_flat_at_z(curve: rhino3dm.Curve, target_z: float, tol: float) -> b
 
 
 def _edge_curve(edge: rhino3dm.BrepEdge) -> Optional[rhino3dm.Curve]:
+    """从 BrepEdge 中提取曲线，依次尝试 DuplicateCurve / ToNurbsCurve / ToCurve"""
     for attr in ("DuplicateCurve", "ToNurbsCurve", "ToCurve"):
         func = getattr(edge, attr, None)
         if callable(func):
@@ -295,6 +322,7 @@ def _edge_curve(edge: rhino3dm.BrepEdge) -> Optional[rhino3dm.Curve]:
 def _bottom_edge_segments_from_brep(
     brep: rhino3dm.Brep, z_tol: float = 1e-4
 ) -> List[Segment2D]:
+    """从 Brep 中提取底面（最低 Z）的边线段列表"""
     try:
         vertices = [vertex.Location for vertex in brep.Vertices]
     except Exception:
@@ -316,6 +344,7 @@ def _bottom_edge_segments_from_brep(
 
 
 def _bottom_edge_segments(geometry: rhino3dm.CommonObject) -> List[Segment2D]:
+    """从几何体中提取底面边线段，支持 Curve/Extrusion/Brep/Mesh/Surface，失败时退化为 BoundingBox"""
     if isinstance(geometry, rhino3dm.Curve) and geometry.IsClosed:
         points = _points_to_2d(_curve_to_points(geometry))
         if len(points) >= 3:
@@ -373,6 +402,7 @@ def _bottom_edge_segments(geometry: rhino3dm.CommonObject) -> List[Segment2D]:
 
 
 def _polygon_points_from_geometry(geometry: rhino3dm.CommonObject) -> List[rhino3dm.Point3d]:
+    """从几何体中提取底面轮廓点（XY 平面），支持 Curve/Extrusion/Brep/Mesh，失败时退化为 BoundingBox"""
     if isinstance(geometry, rhino3dm.Curve):
         return _curve_to_points(geometry)
     if isinstance(geometry, rhino3dm.Extrusion):
@@ -413,6 +443,7 @@ def _polygon_points_from_geometry(geometry: rhino3dm.CommonObject) -> List[rhino
 
 
 def _polygon_centroid_2d(points: List[rhino3dm.Point3d]) -> Optional[Point2D]:
+    """计算多边形重心（XY 平面），点数不足时返回 None"""
     if len(points) < 3:
         return None
     area = 0.0
@@ -434,6 +465,7 @@ def _polygon_centroid_2d(points: List[rhino3dm.Point3d]) -> Optional[Point2D]:
 
 
 def _extract_boundary_curves(geometry: rhino3dm.CommonObject) -> List[rhino3dm.Curve]:
+    """从几何体中提取边界曲线，支持 Curve / Brep / Extrusion 等类型"""
     if isinstance(geometry, rhino3dm.Curve):
         return [geometry]
 
@@ -460,11 +492,13 @@ def _extract_boundary_curves(geometry: rhino3dm.CommonObject) -> List[rhino3dm.C
 
 
 def _segment_length(segment: Segment2D) -> float:
+    """计算线段长度"""
     (ax, ay), (bx, by) = segment
     return math.hypot(bx - ax, by - ay)
 
 
 def _segments_share_point(a: Segment2D, b: Segment2D, tol: float = 1e-6) -> bool:
+    """判断两条线段是否共享端点（在容差范围内）"""
     for p1 in a:
         for p2 in b:
             if math.isclose(p1[0], p2[0], abs_tol=tol) and math.isclose(p1[1], p2[1], abs_tol=tol):
@@ -473,6 +507,7 @@ def _segments_share_point(a: Segment2D, b: Segment2D, tol: float = 1e-6) -> bool
 
 
 def _opposite_edge(segments: List[Segment2D], target: Segment2D) -> Optional[Segment2D]:
+    """在线段列表中找到与 target 不共享端点的线段（即对边）"""
     for segment in segments:
         if segment == target:
             continue
@@ -482,6 +517,7 @@ def _opposite_edge(segments: List[Segment2D], target: Segment2D) -> Optional[Seg
 
 
 def _segment_midpoint(segment: Segment2D) -> Point2D:
+    """计算线段中点"""
     (ax, ay), (bx, by) = segment
     return ((ax + bx) * 0.5, (ay + by) * 0.5)
 
@@ -490,6 +526,10 @@ def _ladder_dimensions(
     ladder_segments: List[Segment2D],
     building_segments: List[Segment2D],
 ) -> Tuple[float, float, float]:
+    """
+    计算消防登高面的宽度、长边长度和与建筑的最近距离。
+    返回 (宽度, 长边长度, 最近距离)
+    """
     if not ladder_segments:
         return 0.0, 0.0, float("inf")
     lengths = [_segment_length(seg) for seg in ladder_segments]
@@ -515,6 +555,7 @@ def _ladder_dimensions(
 
 
 def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
+    """从对象 UserText 或 Attributes 中读取建筑名称，找不到时返回 fallback"""
     name = _get_user_text(obj, "建筑名称")
     if name:
         return name
@@ -533,6 +574,7 @@ def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
 
 
 def _resolve_redline_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
+    """从对象 UserText 或 Attributes 中读取红线/地块名称，找不到时返回 fallback"""
     for key in ("地块名称", "地块名", "地块"):
         value = _get_user_text(obj, key)
         if value:
@@ -552,6 +594,7 @@ def _resolve_redline_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
 
 
 def _plot_name_from_object(obj: rhino3dm.File3dmObject, fallback: str) -> str:
+    """从对象 UserText 或 Attributes 中读取地块名称，找不到时返回 fallback"""
     for key in ("地块名称", "地块名", "地块"):
         value = _get_user_text(obj, key)
         if value:
@@ -582,6 +625,14 @@ def check_fire_ladder_pure_python(
     length_ratio: float = 0.25,
     allow_outside_redline: bool = False,
 ) -> Dict:
+    """
+    消防登高面检测主函数。
+    对每条建筑红线范围内的消防登高面检测：
+    - 登高面宽度 >= min_width
+    - 登高面与建筑距离在 [min_distance, max_distance] 范围内
+    - 登高面总长度 >= 建筑周长 * length_ratio
+    - 登高面在红线范围内（allow_outside_redline=False 时）
+    """
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
         raise ValueError(f"Failed to read 3dm file: {model_path}")

@@ -1,4 +1,8 @@
-﻿"use client";
+﻿/**
+ * 人行出入口检测面板
+ * 配置建筑红线距离阈值，调用后端检测接口，展示每条红线的出入口数量合规状态。
+ */
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Eye, Loader2, X } from "lucide-react";
@@ -9,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
+import { resolveApiBase } from "@/lib/api-base";
 import { checkPedestrianEntrance } from "./api";
 import { usePedestrianEntranceStore } from "./store";
 
@@ -28,7 +33,6 @@ const redlineReasonLabels: Record<string, string> = {
 const REQUIRED_MIN_COUNT = 2;
 
 export function PedestrianEntrancePanel() {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
   const modelFilePath = useModelStore((state) => state.modelFilePath);
   const modelFile = useModelStore((state) => state.externalModelFile);
   const setModelFilePath = useModelStore((state) => state.setModelFilePath);
@@ -63,6 +67,7 @@ export function PedestrianEntrancePanel() {
 
     const formData = new FormData();
     formData.append("file", modelFile);
+    const apiBase = await resolveApiBase();
 
     const uploadResponse = await fetch(`${apiBase}/models/import?skip_layers=true`, {
       method: "POST",
@@ -104,6 +109,7 @@ export function PedestrianEntrancePanel() {
       setShowHighlights(true);
     } catch (err) {
       if (err instanceof TypeError && err.message.includes("Failed to fetch")) {
+        const apiBase = await resolveApiBase({ forceRefresh: true });
         setError(`无法连接后端服务，请确认后端已启动（${apiBase}）`);
       } else {
         setError(err instanceof Error ? err.message : "未知错误");

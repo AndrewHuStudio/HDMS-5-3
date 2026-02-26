@@ -61,7 +61,7 @@ python -m venv backend\\review_system\.venv
 pip install -r requirements.txt
 
 # Run
-python -m uvicorn app:app --reload --port 8003 --app-dir backend/review_system
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8003 --app-dir backend/review_system
 ```
 
 ### QA Assistant
@@ -72,7 +72,7 @@ python -m venv backend\\qa_assistant\\.venv
 pip install -r requirements.txt
 
 # Run
-python -m uvicorn app:app --reload --port 8002 --app-dir backend/qa_assistant
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8002 --app-dir backend/qa_assistant
 ```
 
 ### Nginx Gateway

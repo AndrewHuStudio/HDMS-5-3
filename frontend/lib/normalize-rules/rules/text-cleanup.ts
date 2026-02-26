@@ -1,7 +1,11 @@
 /**
- * Rules: fullwidth-asterisks, bold-whitespace, star-run-placeholders, unicode-bullets
+ * 规则：fullwidth-asterisks, bold-whitespace, star-run-placeholders, unicode-bullets
  *
- * Text-level cleanup that operates on unprotected segments only.
+ * 文本级清理，仅在非保护区段（代码块外）操作：
+ * - fullwidth-asterisks: 全角星号转半角
+ * - bold-whitespace: 修复粗体标记内的多余空格
+ * - star-run-placeholders: 将连续星号占位符替换为"相关资料"
+ * - unicode-bullets: Unicode 项目符号转标准 Markdown 列表符号
  */
 
 import { registerRules } from "../registry";

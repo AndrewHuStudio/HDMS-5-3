@@ -1,8 +1,8 @@
 /**
- * Rule: related-concepts-body
+ * 规则：related-concepts-body
  *
- * Demote heading lines inside "## 相关概念" section to plain text
- * so the UI renders them as normal body font.
+ * 将 "## 相关概念" 区块内的标题行降级为普通文本，使 UI 以正文字体渲染。
+ * 避免相关概念区块内出现过多层级标题，保持视觉简洁。
  */
 
 import { registerRules } from "../registry";

@@ -1,3 +1,5 @@
+/** 空中连廊检测 - 类型定义 */
+
 export interface PlotInfo {
   name: string;
   center: [number, number, number];

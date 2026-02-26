@@ -1,11 +1,10 @@
 /**
- * Rules: strip-horizontal-rules, strip-strikethrough-markers
+ * 规则：strip-horizontal-rules, strip-strikethrough-markers
  *
- * Remove user-visible markdown artifacts that frequently leak from LLM output:
- * - standalone horizontal rules (`---`, `***`, `___`)
- * - accidental strikethrough wrappers (`~~text~~`)
- *
- * Keep protected regions (code/math/links/images) untouched.
+ * 移除 LLM 输出中常见的 Markdown 伪影：
+ * - strip-horizontal-rules: 独立的水平分隔线（---、***、___）
+ * - strip-strikethrough-markers: 意外的删除线包裹（~~text~~）
+ * 保持代码/数学/链接/图片等保护区域不变。
  */
 
 import { registerRules } from "../registry";

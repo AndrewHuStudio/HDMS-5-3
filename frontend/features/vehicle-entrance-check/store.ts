@@ -1,3 +1,4 @@
+/** 车行出入口检测 Zustand store - 管理检测结果、高亮开关和选中出入口 */
 import { create } from "zustand";
 import type { VehicleEntranceCheckResponse } from "./types";
 

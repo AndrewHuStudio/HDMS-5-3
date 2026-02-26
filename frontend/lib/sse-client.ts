@@ -1,3 +1,19 @@
+/**
+ * SSE 客户端模块
+ *
+ * 通过 Server-Sent Events 流式接收 QA 助手的回答，
+ * 支持自动重试、非流式降级（NEXT_PUBLIC_QA_STREAM_FALLBACK_ENABLED=true）。
+ *
+ * 事件类型：
+ * - sources: 检索到的来源文档
+ * - retrieval_stats: 检索统计信息
+ * - graph: 知识图谱数据
+ * - thinking: 思考过程 token
+ * - answer: 答案 token
+ * - status: 状态更新
+ * - done: 完成
+ * - error: 错误
+ */
 import type { SourceInfo, RetrievalStats, SubgraphData } from "@/features/qa/types";
 
 export interface SSECallbacks {

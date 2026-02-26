@@ -252,24 +252,24 @@ export default function CityControlSystem() {
       </aside>
 
       {/* 主内容区 */}
-      {isDataUploadView ? (
-        <section className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-          <header className="h-12 border-b border-border bg-card flex items-center justify-between px-4 flex-shrink-0">
-            <div className="flex items-center gap-2">
-              <h2 className="font-medium">管控资料上传</h2>
-              <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
-                严格串行
-              </span>
-            </div>
+      {/* 管控资料上传面板：用 hidden 隐藏而非卸载，避免切换视图时 CityScene 重新挂载导致模型闪烁 */}
+      <section className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${isDataUploadView ? "" : "hidden"}`}>
+        <header className="h-12 border-b border-border bg-card flex items-center justify-between px-4 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <h2 className="font-medium">管控资料上传</h2>
+            <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
+              严格串行
+            </span>
+          </div>
 
-            <ThemeToggle />
-          </header>
+          <ThemeToggle />
+        </header>
 
-          <DataUploadPanel />
-        </section>
-      ) : (
-        <>
-      <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+        <DataUploadPanel />
+      </section>
+
+      {/* 3D 场景主区域：始终挂载，避免切换视图时模型重新加载 */}
+      <main className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${isDataUploadView ? "hidden" : ""}`}>
         {/* 顶部栏 */}
         <header className="h-12 border-b border-border bg-card flex items-center justify-end px-4 flex-shrink-0">
           <div className="flex items-center gap-4">
@@ -455,7 +455,7 @@ export default function CityControlSystem() {
 
       {/* 右侧详情面板 */}
       <aside
-        className="border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden relative"
+        className={`border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden relative ${isDataUploadView ? "hidden" : ""}`}
         style={{ width: `${effectiveRightPanelWidth}px` }}
       >
         {/* 可拖拽的分隔条 */}
@@ -631,8 +631,6 @@ export default function CityControlSystem() {
           )}
         </div>
       </aside>
-        </>
-      )}
     </div>
   );
 }

@@ -1,3 +1,11 @@
+"""
+问答助手 API 路由
+POST /qa/chat/stream      - RAG 问答（SSE 流式）
+POST /qa/feedback         - 提交答案质量反馈
+GET  /rag/sources/{id}    - 获取来源 chunk 详情（含页码定位、图片预览）
+GET  /rag/documents/{id}/pdf   - 返回原始 PDF 文件
+GET  /rag/documents/{id}/image - 返回文档内嵌图片
+"""
 from __future__ import annotations
 
 import json

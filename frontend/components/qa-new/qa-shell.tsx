@@ -1,3 +1,8 @@
+/**
+ * QA Shell 主容器组件
+ * 管理问答界面的消息列表、输入框、快捷问题、反馈、导出、知识图谱等功能，
+ * 协调 Markdown 渲染、思考过程展示、引用面板等子组件。
+ */
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

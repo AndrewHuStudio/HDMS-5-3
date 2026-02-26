@@ -1,4 +1,9 @@
-﻿import type { SourceInfo } from "../../types";
+﻿/**
+ * 圆圈数字引用转锚点
+ * 将正文中的 ①②③... 圆圈数字转换为 [N-M](#source-N-M) 格式的 Markdown 锚点。
+ * 跳过代码块和检索综述引用块（> 开头的行），避免误转换。
+ */
+import type { SourceInfo } from "../../types";
 
 const CIRCLED_NUMERALS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"] as const;
 

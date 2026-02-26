@@ -1,10 +1,9 @@
 ﻿"""
-贴线率检测核心逻辑（纯 Python）
+贴线率检测与退线违规检测（纯 Python 实现）
 
-逻辑：
-- 读取建筑体块与建筑退线图层
-- 将建筑几何投影到 XY 平面形成足迹边界（凸包近似）
-- 计算退线曲线与建筑足迹边界的重合长度
+包含两个主函数：
+- check_setback_rate_pure_python: 计算建筑贴线率（建筑底面与退线曲线的重合比例）
+- check_setback_violation_pure_python: 检测建筑是否超出退线范围
 """
 from __future__ import annotations
 
@@ -26,6 +25,7 @@ Segment2D = Tuple[Point2D, Point2D]
 
 
 def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
+    """获取图层的所有候选名称，兼容 FullPath / Name 等不同属性名"""
     names: List[str] = []
     for attr in ("FullPath", "fullPath", "Name", "name"):
         value = getattr(layer, attr, None)
@@ -40,10 +40,12 @@ def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
 
 
 def _normalize_layer_name(name: str) -> str:
+    """图层名称标准化：去首尾空格并转小写"""
     return name.strip().lower()
 
 
 def _expand_layer_name(name: str) -> set[str]:
+    """将图层名展开为候选集合，同时包含完整路径和末级名称"""
     normalized = _normalize_layer_name(name)
     if not normalized:
         return set()
@@ -93,6 +95,7 @@ def _load_objects_from_layer(
 
 
 def _points_are_close(a: rhino3dm.Point3d, b: rhino3dm.Point3d, tol: float = 1e-6) -> bool:
+    """判断两点是否在容差范围内重合"""
     return (
         math.isclose(a.X, b.X, abs_tol=tol)
         and math.isclose(a.Y, b.Y, abs_tol=tol)
@@ -101,6 +104,7 @@ def _points_are_close(a: rhino3dm.Point3d, b: rhino3dm.Point3d, tol: float = 1e-
 
 
 def _curve_to_points(curve: rhino3dm.Curve, sample_count: int = 120) -> List[rhino3dm.Point3d]:
+    """将曲线转换为点列表，优先取多段线顶点，否则均匀采样"""
     if hasattr(curve, "TryGetPolyline"):
         try:
             polyline = curve.TryGetPolyline()
@@ -158,6 +162,7 @@ def _point_in_curve_2d(point: rhino3dm.Point3d, curve: rhino3dm.Curve) -> bool:
 
 
 def _point_in_polygon_2d(point: Point2D, polygon: List[Point2D]) -> bool:
+    """射线法判断点是否在多边形内，边上的点视为在内部"""
     if len(polygon) < 3:
         return False
     px, py = point
@@ -165,7 +170,7 @@ def _point_in_polygon_2d(point: Point2D, polygon: List[Point2D]) -> bool:
     for i in range(len(polygon)):
         x1, y1 = polygon[i]
         x2, y2 = polygon[(i + 1) % len(polygon)]
-        # On edge is considered inside
+        # 点在边上视为内部
         dx = x2 - x1
         dy = y2 - y1
         cross = (px - x1) * dy - (py - y1) * dx
@@ -181,6 +186,7 @@ def _point_in_polygon_2d(point: Point2D, polygon: List[Point2D]) -> bool:
 
 
 def _building_footprint_points(geometry: rhino3dm.CommonObject) -> List[Point2D]:
+    """提取建筑底面轮廓点（XY 平面），用凸包近似，失败时退化为 BoundingBox"""
     segments = _bottom_edge_segments(geometry)
     points: List[Point2D] = []
     for segment in segments:
@@ -205,6 +211,7 @@ def _points_to_2d(points: Iterable[rhino3dm.Point3d]) -> List[Point2D]:
 
 
 def _convex_hull(points: List[Point2D]) -> List[Point2D]:
+    """Andrew's Monotone Chain 算法计算二维凸包"""
     unique = sorted(set(points))
     if len(unique) < 3:
         return unique
@@ -391,6 +398,11 @@ def _compute_overlap_length(
     tolerance: float,
     closed: bool,
 ) -> Tuple[float, float, List[Segment2D]]:
+    """
+    计算退线曲线与建筑底面边界的重合长度（贴线率分子）。
+    沿退线曲线均匀采样，判断每个子段的中点是否在建筑边界容差范围内。
+    返回 (重合长度, 退线总长度, 高亮线段列表)
+    """
     if len(setback_points) < 2:
         return 0.0, 0.0, []
 
@@ -442,6 +454,13 @@ def check_setback_rate_pure_python(
     tolerance: float = 0.5,
     required_rate: Optional[float] = None,
 ) -> Dict:
+    """
+    贴线率检测主函数。
+    计算每条退线曲线与其范围内建筑底面边界的重合比例（贴线率）。
+    sample_step: 沿退线采样步长（米）
+    tolerance: 判断贴线的距离容差（米）
+    required_rate: 要求的最低贴线率（0~1），None 表示不做合规判断
+    """
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
         raise ValueError(f"Failed to read 3dm file: {model_path}")
@@ -658,6 +677,11 @@ def check_setback_violation_pure_python(
     setback_layer: str = "限制_建筑退线",
     plot_layer: str = "场景_地块",
 ) -> Dict:
+    """
+    退线违规检测主函数。
+    判断每栋建筑的底面轮廓是否完全在对应退线曲线范围内，
+    超出退线范围则标记为违规。
+    """
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
         raise ValueError(f"Failed to read 3dm file: {model_path}")

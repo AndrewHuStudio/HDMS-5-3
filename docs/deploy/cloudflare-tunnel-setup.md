@@ -57,19 +57,19 @@ npm run dev -- -p 8021
 
 # qa_assistant
 cd e:\MyPrograms\HDMS\backend\qa_assistant
-python -m uvicorn app:app --reload --port 8022 --env-file ..\..\.env.external
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8022 --env-file ..\..\.env.external
 
 # review_system
 cd e:\MyPrograms\HDMS\backend\review_system
-python -m uvicorn app:app --reload --port 8023 --env-file ..\..\.env.external
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8023 --env-file ..\..\.env.external
 
 # approval_checklist (可选)
 cd e:\MyPrograms\HDMS\backend\approval_checklist
-python -m uvicorn app:app --reload --port 8024 --env-file ..\..\.env.external
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8024 --env-file ..\..\.env.external
 
 # data_process
 cd e:\MyPrograms\HDMS\data_process
-python -m uvicorn main:app --reload --port 8025 --env-file ..\.env.external
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8025 --env-file ..\.env.external
 ```
 
 ## 8) 启动 Tunnel

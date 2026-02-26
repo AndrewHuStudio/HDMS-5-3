@@ -1,3 +1,7 @@
+/**
+ * 审查面板组件
+ * 展示地块信息、控规要素、检测结果、违规项等，支持导出报告功能。
+ */
 "use client";
 
 import React from "react"

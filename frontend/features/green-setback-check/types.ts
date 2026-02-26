@@ -1,3 +1,5 @@
+/** 绿地退线检测 - 类型定义 */
+
 export interface GreenSetbackBuildingResult {
   building_name: string;
   object_id?: string | null;

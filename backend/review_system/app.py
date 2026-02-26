@@ -1,3 +1,7 @@
+"""
+管控审查系统 FastAPI 应用入口
+注册所有检测功能路由，配置 CORS 中间件。
+"""
 from __future__ import annotations
 
 import logging
@@ -33,6 +37,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 注册各检测功能路由
 app.include_router(models.router)
 app.include_router(height_check.router)
 app.include_router(setback_check.router)
@@ -48,4 +53,5 @@ app.include_router(pedestrian_entrance_check.router)
 
 @app.get("/health")
 def health() -> dict:
+    """健康检查端点"""
     return {"status": "ok"}

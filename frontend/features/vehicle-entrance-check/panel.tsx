@@ -1,3 +1,8 @@
+/**
+ * 车行出入口检测面板
+ * 配置主/次/支路交叉口最小距离参数，调用后端检测接口，展示每个出入口的合规状态。
+ * 点击结果条目可在 3D 场景中高亮对应出入口。
+ */
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -9,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
+import { resolveApiBase } from "@/lib/api-base";
 import { checkVehicleEntrance } from "./api";
 import { useVehicleEntranceStore } from "./store";
 import type { VehicleEntranceResult } from "./types";
@@ -27,7 +33,6 @@ const reasonLabels: Record<string, string> = {
 };
 
 export function VehicleEntrancePanel() {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
   const modelFilePath = useModelStore((state) => state.modelFilePath);
   const modelFile = useModelStore((state) => state.externalModelFile);
   const setModelFilePath = useModelStore((state) => state.setModelFilePath);
@@ -66,6 +71,7 @@ export function VehicleEntrancePanel() {
 
     const formData = new FormData();
     formData.append("file", modelFile);
+    const apiBase = await resolveApiBase();
 
     const uploadResponse = await fetch(`${apiBase}/models/import?skip_layers=true`, {
       method: "POST",
@@ -111,6 +117,7 @@ export function VehicleEntrancePanel() {
       setShowHighlights(true);
     } catch (err) {
       if (err instanceof TypeError && err.message.includes("Failed to fetch")) {
+        const apiBase = await resolveApiBase({ forceRefresh: true });
         setError(`无法连接后端服务，请确认后端已启动（${apiBase}）`);
       } else {
         setError(err instanceof Error ? err.message : "未知错误");

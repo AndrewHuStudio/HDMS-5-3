@@ -1,10 +1,8 @@
 /**
- * Rules: strip-think-tags, strip-zero-width
+ * 规则：strip-think-tags, strip-zero-width
  *
- * Remove leaked <think>/<\/think> tags and zero-width Unicode characters
- * that break markdown rendering.
- *
- * Backend rendering removed — this is now the sole handler.
+ * 移除泄漏的 <think></think> 标签和零宽 Unicode 字符，避免破坏 Markdown 渲染。
+ * 后端渲染已移除，现在由前端统一处理。
  */
 
 import { registerRules } from "../registry";

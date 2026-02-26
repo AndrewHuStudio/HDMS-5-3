@@ -1,3 +1,7 @@
+/**
+ * 退线贴线率检测面板（薄包装）
+ * 将 Zustand store 状态注入到共享的 SetbackRateCheckPanel 组件。
+ */
 "use client";
 
 import { SetbackRateCheckPanel } from "@/components/setback-rate-check-panel";

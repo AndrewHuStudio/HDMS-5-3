@@ -1,8 +1,8 @@
 /**
- * Rule: loose-pipe-tables
+ * 规则：loose-pipe-tables
  *
- * Upgrade loose pipe-delimited table text into valid multi-line GFM table
- * blocks. Keeps streaming mode conservative.
+ * 将松散的管道分隔表格文本升级为有效的多行 GFM 表格块。
+ * 处理全角管道符、连写行（||）、表格注释行等，流式模式保持保守策略。
  */
 
 import {

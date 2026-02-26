@@ -1,3 +1,10 @@
+/**
+ * 阶段矩阵 - 声明式规则调度表
+ * 定义每条规则在哪些阶段执行：
+ * - streaming:  轻量安全规则（无布局重写）
+ * - finalizing: 中等权重规则（标题/列表规范化）
+ * - final:      完整规则集（脚手架/晋升/结论）
+ */
 import type { NormalizePhase } from "./types";
 
 const ALL: Set<NormalizePhase> = new Set(["streaming", "finalizing", "final"]);

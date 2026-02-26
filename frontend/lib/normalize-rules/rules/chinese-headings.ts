@@ -1,8 +1,8 @@
 /**
- * Rule: chinese-headings
+ * 规则：chinese-headings
  *
- * Convert Chinese-style headings (一、标题 / （一）标题 / 1. 标题 / 1) 标题 / ① 标题)
- * to Markdown headings using the heading classifier.
+ * 将中文风格标题（一、标题 / （一）标题 / 1. 标题 / 1) 标题 / ① 标题）
+ * 转换为 Markdown 标题，使用标题分类器判断是否为真正的标题。
  */
 
 import {

@@ -1,8 +1,8 @@
 /**
- * Rule: numeric-range-delimiters
+ * 规则：numeric-range-delimiters
  *
- * Normalize "~~" used as a numeric range delimiter (e.g. "50~~100")
- * to single "~" while preserving real markdown strikethrough and code.
+ * 规范化用作数值范围分隔符的 "~~"（如 "50~~100"）为单个 "~"，
+ * 同时保留真正的 Markdown 删除线和代码块。
  */
 
 import { registerRules } from "../registry";

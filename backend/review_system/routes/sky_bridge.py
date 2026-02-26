@@ -1,3 +1,9 @@
+"""
+空中连廊检测路由
+POST /sky-bridge-check/prepare - 提取地块连接关系，供前端渲染连廊示意图
+POST /sky-bridge-check - 检测空中连廊是否满足净高、宽度、高度要求
+POST /sky-bridge/check  - 同上（别名）
+"""
 from __future__ import annotations
 
 import logging
@@ -40,16 +46,18 @@ class SkyBridgeCheckRequest(BaseModel):
 
 
 def _resolve_model_path(model_path: str) -> Path:
+    """将相对路径解析为绝对路径，文件不存在时抛出 404"""
     path = Path(model_path)
     if not path.is_absolute():
         path = (config.MODEL_STORAGE_PATH / path).resolve()
     if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Model not found: {path}")
+        raise HTTPException(status_code=404, detail=f"模型文件不存在: {path}")
     return path
 
 
 @router.post("/sky-bridge-check/prepare")
 def sky_bridge_prepare(request: SkyBridgePrepareRequest) -> Dict[str, Any]:
+    """提取地块连接关系，供前端渲染连廊示意图"""
     resolved_path = _resolve_model_path(request.model_path)
     try:
         return prepare_sky_bridge_info(
@@ -60,13 +68,14 @@ def sky_bridge_prepare(request: SkyBridgePrepareRequest) -> Dict[str, Any]:
             connection_key=request.connection_key,
         )
     except ValueError as exc:
-        logger.warning("Sky bridge prepare failed: %s", exc)
+        logger.warning("空中连廊准备失败: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/sky-bridge-check")
 @router.post("/sky-bridge/check")
 def sky_bridge_check(request: SkyBridgeCheckRequest) -> Dict[str, Any]:
+    """空中连廊检测接口"""
     resolved_path = _resolve_model_path(request.model_path)
     try:
         return check_sky_bridge_pure_python(
@@ -81,5 +90,5 @@ def sky_bridge_check(request: SkyBridgeCheckRequest) -> Dict[str, Any]:
             connections=request.connections,
         )
     except ValueError as exc:
-        logger.warning("Sky bridge check failed: %s", exc)
+        logger.warning("空中连廊检测失败: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc

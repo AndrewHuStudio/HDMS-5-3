@@ -1,3 +1,4 @@
+/** 退线贴线率检测 - 注册到 toolRegistry，useSceneState 将 store 状态映射为场景层 props */
 import { Move } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
 import { SetbackRatePanel } from "./panel";

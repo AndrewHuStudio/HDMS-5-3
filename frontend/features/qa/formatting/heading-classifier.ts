@@ -1,3 +1,9 @@
+/**
+ * 标题分类器
+ * classifyHeadingCandidate: 基于结构前缀、标点密度、行长度等特征打分，判断一行是否为标题。
+ * splitInlineHeadingAndBody: 将"标题+正文"混排的行拆分为独立的标题行和正文行。
+ */
+
 export type HeadingDecision = "heading" | "paragraph";
 
 export interface HeadingClassifierContext {

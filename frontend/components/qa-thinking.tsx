@@ -1,3 +1,7 @@
+/**
+ * QA 思考过程展示组件
+ * 显示 AI 助手的思考过程（thinking），支持折叠/展开、流式更新、自动收起等功能。
+ */
 "use client";
 
 import { useEffect, useRef, useState } from "react";

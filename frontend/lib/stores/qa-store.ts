@@ -1,3 +1,12 @@
+/**
+ * QA 问答状态管理 Store (Zustand)
+ *
+ * 管理 QA 助手的全局状态：
+ * - 对话列表（conversations）、当前对话 ID
+ * - 消息历史、流式状态、输入框内容
+ * - 思考过程、来源引用、检索统计、知识图谱
+ * - 对话创建、切换、删除、消息追加等操作
+ */
 import { create } from "zustand";
 import type { ChatMessage, SourceInfo, RetrievalStats, SubgraphData } from "@/features/qa/types";
 

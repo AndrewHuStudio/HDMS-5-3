@@ -1,3 +1,4 @@
+/** 绿地退线检测 Zustand store - 管理检测结果、高亮开关和选中区域 */
 import { create } from "zustand";
 import type { GreenSetbackCheckResponse } from "./types";
 

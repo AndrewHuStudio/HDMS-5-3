@@ -1,4 +1,5 @@
-﻿import type { PedestrianEntranceCheckResponse } from "./types";
+﻿/** 人行出入口检测 API 封装 - 调用后端 /pedestrian-entrance-check 端点 */
+import type { PedestrianEntranceCheckResponse } from "./types";
 import { API_BASE, normalizeApiBase } from "@/lib/api-base";
 
 export interface PedestrianEntranceCheckParams {

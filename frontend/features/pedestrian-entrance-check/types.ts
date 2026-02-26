@@ -1,4 +1,6 @@
-﻿export type PedestrianEntranceReason = "outside_redline";
+﻿/** 人行出入口检测 - 类型定义 */
+
+export type PedestrianEntranceReason = "outside_redline";
 
 export interface PedestrianEntranceResult {
   index: number;

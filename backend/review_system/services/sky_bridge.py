@@ -1,3 +1,10 @@
+"""
+空中连廊检测（纯 Python 实现）
+
+包含两个主函数：
+- prepare_sky_bridge_info: 提取地块连接关系，供前端渲染连廊示意图
+- check_sky_bridge_pure_python: 检测空中连廊是否满足净高、宽度、高度要求
+"""
 from __future__ import annotations
 
 import logging
@@ -17,10 +24,12 @@ Point2D = Tuple[float, float]
 
 
 def _normalize_layer_name(name: str) -> str:
+    """图层名称标准化：去首尾空格并转小写"""
     return name.strip().lower()
 
 
 def _expand_layer_name(name: str) -> set[str]:
+    """将图层名展开为候选集合，同时包含完整路径和末级名称"""
     normalized = _normalize_layer_name(name)
     if not normalized:
         return set()
@@ -33,6 +42,7 @@ def _expand_layer_name(name: str) -> set[str]:
 
 
 def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
+    """获取图层的所有候选名称，兼容 FullPath / Name 等不同属性名"""
     names: List[str] = []
     for attr in ("FullPath", "fullPath", "Name", "name"):
         value = getattr(layer, attr, None)
@@ -49,6 +59,7 @@ def _layer_name_candidates(layer: rhino3dm.Layer) -> List[str]:
 def _load_objects_from_layer(
     file3dm: rhino3dm.File3dm, layer_name: str
 ) -> List[Tuple[rhino3dm.File3dmObject, rhino3dm.CommonObject]]:
+    """从 File3dm 中按图层名加载所有对象，返回 (对象, 几何体) 列表"""
     target_layers = _expand_layer_name(layer_name)
     if not target_layers:
         return []
@@ -82,6 +93,7 @@ def _load_objects_from_layer(
 
 
 def _points_are_close(a: rhino3dm.Point3d, b: rhino3dm.Point3d, tol: float = 1e-6) -> bool:
+    """判断两点是否在容差范围内重合"""
     return (
         math.isclose(a.X, b.X, abs_tol=tol)
         and math.isclose(a.Y, b.Y, abs_tol=tol)
@@ -90,6 +102,7 @@ def _points_are_close(a: rhino3dm.Point3d, b: rhino3dm.Point3d, tol: float = 1e-
 
 
 def _curve_to_points(curve: rhino3dm.Curve, sample_count: int = 120) -> List[rhino3dm.Point3d]:
+    """将曲线转换为点列表，优先取多段线顶点，否则均匀采样"""
     if hasattr(curve, "TryGetPolyline"):
         try:
             polyline = curve.TryGetPolyline()
@@ -126,10 +139,12 @@ def _curve_to_points(curve: rhino3dm.Curve, sample_count: int = 120) -> List[rhi
 
 
 def _points_to_2d(points: Iterable[rhino3dm.Point3d]) -> List[Point2D]:
+    """将三维点列表投影到 XY 平面，返回二维坐标列表"""
     return [(float(pt.X), float(pt.Y)) for pt in points]
 
 
 def _convex_hull(points: List[Point2D]) -> List[Point2D]:
+    """Andrew's Monotone Chain 算法计算二维凸包"""
     unique = sorted(set(points))
     if len(unique) < 3:
         return unique
@@ -153,6 +168,7 @@ def _convex_hull(points: List[Point2D]) -> List[Point2D]:
 
 
 def _polygon_points_from_geometry(geometry: rhino3dm.CommonObject) -> List[rhino3dm.Point3d]:
+    """从几何体中提取底面轮廓点（XY 平面），支持 Curve/Extrusion/Brep/Mesh，失败时退化为 BoundingBox"""
     if isinstance(geometry, rhino3dm.Curve):
         return _curve_to_points(geometry)
     if isinstance(geometry, rhino3dm.Extrusion):
@@ -196,6 +212,7 @@ def _polygon_points_from_geometry(geometry: rhino3dm.CommonObject) -> List[rhino
 
 
 def _polygon_centroid(points: List[rhino3dm.Point3d]) -> Optional[Point2D]:
+    """计算多边形重心（XY 平面），点数不足时返回 None"""
     if len(points) < 3:
         return None
     area = 0.0
@@ -217,6 +234,7 @@ def _polygon_centroid(points: List[rhino3dm.Point3d]) -> Optional[Point2D]:
 
 
 def _point_in_polygon(point: Point2D, polygon: List[Point2D]) -> bool:
+    """射线法判断点是否在多边形内"""
     if len(polygon) < 3:
         return False
     px, py = point
@@ -232,6 +250,7 @@ def _point_in_polygon(point: Point2D, polygon: List[Point2D]) -> bool:
 
 
 def _segments_intersect(a1: Point2D, a2: Point2D, b1: Point2D, b2: Point2D) -> bool:
+    """判断两条线段是否相交（含端点共线情况）"""
     def orient(p: Point2D, q: Point2D, r: Point2D) -> float:
         return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
 
@@ -259,6 +278,7 @@ def _segments_intersect(a1: Point2D, a2: Point2D, b1: Point2D, b2: Point2D) -> b
 
 
 def _polygons_intersect(poly_a: List[Point2D], poly_b: List[Point2D]) -> bool:
+    """判断两个多边形是否相交（含包含关系）"""
     if len(poly_a) < 3 or len(poly_b) < 3:
         return False
     for point in poly_a:
@@ -279,6 +299,7 @@ def _polygons_intersect(poly_a: List[Point2D], poly_b: List[Point2D]) -> bool:
 
 
 def _geometry_is_closed(geometry: rhino3dm.CommonObject) -> bool:
+    """判断几何体是否为封闭实体（Brep/Mesh/Extrusion）"""
     if isinstance(geometry, rhino3dm.Brep):
         return bool(getattr(geometry, "IsSolid", False))
     if isinstance(geometry, rhino3dm.Mesh):
@@ -289,6 +310,7 @@ def _geometry_is_closed(geometry: rhino3dm.CommonObject) -> bool:
 
 
 def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str, key: str) -> str:
+    """从对象 UserText 或 Attributes 中读取名称，找不到时返回 fallback"""
     name = _get_user_text(obj, key)
     if name:
         return name
@@ -307,6 +329,7 @@ def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str, key: str) -
 
 
 def _parse_connection_targets(value: str) -> List[str]:
+    """解析逗号分隔的连接目标地块名称列表（支持中英文逗号）"""
     if not value:
         return []
     tokens = re.split(r"[，,]", value)
@@ -314,12 +337,14 @@ def _parse_connection_targets(value: str) -> List[str]:
 
 
 def _sorted_pair(a: str, b: str) -> Tuple[str, str]:
+    """将两个地块名称排序为固定顺序的元组，用于去重连接对"""
     if a <= b:
         return a, b
     return b, a
 
 
 def _projected_width(points: List[Point2D], direction: Point2D) -> float:
+    """计算多边形在给定方向的垂直投影宽度"""
     if len(points) < 2:
         return 0.0
     dx, dy = direction
@@ -332,6 +357,7 @@ def _projected_width(points: List[Point2D], direction: Point2D) -> float:
 
 
 def _safe_bbox_points(bbox: rhino3dm.BoundingBox) -> List[Point2D]:
+    """将 BoundingBox 的四个底角转换为二维点列表"""
     return [
         (bbox.Min.X, bbox.Min.Y),
         (bbox.Min.X, bbox.Max.Y),
@@ -347,6 +373,11 @@ def prepare_sky_bridge_info(
     plot_name_key: str = "地块名称",
     connection_key: str = "空中连接地块",
 ) -> Dict:
+    """
+    提取地块连接关系，供前端渲染空中连廊示意图。
+    读取地块图层，解析每个地块的 UserText 中的连接目标，
+    返回地块列表和连接对列表（去重）。
+    """
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
         raise ValueError(f"Failed to read 3dm file: {model_path}")
@@ -417,6 +448,15 @@ def check_sky_bridge_pure_python(
     min_height: float = 4.0,
     connections: Optional[List[List[str]]] = None,
 ) -> Dict:
+    """
+    空中连廊检测主函数。
+    对每对需要连接的地块，检测其间的连廊体块是否满足：
+    - 净高（连廊底部距地块顶面）>= elevation
+    - 连廊宽度 >= min_width
+    - 连廊自身高度 >= min_height
+    - 连廊为封闭实体且同时与两侧地块相交
+    connections 为 None 时从模型 UserText 中读取连接关系。
+    """
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
         raise ValueError(f"Failed to read 3dm file: {model_path}")

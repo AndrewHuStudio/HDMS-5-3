@@ -1,12 +1,11 @@
 /**
- * Rule: math-delimiters
+ * 规则：math-delimiters
  *
- * Frontend fallback for math delimiters:
- * - \[...\] -> $$...$$
- * - \(...\) -> $...$
- * - \$...\$ / \$\$...\$\$ -> $...$ / $$...$$
- *
- * Backend rendering removed — this is now the sole handler.
+ * 数学公式定界符规范化（前端回退处理）：
+ * - \[...\] → $$...$$
+ * - \(...\) → $...$
+ * - \$...\$ / \$\$...\$\$ → $...$ / $$...$$
+ * 后端渲染已移除，现在由前端统一处理。
  */
 
 import { registerRules } from "../registry";

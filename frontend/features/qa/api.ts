@@ -1,4 +1,9 @@
-﻿import type { ChatHistoryMessage } from "./types";
+﻿/**
+ * 问答助手 API 封装
+ * sendQuestionStream: 通过 SSE 流式发送问题并接收回答
+ * submitFeedback: 提交答案质量反馈
+ */
+import type { ChatHistoryMessage } from "./types";
 import { streamChat, type SSECallbacks } from "@/lib/sse-client";
 
 export async function sendQuestionStream(

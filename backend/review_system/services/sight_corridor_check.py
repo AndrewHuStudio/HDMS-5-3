@@ -1,6 +1,9 @@
 ﻿"""
-视线通廊检测核心逻辑
-基于射线追踪的可见性分析
+视线通廊检测（纯 Python 实现）
+
+包含两个主函数：
+- check_sight_corridor: 基于角度扫描算法，计算从观察点能看到哪些建筑
+- check_corridor_collision: 检测视线通廊体块与建筑体块是否真实相交（贴着不算）
 """
 from __future__ import annotations
 
@@ -18,18 +21,20 @@ from core.utils import (
 
 logger = logging.getLogger(__name__)
 
-COLLISION_EPS = 1e-6
-AXIS_EPS = 1e-12
-ANGLE_EPS = 1e-9
+COLLISION_EPS = 1e-6   # 碰撞检测容差
+AXIS_EPS = 1e-12       # 向量长度判零容差
+ANGLE_EPS = 1e-9       # 角度判零容差
 
 
 def _normalize_layer_token(value: str) -> str:
+    """图层名称标准化：去空格并转小写（含内部空格）"""
     return "".join(value.strip().lower().split())
 
 
 def _bbox_intersects_strict(
     a: rhino3dm.BoundingBox, b: rhino3dm.BoundingBox, eps: float = 0.0
 ) -> bool:
+    """严格判断两个 BoundingBox 是否相交（贴着不算，需真实重叠）"""
     return (
         a.Max.X > b.Min.X + eps
         and a.Min.X < b.Max.X - eps
@@ -43,6 +48,7 @@ def _bbox_intersects_strict(
 def _mesh_triangles_from_mesh(
     mesh: rhino3dm.Mesh,
 ) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]:
+    """将 Mesh 的所有面分解为三角形列表（四边形面拆分为两个三角形）"""
     triangles: List[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]] = []
     faces = mesh.Faces
     vertices = mesh.Vertices
@@ -77,6 +83,7 @@ def _mesh_triangles_from_mesh(
 def _mesh_triangles_from_geometry(
     geometry: rhino3dm.CommonObject,
 ) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]:
+    """从几何体（Mesh/Extrusion/Brep）中提取所有三角形面片"""
     if isinstance(geometry, rhino3dm.Mesh):
         return _mesh_triangles_from_mesh(geometry)
 
@@ -117,16 +124,19 @@ def _mesh_triangles_from_geometry(
 
 
 def _vec_sub(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    """三维向量减法：a - b"""
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 
 def _dot(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
+    """三维向量点积"""
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
 def _cross(
     a: Tuple[float, float, float], b: Tuple[float, float, float]
 ) -> Tuple[float, float, float]:
+    """三维向量叉积"""
     return (
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -135,10 +145,12 @@ def _cross(
 
 
 def _length_sq(v: Tuple[float, float, float]) -> float:
+    """三维向量长度的平方"""
     return v[0] * v[0] + v[1] * v[1] + v[2] * v[2]
 
 
 def _normalize(v: Tuple[float, float, float]) -> Optional[Tuple[float, float, float]]:
+    """归一化三维向量，零向量返回 None"""
     length_sq = _length_sq(v)
     if length_sq <= AXIS_EPS:
         return None
@@ -152,6 +164,7 @@ def _project_triangle(
     b: Tuple[float, float, float],
     c: Tuple[float, float, float],
 ) -> Tuple[float, float]:
+    """将三角形三顶点投影到轴上，返回 (min, max) 区间"""
     p0 = _dot(axis, a)
     p1 = _dot(axis, b)
     p2 = _dot(axis, c)
@@ -168,6 +181,7 @@ def _overlap_on_axis(
     b2: Tuple[float, float, float],
     eps: float,
 ) -> bool:
+    """判断两个三角形在指定轴上的投影区间是否重叠（SAT 分离轴测试）"""
     a_min, a_max = _project_triangle(axis, a0, a1, a2)
     b_min, b_max = _project_triangle(axis, b0, b1, b2)
     if a_max <= b_min + eps or b_max <= a_min + eps:
@@ -181,6 +195,7 @@ def _overlap_on_axis_2d(
     tri_b: List[Tuple[float, float]],
     eps: float,
 ) -> bool:
+    """判断两个二维多边形在指定轴上的投影区间是否重叠（SAT 分离轴测试）"""
     ax, ay = axis
     min_a = ax * tri_a[0][0] + ay * tri_a[0][1]
     max_a = min_a
@@ -211,6 +226,7 @@ def _triangles_overlap_coplanar(
     normal: Tuple[float, float, float],
     eps: float,
 ) -> bool:
+    """判断两个共面三角形是否重叠（投影到最大分量平面后用 SAT 检测）"""
     abs_x = abs(normal[0])
     abs_y = abs(normal[1])
     abs_z = abs(normal[2])
@@ -261,6 +277,7 @@ def _triangles_intersect(
     b2: Tuple[float, float, float],
     eps: float,
 ) -> bool:
+    """判断两个三角形是否相交（使用 SAT 分离轴测试，共面时调用 2D 检测）"""
     a0a1 = _vec_sub(a1, a0)
     a1a2 = _vec_sub(a2, a1)
     a2a0 = _vec_sub(a0, a2)
@@ -482,6 +499,7 @@ def _sample_bbox_points_2d(bbox: rhino3dm.BoundingBox) -> List[Tuple[float, floa
 
 
 def _cross_2d(a: Tuple[float, float], b: Tuple[float, float]) -> float:
+    """二维向量叉积（返回标量）"""
     return a[0] * b[1] - a[1] * b[0]
 
 
@@ -556,6 +574,7 @@ def _ray_polygon_entry_t(
 
 
 def _normalize_angle(angle: float) -> float:
+    """将角度归一化到 [0, 2π) 范围"""
     value = angle % (2 * math.pi)
     if value < 0:
         value += 2 * math.pi
@@ -563,6 +582,7 @@ def _normalize_angle(angle: float) -> float:
 
 
 def _angle_in_interval(angle: float, start: float, end: float, eps: float = ANGLE_EPS) -> bool:
+    """判断角度是否在区间 [start, end] 内（支持跨越 0/2π 的环绕区间）"""
     if start <= end:
         return start - eps <= angle <= end + eps
     return angle >= start - eps or angle <= end + eps
@@ -572,6 +592,7 @@ def _polygon_angle_intervals(
     origin: Tuple[float, float],
     polygon: List[Tuple[float, float]],
 ) -> List[Tuple[float, float]]:
+    """计算多边形相对于观察点的角度覆盖区间（用于角度扫描可见性判断）"""
     if len(polygon) < 3:
         return []
     if _point_in_polygon(origin, polygon):
@@ -625,6 +646,7 @@ def _polygon_entry_t(
 
 
 def _point_in_polygon(point: Tuple[float, float], polygon: List[Tuple[float, float]]) -> bool:
+    """射线法判断点是否在多边形内"""
     if len(polygon) < 3:
         return False
     x, y = point
@@ -645,6 +667,7 @@ def _distance_point_to_segment(
     a: Tuple[float, float],
     b: Tuple[float, float],
 ) -> float:
+    """计算点到线段的最短距离"""
     px, py = point
     ax, ay = a
     bx, by = b
@@ -664,6 +687,7 @@ def _polygon_intersects_circle(
     center: Tuple[float, float],
     radius: float,
 ) -> bool:
+    """判断多边形是否与圆相交（顶点在圆内、圆心在多边形内、或边与圆相交）"""
     if len(polygon) < 3:
         return False
 
@@ -687,6 +711,7 @@ def _polygon_intersects_circle(
 
 
 def _polygon_axes(polygon: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    """提取多边形所有边的法向量，用于 SAT 分离轴测试"""
     axes: List[Tuple[float, float]] = []
     if len(polygon) < 2:
         return axes
@@ -708,6 +733,7 @@ def _project_polygon(
     axis: Tuple[float, float],
     polygon: List[Tuple[float, float]],
 ) -> Tuple[float, float]:
+    """将多边形投影到轴上，返回 (min, max) 区间"""
     ax, ay = axis
     min_p = ax * polygon[0][0] + ay * polygon[0][1]
     max_p = min_p
@@ -723,6 +749,7 @@ def _polygons_intersect_strict(
     poly_b: List[Tuple[float, float]],
     eps: float,
 ) -> bool:
+    """严格判断两个多边形是否相交（贴着不算，使用 SAT 分离轴测试）"""
     if len(poly_a) < 3 or len(poly_b) < 3:
         return False
 
@@ -736,6 +763,7 @@ def _polygons_intersect_strict(
 
 
 def _collect_geometry_points(geometry: rhino3dm.CommonObject) -> List[Tuple[float, float, float]]:
+    """从几何体中收集所有顶点坐标，支持 Mesh/Brep/Extrusion"""
     points: List[Tuple[float, float, float]] = []
 
     if isinstance(geometry, rhino3dm.Mesh):
@@ -768,6 +796,7 @@ def _collect_geometry_points(geometry: rhino3dm.CommonObject) -> List[Tuple[floa
 
 
 def _compute_convex_hull(points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    """Andrew's Monotone Chain 算法计算二维凸包"""
     if len(points) < 3:
         return points
 
@@ -796,6 +825,7 @@ def _compute_convex_hull(points: List[Tuple[float, float]]) -> List[Tuple[float,
 
 
 def _bbox_polygon(bbox: rhino3dm.BoundingBox) -> List[Tuple[float, float]]:
+    """将 BoundingBox 转换为四角二维多边形"""
     min_x, min_y = bbox.Min.X, bbox.Min.Y
     max_x, max_y = bbox.Max.X, bbox.Max.Y
     return [
@@ -810,6 +840,7 @@ def _extract_footprint_polygon(
     geometry: rhino3dm.CommonObject,
     bbox: rhino3dm.BoundingBox,
 ) -> List[Tuple[float, float]]:
+    """提取几何体的底面轮廓凸包，失败时退化为 BoundingBox 四角"""
     points_3d = _collect_geometry_points(geometry)
     if points_3d:
         points_2d = [(x, y) for x, y, _ in points_3d]
@@ -821,6 +852,7 @@ def _extract_footprint_polygon(
 
 
 def _sample_polygon_points(polygon: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    """在多边形顶点基础上补充各边中点，增加采样密度"""
     if len(polygon) < 3:
         return polygon
 
@@ -887,38 +919,28 @@ def check_sight_corridor(
     hemisphere_radius: float = 100.0,
 ) -> Dict:
     """
-    视线通廊检测 - 计算观察点的可见建筑
-
-    Args:
-        model_path: 3dm模型文件路径
-        building_layer: 建筑体块图层名称
-        observer_position: 观察者位置 (x, y, z)
-        hemisphere_radius: 可视半球半径（米）
-
-    Returns:
-        检测结果字典
+    视线通廊检测主函数（基于角度扫描算法）。
+    从观察点出发，对所有建筑的水平投影轮廓进行角度区间扫描，
+    判断每栋建筑是否可见（未被其他建筑遮挡）。
     """
-    # 读取模型
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
-        raise ValueError(f"Failed to read 3dm file: {model_path}")
+        raise ValueError(f"无法读取 3dm 文件: {model_path}")
 
-    # 加载建筑体块
     building_objects = _load_objects_from_layer(file3dm, building_layer)
     if not building_objects:
-        raise ValueError(f"No buildings found in layer: {building_layer}")
+        raise ValueError(f"图层 '{building_layer}' 中未找到建筑体块")
 
-    logger.info(f"Loaded {len(building_objects)} buildings from layer '{building_layer}'")
+    logger.info("从图层 '%s' 加载了 %s 栋建筑", building_layer, len(building_objects))
 
-    # 解析建筑信息
     buildings = []
     for idx, (obj, geometry, layer, layer_index, layer_full_path) in enumerate(building_objects):
         bbox = _get_bounding_box(geometry)
         if bbox is None:
-            logger.warning(f"Building {idx} has no valid bounding box, skipping")
+            logger.warning("建筑 %s 无有效包围盒，已跳过", idx)
             continue
 
-        # 读取建筑名称
+        # 优先从对象 UserText 读取建筑名称，其次从图层名称
         layer_user_name = _get_user_text_from_source(layer, "建筑名称")
         building_name = (
             _get_user_text(obj, "建筑名称")
@@ -943,10 +965,9 @@ def check_sight_corridor(
 
     logger.info(f"Parsed {len(buildings)} valid buildings")
 
-    # 观察者位置
     obs_x, obs_y, obs_z = observer_position
+    origin = (obs_x, obs_y)
 
-    # 计算每个建筑的可见性
     visible_buildings = []
     invisible_buildings = []
     blocking_buildings = {}
@@ -954,8 +975,7 @@ def check_sight_corridor(
     visible_indices: set[int] = set()
     blocker_indices: set[int] = set()
 
-    origin = (obs_x, obs_y)
-
+    # 收集所有建筑的角度区间端点，作为扫描事件角度
     building_intervals: Dict[int, List[Tuple[float, float]]] = {}
     event_angles: List[float] = []
 
@@ -971,6 +991,7 @@ def check_sight_corridor(
 
     event_angles = sorted(set(_normalize_angle(a) for a in event_angles))
 
+    # 对每个角度区间的中点方向发射射线，找最近建筑（可见）和其后建筑（被遮挡）
     for i in range(len(event_angles)):
         start = event_angles[i]
         end = event_angles[(i + 1) % len(event_angles)]
@@ -1070,14 +1091,17 @@ def check_corridor_collision(
     eps: float = COLLISION_EPS,
 ) -> Dict:
     """
-    视线通廊碰撞检测 - 判断通廊与建筑是否真实相交（贴着不算）
+    视线通廊碰撞检测主函数。
+    判断通廊体块与建筑体块是否真实相交（贴着不算）。
+    先用 BoundingBox 快速过滤，再用多边形相交精确判断。
     """
     file3dm = rhino3dm.File3dm.Read(str(model_path))
     if file3dm is None:
-        raise ValueError(f"Failed to read 3dm file: {model_path}")
+        raise ValueError(f"无法读取 3dm 文件: {model_path}")
 
     corridor_objects = _load_objects_from_layer(file3dm, corridor_layer)
     if not corridor_objects:
+        # 图层名未精确匹配时，尝试模糊查找含"通廊"的图层
         candidate_layers: List[str] = []
         for layer in file3dm.Layers:
             layer_full_path = None

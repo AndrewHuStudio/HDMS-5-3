@@ -1,10 +1,10 @@
 /**
- * Rules: image-math-unwrap, strip-unrenderable-images
+ * 规则：image-math-unwrap, strip-unrenderable-images
  *
- * Image cleanup: unwrap images from math delimiters and strip
- * unrenderable image tokens.
- *
- * Backend rendering removed — this is now the sole handler.
+ * 图片清理：
+ * - image-math-unwrap: 从数学定界符中解包图片（$![...]$ → ![...]）
+ * - strip-unrenderable-images: 剥离无法渲染的图片标记（无效 URL、缺少 ref 参数等）
+ * 后端渲染已移除，现在由前端统一处理。
  */
 
 import { registerRules } from "../registry";

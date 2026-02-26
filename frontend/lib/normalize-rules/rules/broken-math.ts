@@ -1,9 +1,11 @@
 /**
- * Rule: broken-inline-math
+ * 规则：broken-inline-math
  *
- * Light-touch fix for broken inline math delimiters. Only intervenes
- * when a $...$ span is clearly broken (unbalanced braces, heading
- * markers, or multi-line with unbalanced braces).
+ * 轻量修复损坏的内联数学定界符。仅在 $...$ 区间明显损坏时介入：
+ * - 花括号不平衡
+ * - 包含标题标记
+ * - 多行且花括号不平衡
+ * 将损坏的 LaTeX 片段净化为纯文本。
  */
 
 import { registerRules } from "../registry";

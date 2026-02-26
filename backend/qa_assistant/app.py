@@ -1,3 +1,7 @@
+"""
+问答助手 FastAPI 应用入口
+启动时初始化 Milvus / MongoDB / Neo4j 数据库连接，注册 QA 路由，配置 CORS 中间件。
+"""
 from __future__ import annotations
 
 import asyncio
