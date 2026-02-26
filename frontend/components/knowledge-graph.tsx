@@ -1,345 +1,580 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import dynamic from "next/dynamic";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Network, List } from "lucide-react";
-import type { CityElement } from "@/lib/city-data";
+import { Eye, EyeOff } from "lucide-react";
+import type { SubgraphData } from "@/features/qa/types";
+import {
+  filterGraphWithHiddenTypes,
+  type GraphViewData,
+  type GraphViewNode,
+} from "./knowledge-graph-filter";
+import {
+  buildRelatedNodes,
+  computeLayoutTuning,
+  getLinkNodeId,
+  shouldShowNodeLabel,
+} from "./knowledge-graph-utils";
+// @ts-expect-error d3-force-3d package does not ship TypeScript declarations.
+import { forceCollide, forceX, forceY } from "d3-force-3d";
 
-// 动态导入 ForceGraph2D 以避免 SSR 问题
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
 });
 
-interface GraphNode {
-  id: string;
-  name: string;
-  type: "element" | "control" | "knowledge";
-  val?: number;
-}
+// Node type -> color mapping (research SCI palette from the provided design)
+const NODE_COLORS: Record<string, string> = {
+  法规: "#274753",
+  标准: "#297270",
+  空间要素: "#299d8f",
+  片区: "#8ab07c",
+  Document: "#e7c66b",
+  导则: "#f3a361",
+  地块: "#e66d50",
+};
 
-interface GraphLink {
-  source: string;
-  target: string;
+// Chinese labels for node types (identity mapping since labels are already Chinese)
+const NODE_TYPE_LABELS: Record<string, string> = {
+  片区: "片区",
+  地块: "地块",
+  空间要素: "空间要素",
+  法规: "法规",
+  标准: "标准",
+  导则: "导则",
+  Document: "文档",
+};
+
+// Chinese labels for relationship types (8 types)
+const REL_TYPE_LABELS: Record<string, string> = {
+  PART_OF: "属于",
+  CONTAINS: "包含",
+  ADJACENT_TO: "相邻",
+  LOCATED_IN: "位于",
+  APPLIES_TO: "适用",
+  REFERENCES: "引用",
+  DERIVED_FROM: "来源",
+  HAS_PROPERTY: "属性",
+  HIDDEN_BRIDGE: "隐藏后连接",
+};
+
+function hexToRgba(hex: string, alpha: number): string {
+  const normalized = hex.replace("#", "");
+  if (normalized.length !== 6) return `rgba(107, 114, 128, ${alpha})`;
+  const value = Number.parseInt(normalized, 16);
+  if (Number.isNaN(value)) return `rgba(107, 114, 128, ${alpha})`;
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 interface KnowledgeGraphProps {
-  selectedElement: CityElement | null;
+  subgraph: SubgraphData | null;
+  isStreaming?: boolean;
+  height?: number;
 }
 
-const defaultControls = [
-  { id: "control-height", name: "建筑限高", description: "控制天际线与城市风貌" },
-  { id: "control-setback", name: "建筑退线", description: "保障街道尺度与公共安全" },
-  { id: "control-far", name: "容积率", description: "衡量开发强度与用地效率" },
-  { id: "control-density", name: "建筑密度", description: "平衡建设量与开放空间" },
-  { id: "control-greenspace", name: "绿地率", description: "提升生态与景观品质" },
-  { id: "control-parking", name: "停车配建", description: "匹配交通与停车需求" },
-  { id: "control-sunlight", name: "日照要求", description: "保障居住舒适度" },
-  { id: "control-fire", name: "消防通道", description: "满足应急安全要求" },
-  { id: "control-view", name: "视廊保护", description: "维护城市景观视线" },
-  { id: "control-traffic", name: "交通影响", description: "评估路网承载" },
-];
-
-const defaultKnowledgePoints = [
-  { id: "knowledge-skyline", name: "风貌控制", description: "天际线与城市特色" },
-  { id: "knowledge-safety", name: "公共安全", description: "疏散与应急保障" },
-  { id: "knowledge-ecology", name: "生态品质", description: "绿地与舒适度" },
-  { id: "knowledge-transport", name: "交通承载", description: "出行效率与停车" },
-  { id: "knowledge-intensity", name: "开发强度", description: "建设量与用地效率" },
-  { id: "knowledge-openness", name: "空间开放度", description: "公共空间与通行尺度" },
-];
-
-export function KnowledgeGraph({ selectedElement }: KnowledgeGraphProps) {
-  const [viewMode, setViewMode] = useState<"graph" | "list">("list");
+export function KnowledgeGraph({
+  subgraph,
+  isStreaming,
+  height = 300,
+}: KnowledgeGraphProps) {
+  const graphRef = useRef<any>(null);
+  const resizingLegendRef = useRef(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [hiddenNodeTypes, setHiddenNodeTypes] = useState<Set<string>>(new Set());
+  const [legendWidth, setLegendWidth] = useState<number>(120);
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
-  const graphBackground = isDark ? "#0f172a" : "#ffffff";
-  const graphLabelBackground = isDark ? "rgba(15, 23, 42, 0.85)" : "rgba(255, 255, 255, 0.8)";
-  const graphLabelColor = isDark ? "#e2e8f0" : "#1f2937";
-  const graphLinkColor = isDark ? "#334155" : "#cbd5e1";
+  const bgColor = isDark ? "#0f172a" : "#ffffff";
 
-  // 将选中元素的数据转换为图谱数据
-  const graphData = useMemo(() => {
-    const nodes: GraphNode[] = [];
-    const links: GraphLink[] = [];
-
-    if (selectedElement) {
-      nodes.push({
-        id: selectedElement.id,
-        name: selectedElement.name,
-        type: "element",
-        val: 20,
-      });
-
-      selectedElement.controls.forEach((control) => {
-        nodes.push({
-          id: control.id,
-          name: control.name,
-          type: "control",
-          val: 10,
-        });
-        links.push({
-          source: selectedElement.id,
-          target: control.id,
-        });
-      });
-
-      selectedElement.knowledgeBase.forEach((kb, index) => {
-        const kbId = `kb-${selectedElement.id}-${index}`;
-        nodes.push({
-          id: kbId,
-          name: kb.substring(0, 30) + (kb.length > 30 ? "..." : ""),
-          type: "knowledge",
-          val: 8,
-        });
-        links.push({
-          source: selectedElement.id,
-          target: kbId,
-        });
-      });
-
-      return { nodes, links };
+  const rawGraphData = useMemo(() => {
+    if (!subgraph || !subgraph.nodes || subgraph.nodes.length === 0) {
+      return { nodes: [], links: [] };
     }
 
-    nodes.push({
-      id: "city-control",
-      name: "城市管控要素",
-      type: "element",
-      val: 22,
-    });
+    // Compute degree for node sizing
+    const degree: Record<string, number> = {};
+    for (const edge of subgraph.edges || []) {
+      degree[edge.source] = (degree[edge.source] || 0) + 1;
+      degree[edge.target] = (degree[edge.target] || 0) + 1;
+    }
 
-    defaultControls.forEach((control) => {
-      nodes.push({
-        id: control.id,
-        name: control.name,
-        type: "control",
-        val: 10,
-      });
-      links.push({ source: "city-control", target: control.id });
-    });
+    const nodes: GraphViewNode[] = subgraph.nodes.map((n) => ({
+      id: n.id,
+      name: n.name || "?",
+      label: n.label || "Unknown",
+      degree: degree[n.id] || 0,
+      val: Math.max(4, Math.min(14, (degree[n.id] || 0) * 1.5 + 4)),
+    }));
 
-    defaultKnowledgePoints.forEach((point) => {
-      nodes.push({
-        id: point.id,
-        name: point.name,
-        type: "knowledge",
-        val: 8,
-      });
-    });
-
-    links.push(
-      { source: "control-height", target: "knowledge-skyline" },
-      { source: "control-view", target: "knowledge-skyline" },
-      { source: "control-sunlight", target: "knowledge-ecology" },
-      { source: "control-greenspace", target: "knowledge-ecology" },
-      { source: "control-parking", target: "knowledge-transport" },
-      { source: "control-traffic", target: "knowledge-transport" },
-      { source: "control-fire", target: "knowledge-safety" },
-      { source: "control-setback", target: "knowledge-safety" },
-      { source: "control-far", target: "knowledge-intensity" },
-      { source: "control-density", target: "knowledge-intensity" },
-      { source: "control-setback", target: "knowledge-openness" },
-      { source: "control-density", target: "knowledge-openness" }
-    );
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const links: GraphViewData["links"] = (subgraph.edges || [])
+      .filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+      .map((e) => ({
+        source: e.source,
+        target: e.target,
+        type: e.type || "",
+      }));
 
     return { nodes, links };
-  }, [selectedElement]);
+  }, [subgraph]);
 
-  // 节点颜色配置
-  const getNodeColor = (node: GraphNode) => {
-    switch (node.type) {
-      case "element":
-        return "#3b82f6"; // 蓝色 - 城市要素
-      case "control":
-        return "#10b981"; // 绿色 - 管控指标
-      case "knowledge":
-        return "#f59e0b"; // 橙色 - 知识库
-      default:
-        return "#6b7280";
+  const graphData = useMemo(() => {
+    return filterGraphWithHiddenTypes(rawGraphData, hiddenNodeTypes);
+  }, [rawGraphData, hiddenNodeTypes]);
+
+  const layoutTuning = useMemo(() => {
+    return computeLayoutTuning({
+      nodeCount: graphData.nodes.length,
+      isDark,
+    });
+  }, [graphData.nodes.length, isDark]);
+
+  const nodeMap = useMemo(() => {
+    const map = new Map<string, GraphViewNode>();
+    for (const node of graphData.nodes) {
+      map.set(node.id, node);
     }
+    return map;
+  }, [graphData.nodes]);
+
+  // Pre-compute degree map for degree-aware link strength
+  const degreeMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const node of graphData.nodes) {
+      map.set(node.id, node.degree);
+    }
+    return map;
+  }, [graphData.nodes]);
+
+  useEffect(() => {
+    if (!graphRef.current || graphData.nodes.length === 0) return;
+
+    // Charge: repulsion between all nodes
+    graphRef.current?.d3Force("charge")?.strength(layoutTuning.chargeStrength);
+
+    // Link distance
+    graphRef.current?.d3Force("link")?.distance(layoutTuning.linkDistance);
+
+    // Degree-aware link strength: weaken links from high-degree hubs
+    // so they don't create radial star patterns
+    graphRef.current?.d3Force("link")?.strength((link: any) => {
+      const srcId = getLinkNodeId(link.source);
+      const tgtId = getLinkNodeId(link.target);
+      const srcDeg = (srcId ? degreeMap.get(srcId) : null) ?? 1;
+      const tgtDeg = (tgtId ? degreeMap.get(tgtId) : null) ?? 1;
+      // d3 default formula: 1 / min(srcDeg, tgtDeg)
+      // We use a softer version to avoid overly loose hubs
+      const rawStrength = 1 / Math.sqrt(Math.max(srcDeg, tgtDeg));
+      const scaledStrength = rawStrength * layoutTuning.linkStrengthScale;
+      return Math.max(layoutTuning.minLinkStrength, scaledStrength);
+    });
+
+    // Collision
+    graphRef.current?.d3Force(
+      "collide",
+      forceCollide((node: any) => (node.val || 6) + layoutTuning.collidePadding).iterations(2),
+    );
+
+    // Keep every graph size cohesive while still preserving local spacing.
+    graphRef.current?.d3Force("gravityX", forceX(0).strength(layoutTuning.gravityStrength));
+    graphRef.current?.d3Force("gravityY", forceY(0).strength(layoutTuning.gravityStrength));
+
+    graphRef.current?.d3ReheatSimulation();
+  }, [graphData.nodes.length, graphData.links.length, layoutTuning, degreeMap]);
+
+  useEffect(() => {
+    if (graphData.nodes.length === 0) {
+      setSelectedNodeId(null);
+      return;
+    }
+    // If selected node was removed (e.g. by filtering), clear selection
+    if (selectedNodeId && !nodeMap.has(selectedNodeId)) {
+      setSelectedNodeId(null);
+    }
+  }, [graphData.nodes, nodeMap, selectedNodeId]);
+
+  // Collect active node types for legend
+  const activeTypes = useMemo(() => {
+    const types = new Set<string>();
+    for (const node of rawGraphData.nodes) {
+      types.add(node.label);
+    }
+    return Array.from(types).sort();
+  }, [rawGraphData.nodes]);
+
+  const visibleTypeCount = useMemo(() => {
+    const types = new Set<string>();
+    for (const node of graphData.nodes) {
+      types.add(node.label);
+    }
+    return types.size;
+  }, [graphData.nodes]);
+
+  const nodeTypeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const node of rawGraphData.nodes) {
+      counts[node.label] = (counts[node.label] || 0) + 1;
+    }
+    return counts;
+  }, [rawGraphData.nodes]);
+
+  const onToggleNodeType = (type: string) => {
+    setHiddenNodeTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
   };
 
-  return (
-    <div className="space-y-4">
-      {/* 视图切换按钮 */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">知识图谱</h3>
-        <div className="flex gap-2">
-          <Button
-            variant={viewMode === "list" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setViewMode("list")}
-          >
-            <List className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={viewMode === "graph" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setViewMode("graph")}
-          >
-            <Network className="h-4 w-4" />
-          </Button>
-        </div>
+  const startResizeLegend = () => {
+    resizingLegendRef.current = true;
+  };
+
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      if (!resizingLegendRef.current) return;
+      const next = Math.max(90, Math.min(event.clientX - 24, 240));
+      setLegendWidth(next);
+    };
+    const onMouseUp = () => {
+      resizingLegendRef.current = false;
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  const selectedNode = selectedNodeId ? nodeMap.get(selectedNodeId) ?? null : null;
+  const selectedNodeColor = selectedNode ? NODE_COLORS[selectedNode.label] || "#6b7280" : "#6b7280";
+
+  const relatedNodes = useMemo(() => {
+    return buildRelatedNodes({
+      selectedNodeId,
+      selectedNode,
+      links: graphData.links,
+      nodeMap,
+      relTypeLabels: REL_TYPE_LABELS,
+      nodeTypeLabels: NODE_TYPE_LABELS,
+    });
+  }, [selectedNodeId, selectedNode, graphData.links, nodeMap]);
+
+  if (!subgraph || rawGraphData.nodes.length === 0) {
+    return (
+      <div
+        className="flex items-center justify-center text-xs text-muted-foreground"
+        style={{ height }}
+      >
+        {isStreaming ? "正在检索知识图谱..." : "提问后将展示知识推理路径"}
       </div>
+    );
+  }
 
-      {/* 列表视图 */}
-      {viewMode === "list" && (
-        <div className="space-y-4">
-          {selectedElement ? (
-            <>
-              <div>
-                <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                  管控指标 ({selectedElement.controls.length})
-                </h4>
-                <div className="space-y-2">
-                  {selectedElement.controls.map((control) => (
-                    <div
-                      key={control.id}
-                      className="p-3 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 rounded-lg text-sm"
-                    >
-                      <p className="font-medium text-emerald-900 dark:text-emerald-100">{control.name}</p>
-                      <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
-                        当前: {control.currentValue}
-                        {control.unit} / 限制: {control.limitValue}
-                        {control.unit}
-                      </p>
-                    </div>
-                  ))}
+  return (
+    <div className="flex h-full min-h-0 rounded-md border border-border/50 bg-background" style={{ height }}>
+      <aside
+        className="w-[24rem] shrink-0 border-r border-border/50 bg-muted/20 grid"
+        style={{ gridTemplateColumns: `${legendWidth}px 8px minmax(0,1fr)` }}
+      >
+        <div className="graph-legend-rail h-full shrink-0 border-r border-border/50 bg-background/90 px-2 py-3">
+          <p className="text-[11px] font-medium tracking-wide text-muted-foreground mb-2">图例</p>
+          <div className="space-y-1">
+            {activeTypes.map((type) => (
+              <div key={type} className="rounded border border-border/50 px-1.5 py-1">
+                <div className="flex items-center gap-1.5 text-[10px]">
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: NODE_COLORS[type] || "#6b7280" }}
+                  />
+                  <span className="text-muted-foreground truncate">{NODE_TYPE_LABELS[type] || type}</span>
+                  <span className="ml-auto text-[10px] text-muted-foreground">{nodeTypeCounts[type] ?? 0}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-4 w-4 cursor-pointer rounded-sm border border-transparent hover:border-border/70 hover:bg-transparent hover:text-foreground focus-visible:border-border/70 focus-visible:ring-1 focus-visible:ring-primary/50 dark:hover:bg-transparent"
+                    onClick={() => onToggleNodeType(type)}
+                    aria-label={`${hiddenNodeTypes.has(type) ? "显示" : "隐藏"}${NODE_TYPE_LABELS[type] || type}`}
+                  >
+                    {hiddenNodeTypes.has(type) ? (
+                      <EyeOff className="h-3 w-3 text-muted-foreground" />
+                    ) : (
+                      <Eye className="h-3 w-3 text-muted-foreground" />
+                    )}
+                  </Button>
                 </div>
               </div>
-
-              <div>
-                <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                  知识库 ({selectedElement.knowledgeBase.length})
-                </h4>
-                <div className="space-y-2">
-                  {selectedElement.knowledgeBase.map((kb, index) => (
-                    <div
-                      key={index}
-                      className="p-3 bg-amber-50 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 rounded-lg text-sm"
-                    >
-                      <p className="text-amber-900 dark:text-amber-100">{kb}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div>
-                <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                  核心管控要素 ({defaultControls.length})
-                </h4>
-                <div className="space-y-2">
-                  {defaultControls.map((control) => (
-                    <div
-                      key={control.id}
-                      className="p-3 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 rounded-lg text-sm"
-                    >
-                      <p className="font-medium text-emerald-900 dark:text-emerald-100">{control.name}</p>
-                      <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">{control.description}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                  知识点关联 ({defaultKnowledgePoints.length})
-                </h4>
-                <div className="space-y-2">
-                  {defaultKnowledgePoints.map((point) => (
-                    <div
-                      key={point.id}
-                      className="p-3 bg-amber-50 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 rounded-lg text-sm"
-                    >
-                      <p className="font-medium text-amber-900 dark:text-amber-100">{point.name}</p>
-                      <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">{point.description}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
+            ))}
+          </div>
         </div>
-      )}
+        <div
+          className="cursor-col-resize bg-border/50 hover:bg-primary/30 transition-colors"
+          onMouseDown={startResizeLegend}
+          aria-label="调整图例宽度"
+          role="separator"
+        />
 
-      {/* 图谱视图 */}
-      {viewMode === "graph" && (
-        <div className="space-y-2">
-          <div className="h-[500px] border border-border rounded-lg bg-card overflow-hidden">
+        <div className="p-3 space-y-3 overflow-y-auto">
+          <div className="space-y-1">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground">节点信息</p>
+            {selectedNode ? (
+              <div
+                className="rounded-md border p-3 space-y-2"
+                style={{
+                  borderColor: hexToRgba(selectedNodeColor, 0.5),
+                  backgroundColor: hexToRgba(selectedNodeColor, isDark ? 0.22 : 0.12),
+                }}
+              >
+                <p className="text-sm font-semibold break-all">{selectedNode.name}</p>
+                <div className="flex flex-wrap gap-1">
+                  <Badge variant="secondary" className="text-[10px]">
+                    {NODE_TYPE_LABELS[selectedNode.label] || selectedNode.label}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px]">
+                    连接数 {selectedNode.degree}
+                  </Badge>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">点击节点查看详情</p>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground">关联节点</p>
+            <div className="space-y-1">
+              {relatedNodes.length > 0 ? (
+                relatedNodes.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSelectedNodeId(item.neighborId)}
+                    className="w-full rounded border px-2 py-1.5 text-left transition-colors"
+                    style={{
+                      borderColor: hexToRgba(NODE_COLORS[item.neighborType] || "#6b7280", 0.45),
+                      backgroundColor: hexToRgba(
+                        NODE_COLORS[item.neighborType] || "#6b7280",
+                        isDark ? 0.2 : 0.09,
+                      ),
+                    }}
+                  >
+                    <p className="text-xs font-medium truncate">{item.name}</p>
+                    <div className="relation-flow mt-1 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+                      <span className="max-w-[5.5rem] truncate">{item.fromName}</span>
+                      <span className="shrink-0">-</span>
+                      <span className="shrink-0 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[9px] text-foreground">
+                        {item.type}
+                      </span>
+                      <span className="shrink-0">-&gt;</span>
+                      <span className="min-w-0 truncate">{item.toName}</span>
+                    </div>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      {item.fromLabel} - {item.type} - {item.toLabel}
+                    </p>
+                  </button>
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground">暂无关联节点</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <div className="min-w-0 flex-1 flex flex-col">
+        <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Badge variant="outline" className="text-[10px]">节点 {graphData.nodes.length}</Badge>
+            <Badge variant="outline" className="text-[10px]">关系 {graphData.links.length}</Badge>
+            <Badge variant="outline" className="text-[10px]">类型 {visibleTypeCount}</Badge>
+          </div>
+        </div>
+        <div className="relative flex-1 min-h-0 overflow-hidden">
+          {graphData.nodes.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+              当前已隐藏全部类型，请在左侧图例点击眼睛恢复显示
+            </div>
+          ) : (
             <ForceGraph2D
+              ref={graphRef}
               graphData={graphData}
-              nodeLabel="name"
-              nodeColor={getNodeColor as any}
-              nodeRelSize={6}
-              linkColor={() => graphLinkColor}
-              linkWidth={2}
-              width={320}
-              height={500}
-              backgroundColor={graphBackground}
+              nodeLabel={(node: any) => {
+                const typeLabel = NODE_TYPE_LABELS[node.label] || node.label;
+                return `[${typeLabel}] ${node.name}`;
+              }}
+              nodeColor={(node: any) => NODE_COLORS[node.label] || "#6b7280"}
+              nodeRelSize={5}
+              linkColor={(link: any) => {
+                const sourceId = getLinkNodeId(link.source);
+                const targetId = getLinkNodeId(link.target);
+                const focusNodeId = hoveredNodeId ?? selectedNodeId;
+                if (focusNodeId && (sourceId === focusNodeId || targetId === focusNodeId)) {
+                  return layoutTuning.activeLinkColor;
+                }
+                return layoutTuning.inactiveLinkColor;
+              }}
+              linkWidth={(link: any) => {
+                const sourceId = getLinkNodeId(link.source);
+                const targetId = getLinkNodeId(link.target);
+                const focusNodeId = hoveredNodeId ?? selectedNodeId;
+                if (focusNodeId && (sourceId === focusNodeId || targetId === focusNodeId)) {
+                  return 1.0;
+                }
+                return link.type === "HIDDEN_BRIDGE" ? 0.5 : 0.35;
+              }}
+              linkDirectionalArrowLength={3.2}
+              linkDirectionalArrowRelPos={0.85}
+              height={Math.max(180, height - 40)}
+              backgroundColor={bgColor}
+              warmupTicks={graphData.nodes.length > 500 ? 60 : 0}
+              cooldownTicks={graphData.nodes.length > 500 ? 200 : 120}
+              onNodeClick={(node: any) => {
+                setSelectedNodeId(node.id);
+                if (node.x != null && node.y != null) {
+                  graphRef.current?.centerAt(node.x, node.y, 600);
+                  graphRef.current?.zoom(2.2, 600);
+                }
+              }}
+              onBackgroundClick={() => setSelectedNodeId(null)}
+              onNodeHover={(node: any) => setHoveredNodeId(node?.id ?? null)}
               nodeCanvasObject={(node: any, ctx, globalScale) => {
-                const label = node.name;
-                const fontSize = 12 / globalScale;
-                ctx.font = `${fontSize}px Sans-Serif`;
-                const textWidth = ctx.measureText(label).width;
-                const bckgDimensions = [textWidth, fontSize].map(
-                  (n) => n + fontSize * 0.4
-                );
+                const nx = node.x as number;
+                const ny = node.y as number;
+                if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
 
-                // 绘制节点圆圈
-                ctx.fillStyle = getNodeColor(node);
+                const r = node.val || 5;
+                const color = NODE_COLORS[node.label] || "#6b7280";
+                const isSelected = node.id === selectedNodeId;
+                const isHovered = node.id === hoveredNodeId;
+                const drawR = isSelected ? r + 2 : isHovered ? r + 1 : r;
+
+                // Outer glow ring for selected / hovered
+                if (isSelected || isHovered) {
+                  const gradient = ctx.createRadialGradient(
+                    nx, ny, drawR,
+                    nx, ny, drawR + 6,
+                  );
+                  gradient.addColorStop(0, hexToRgba(color, isSelected ? 0.4 : 0.25));
+                  gradient.addColorStop(1, hexToRgba(color, 0));
+                  ctx.beginPath();
+                  ctx.arc(nx, ny, drawR + 6, 0, 2 * Math.PI, false);
+                  ctx.fillStyle = gradient;
+                  ctx.fill();
+                }
+
+                // Main circle with slight gradient for depth
+                const bodyGrad = ctx.createRadialGradient(
+                  nx - drawR * 0.3, ny - drawR * 0.3, drawR * 0.1,
+                  nx, ny, drawR,
+                );
+                bodyGrad.addColorStop(0, hexToRgba(color, 1));
+                bodyGrad.addColorStop(1, hexToRgba(color, 0.7));
                 ctx.beginPath();
-                ctx.arc(node.x, node.y, node.val || 5, 0, 2 * Math.PI, false);
+                ctx.arc(nx, ny, drawR, 0, 2 * Math.PI, false);
+                ctx.fillStyle = bodyGrad;
                 ctx.fill();
 
-                // 绘制文字背景
-                ctx.fillStyle = graphLabelBackground;
-                ctx.fillRect(
-                  node.x - bckgDimensions[0] / 2,
-                  node.y - bckgDimensions[1] / 2 + (node.val || 5) + 5,
-                  bckgDimensions[0],
-                  bckgDimensions[1]
-                );
+                // Thin bright border
+                ctx.strokeStyle = isSelected
+                  ? hexToRgba(color, 0.9)
+                  : isHovered
+                    ? hexToRgba(color, 0.6)
+                    : hexToRgba(color, 0.3);
+                ctx.lineWidth = isSelected ? 1.2 : isHovered ? 0.8 : 0.3;
+                ctx.stroke();
 
-                // 绘制文字
+                const showLabel = shouldShowNodeLabel({
+                  isSelected,
+                  isHovered,
+                  degree: node.degree ?? 0,
+                  globalScale,
+                });
+                if (!showLabel) return;
+
+                // Keep node labels visible at every zoom level and keep text inside the node body.
+                const safeScale = Math.max(globalScale, 0.01);
+                const maxTextWidth = drawR * 1.55;
+                const fontSize = Math.min(drawR * 0.85, Math.max(7 / safeScale, drawR * 0.35));
+                ctx.font = `${fontSize}px sans-serif`;
+                let name = node.name;
+                // Truncate long labels to keep overlap manageable on dense graphs.
+                if (ctx.measureText(name).width > maxTextWidth) {
+                  while (name.length > 1 && ctx.measureText(name + "..").width > maxTextWidth) {
+                    name = name.slice(0, -1);
+                  }
+                  name = name + "..";
+                }
+
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                ctx.fillStyle = graphLabelColor;
-                ctx.fillText(
-                  label,
-                  node.x,
-                  node.y + (node.val || 5) + 5 + fontSize / 2
-                );
+                ctx.strokeStyle = isDark ? "rgba(15,23,42,0.8)" : "rgba(248,250,252,0.9)";
+                ctx.lineWidth = 2.2 / safeScale;
+                ctx.fillStyle = isDark ? "#f8fafc" : "#0f172a";
+                const labelY = ny;
+                ctx.strokeText(name, nx, labelY);
+                ctx.fillText(name, nx, labelY);
               }}
-              onNodeClick={(node: any) => {
-                console.log("点击节点:", node);
+              linkCanvasObjectMode={() => "after"}
+              linkCanvasObject={(link: any, ctx, globalScale) => {
+                // Only render link labels when zoomed in enough to read them
+                if (globalScale < 1.8) return;
+
+                const relLabel = REL_TYPE_LABELS[link.type] || link.type;
+                if (!relLabel) return;
+
+                const src = link.source;
+                const tgt = link.target;
+                if (src?.x == null || src?.y == null || tgt?.x == null || tgt?.y == null) return;
+
+                // Prioritize: always show labels for links connected to focused node
+                const focusNodeId = hoveredNodeId ?? selectedNodeId;
+                const srcId = getLinkNodeId(src);
+                const tgtId = getLinkNodeId(tgt);
+                const isConnectedToFocus = focusNodeId && (srcId === focusNodeId || tgtId === focusNodeId);
+                // At moderate zoom only show focused links; at high zoom show all
+                if (!isConnectedToFocus && globalScale < 3.5) return;
+
+                const fontSize = Math.min(5, Math.max(2.2, 10 / globalScale));
+
+                const midX = (src.x + tgt.x) / 2;
+                const midY = (src.y + tgt.y) / 2;
+
+                ctx.font = `${fontSize}px sans-serif`;
+                const textWidth = ctx.measureText(relLabel).width;
+                const pad = fontSize * 0.35;
+
+                // Background pill
+                ctx.fillStyle = isDark ? "rgba(15,23,42,0.75)" : "rgba(255,255,255,0.8)";
+                ctx.fillRect(
+                  midX - textWidth / 2 - pad,
+                  midY - fontSize / 2 - pad,
+                  textWidth + pad * 2,
+                  fontSize + pad * 2,
+                );
+
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillStyle = isConnectedToFocus
+                  ? (isDark ? "rgba(200,215,230,0.9)" : "rgba(30,41,59,0.85)")
+                  : (isDark ? "rgba(148,163,184,0.7)" : "rgba(71,85,105,0.65)");
+                ctx.fillText(relLabel, midX, midY);
               }}
             />
-          </div>
-
-          {/* 图例 */}
-          <div className="flex items-center gap-4 text-xs">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-blue-500" />
-              <span className="text-muted-foreground">城市要素</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-emerald-500" />
-              <span className="text-muted-foreground">管控指标</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-amber-500" />
-              <span className="text-muted-foreground">知识库</span>
-            </div>
-          </div>
-
-          <p className="text-xs text-muted-foreground">
-            提示: 可以拖拽节点、滚轮缩放、点击节点查看详情
-          </p>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

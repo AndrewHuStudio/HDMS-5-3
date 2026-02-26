@@ -11,6 +11,7 @@ from collections import OrderedDict
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+_CACHE_SCHEMA_VERSION = "v2-image-postprocess"
 
 
 class QueryCache:
@@ -30,13 +31,15 @@ class QueryCache:
         self._misses = 0
 
     @staticmethod
-    def _make_key(query: str) -> str:
-        normalized = query.strip().lower()
+    def _make_key(query: str, history_summary: str = "") -> str:
+        normalized = f"{_CACHE_SCHEMA_VERSION}||{query.strip().lower()}"
+        if history_summary:
+            normalized = f"{normalized}||{history_summary}"
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
-    def get(self, query: str) -> Optional[dict]:
+    def get(self, query: str, history_summary: str = "") -> Optional[dict]:
         """Get cached result for query. Returns None on miss or expiry."""
-        key = self._make_key(query)
+        key = self._make_key(query, history_summary)
         with self._lock:
             entry = self._cache.get(key)
             if entry is None:
@@ -54,9 +57,9 @@ class QueryCache:
             logger.debug("Query cache hit for key %s", key[:12])
             return entry["value"]
 
-    def put(self, query: str, result: dict) -> None:
+    def put(self, query: str, result: dict, history_summary: str = "") -> None:
         """Store result in cache."""
-        key = self._make_key(query)
+        key = self._make_key(query, history_summary)
         with self._lock:
             self._cache[key] = {
                 "value": result,

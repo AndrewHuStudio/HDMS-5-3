@@ -179,3 +179,383 @@
 .animate-shimmer {
   animation: shimmer 1.5s infinite;
 }
+
+
+.qa-scrollbar {
+  scrollbar-width: auto;
+  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+  scrollbar-gutter: stable;
+  /* Avoid browser scroll anchoring surprises when mounting/unmounting overlays. */
+  overflow-anchor: none;
+}
+
+.qa-scrollbar--no-gutter {
+  scrollbar-gutter: auto;
+}
+
+.qa-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.qa-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.qa-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.45);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.qa-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(71, 85, 105, 0.65);
+}
+
+.qa-input-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.qa-input-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.qa-input-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.qa-input-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.2);
+  border-radius: 999px;
+}
+
+.qa-input-scrollbar--active {
+  scrollbar-width: auto;
+  scrollbar-color: rgba(100, 116, 139, 0.5) transparent;
+}
+
+.qa-input-scrollbar--active::-webkit-scrollbar {
+  width: 8px;
+}
+
+.qa-input-scrollbar--active::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.55);
+}
+
+/* PDF viewer tooltip overflow fix */
+.pdf-lightbox-root {
+  /* Prevent wheel/touch scroll from "chaining" into the chat panel underneath. */
+  overscroll-behavior: contain;
+}
+.pdf-lightbox-root .rpv-core__tooltip-body {
+  white-space: nowrap;
+  max-width: none;
+  overflow: visible;
+}
+.pdf-lightbox-root .rpv-core__tooltip-body,
+.pdf-lightbox-root .rpv-core__popover-body {
+  z-index: 9999;
+}
+.pdf-lightbox-root .rpv-default-layout__container {
+  overflow: visible;
+}
+.pdf-lightbox-root .rpv-default-layout__toolbar {
+  overflow: visible;
+}
+
+.pdf-lightbox-root .pdf-lightbox-dialog:focus,
+.pdf-lightbox-root .pdf-lightbox-dialog:focus-visible {
+  outline: none !important;
+}
+
+/* PDF viewer scrollbars (react-pdf-viewer) */
+.rpv-default-layout__body,
+.rpv-core__inner-pages,
+.rpv-core__inner-page-container--single {
+  scrollbar-width: auto;
+  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+}
+
+.rpv-default-layout__body::-webkit-scrollbar,
+.rpv-core__inner-pages::-webkit-scrollbar,
+.rpv-core__inner-page-container--single::-webkit-scrollbar {
+  width: 10px;
+}
+
+.rpv-default-layout__body::-webkit-scrollbar-track,
+.rpv-core__inner-pages::-webkit-scrollbar-track,
+.rpv-core__inner-page-container--single::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.rpv-default-layout__body::-webkit-scrollbar-thumb,
+.rpv-core__inner-pages::-webkit-scrollbar-thumb,
+.rpv-core__inner-page-container--single::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.45);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.rpv-default-layout__body::-webkit-scrollbar-thumb:hover,
+.rpv-core__inner-pages::-webkit-scrollbar-thumb:hover,
+.rpv-core__inner-page-container--single::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(71, 85, 105, 0.65);
+}
+
+
+@keyframes qa-inline-dot-pulse {
+  0%, 80%, 100% {
+    transform: translateY(0) scale(0.88);
+    opacity: 0.26;
+  }
+  40% {
+    transform: translateY(-1px) scale(1);
+    opacity: 1;
+  }
+}
+
+.qa-inline-dot {
+  width: 0.32rem;
+  height: 0.32rem;
+  border-radius: 999px;
+  background-color: color-mix(in oklab, var(--primary) 64%, var(--foreground) 36%);
+  animation: qa-inline-dot-pulse 1.15s ease-in-out infinite;
+}
+
+.qa-inline-dot--1 {
+  animation-delay: 0ms;
+}
+
+.qa-inline-dot--2 {
+  animation-delay: 150ms;
+}
+
+.qa-inline-dot--3 {
+  animation-delay: 300ms;
+}
+
+.qa-thinking-ellipsis-dot {
+  display: inline-block;
+  width: 0.34rem;
+  height: 0.34rem;
+  border-radius: 999px;
+  background-color: color-mix(in oklab, var(--primary) 64%, var(--foreground) 36%);
+  animation: qa-inline-dot-pulse 1.15s ease-in-out infinite;
+}
+
+.qa-thinking-ellipsis-dot--1 {
+  animation-delay: 0ms;
+}
+
+.qa-thinking-ellipsis-dot--2 {
+  animation-delay: 150ms;
+}
+
+.qa-thinking-ellipsis-dot--3 {
+  animation-delay: 300ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qa-inline-dot {
+    animation: none;
+  }
+  .qa-thinking-ellipsis-dot {
+    animation: none;
+  }
+}
+
+/* Source card flash animation for citation clicks */
+@keyframes qa-source-flash-anim {
+  0% {
+    box-shadow: 0 0 0 0 oklch(0.45 0.15 250 / 0.5);
+  }
+  30% {
+    box-shadow: 0 0 0 4px oklch(0.45 0.15 250 / 0.3);
+  }
+  100% {
+    box-shadow: 0 0 0 0 oklch(0.45 0.15 250 / 0);
+  }
+}
+
+.qa-source-flash {
+  animation: qa-source-flash-anim 1.2s ease-out;
+}
+
+/* Disable Radix Collapsible height animation to prevent scroll ghost-space */
+[data-slot="collapsible-content"][data-state="open"],
+[data-slot="collapsible-content"][data-state="closed"] {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Style HTML tables inside chunk markdown (OCR outputs raw <table> tags) */
+.chunk-markdown {
+  overflow-x: auto;
+}
+
+/* QA markdown heading hierarchy - visual distinction */
+.qa-markdown h2.qa-heading-1 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--primary);
+  border-left: 4px solid var(--primary);
+  padding-left: 0.625rem;
+  margin-top: 1.75rem;
+  margin-bottom: 0.875rem;
+  letter-spacing: 0.01em;
+}
+
+.qa-markdown h3.qa-heading-2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--primary) 85%, var(--foreground) 15%);
+  margin-top: 1.5rem;
+  margin-bottom: 0.625rem;
+}
+
+.qa-markdown h4.qa-heading-3 {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: color-mix(in oklab, var(--foreground) 75%, var(--muted-foreground) 25%);
+  margin-top: 1.125rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Improve QA body readability: loosen text line spacing. */
+.qa-markdown p,
+.qa-markdown li {
+  line-height: 1.75;
+}
+
+/* QA markdown images: ensure clear separation from surrounding text */
+.qa-markdown img {
+  display: block;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Ensure paragraphs after images have top breathing room */
+.qa-markdown img + p,
+.qa-markdown img + div {
+  margin-top: 0.25rem;
+}
+
+/* QA markdown table readability on gray chat cards */
+.qa-markdown .qa-table-wrap {
+  background: color-mix(in oklab, white 92%, var(--background) 8%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.dark .qa-markdown .qa-table-wrap {
+  background: color-mix(in oklab, var(--background) 88%, white 12%);
+  box-shadow: none;
+}
+
+/* Some LLM outputs emit an extra horizontal rule right after markdown tables. */
+.qa-markdown .qa-table-wrap + hr {
+  display: none;
+}
+
+/* Keep long display formulas inside chat cards instead of stretching the message width. */
+.qa-markdown .katex-display,
+.chunk-markdown .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0.75rem 0;
+  padding: 0.625rem 0.75rem;
+  background: color-mix(in oklab, var(--muted) 45%, transparent);
+  border-radius: 0.375rem;
+  /* Visible scrollbar for long formulas */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--primary) 35%, var(--border) 65%) transparent;
+}
+
+/* Webkit scrollbar styling for formula containers */
+.qa-markdown .katex-display::-webkit-scrollbar,
+.chunk-markdown .katex-display::-webkit-scrollbar {
+  height: 6px;
+}
+
+.qa-markdown .katex-display::-webkit-scrollbar-track,
+.chunk-markdown .katex-display::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.qa-markdown .katex-display::-webkit-scrollbar-thumb,
+.chunk-markdown .katex-display::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--primary) 30%, var(--border) 70%);
+  border-radius: 3px;
+}
+
+.qa-markdown .katex-display::-webkit-scrollbar-thumb:hover,
+.chunk-markdown .katex-display::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--primary) 50%, var(--border) 50%);
+}
+
+/* Fade hint on overflowing formula containers — subtle gradient at right edge */
+.qa-markdown .katex-display.katex-overflow,
+.chunk-markdown .katex-display.katex-overflow {
+  mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+}
+
+.qa-markdown .katex-display.katex-overflow:hover,
+.chunk-markdown .katex-display.katex-overflow:hover,
+.qa-markdown .katex-display.katex-overflow:focus-within,
+.chunk-markdown .katex-display.katex-overflow:focus-within {
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
+.qa-markdown .katex-display > .katex,
+.chunk-markdown .katex-display > .katex {
+  display: inline-block;
+  min-width: max-content;
+}
+
+/* Inline KaTeX: subtle visual lift */
+.qa-markdown .katex:not(.katex-display .katex) {
+  padding: 0 0.15em;
+  font-size: 0.97em;
+}
+
+.chunk-markdown table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  margin: 4px 0;
+}
+
+.chunk-markdown th,
+.chunk-markdown td {
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.chunk-markdown th {
+  background-color: var(--muted);
+  font-weight: 600;
+}
+
+.chunk-markdown tr:first-child td {
+  font-weight: 600;
+  background-color: color-mix(in oklab, var(--muted) 50%, transparent);
+}
+
+/* PDF search highlights (react-pdf-viewer/search) */
+.rpv-search__highlight {
+  background: rgba(96, 165, 250, 0.28) !important;
+  box-shadow: none !important;
+}
+
+.rpv-search__highlight--current {
+  background: rgba(96, 165, 250, 0.4) !important;
+}
+

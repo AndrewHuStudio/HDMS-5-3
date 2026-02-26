@@ -51,6 +51,8 @@ if _DB_INIT_ASYNC_ENV:
 else:
     DB_INIT_ASYNC = APP_ENV == "development"
 DB_INIT_ON_STARTUP = os.getenv("DB_INIT_ON_STARTUP", "1").strip().lower() in {"1", "true", "yes"}
+DB_INIT_MAX_RETRIES = int(os.getenv("DB_INIT_MAX_RETRIES", "10"))
+DB_INIT_RETRY_DELAY_SECONDS = float(os.getenv("DB_INIT_RETRY_DELAY_SECONDS", "2"))
 
 DEFAULT_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,http://172.20.16.1:3000"
 CORS_ORIGINS = [

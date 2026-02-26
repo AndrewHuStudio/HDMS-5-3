@@ -1,119 +1,397 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import type { KeyboardEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send } from "lucide-react";
+import { ChevronDown, ChevronUp, ImagePlus, Send, Square, X } from "lucide-react";
 import { ThinkingProcess } from "@/components/qa-thinking";
-import { QASources } from "@/components/qa-sources";
-import { QARetrievalStats } from "@/components/qa-retrieval-stats";
 import { QAFeedback } from "@/components/qa-feedback";
 import { QAExportButton } from "@/components/qa-export-button";
+import { KnowledgeGraph } from "@/components/knowledge-graph";
 import type { ChatMessage } from "@/features/qa/types";
+import { cn } from "@/lib/utils";
+import { buildAnswerMarkdown } from "@/features/qa/render/answer-markdown-pipeline";
+import {
+  buildAssistantRenderModel,
+  deriveAssistantRenderState,
+  resolveAnswerRenderPhase,
+} from "@/features/qa/render/assistant-render-state-machine";
+import { QAMarkdownRenderer } from "./qa-markdown-renderer";
+import { useCitationState, QACitationSourcePanel } from "./qa-citation-source-panel";
 
 interface QAShellProps {
   title?: string;
   subtitle?: string;
+  embedded?: boolean;
   messages: ChatMessage[];
   input: string;
   isSending?: boolean;
   quickQuestions?: string[];
   onInputChange: (value: string) => void;
   onSend: (question?: string) => void;
+  onStop?: () => void;
   onFeedback?: (messageId: string, feedback: "useful" | "not_useful") => void;
 }
 
+interface PendingUploadImage {
+  id: string;
+  name: string;
+  previewUrl: string;
+}
+
+/** Lightweight image lightbox state */
+function useImageLightbox() {
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const open = useCallback((src: string) => setLightboxSrc(src), []);
+  const close = useCallback(() => setLightboxSrc(null), []);
+  return { lightboxSrc, open, close };
+}
+
+/** Extract recommended questions from <!--RECOMMENDED_QUESTIONS ... --> block */
+function extractRecommendedQuestions(content: string): {
+  cleanContent: string;
+  questions: string[];
+} {
+  const pattern = /<!--RECOMMENDED_QUESTIONS\s*\n([\s\S]*?)-->/;
+  const match = content.match(pattern);
+  if (!match) return { cleanContent: content, questions: [] };
+
+  const questions = match[1]
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const cleanContent = content.replace(pattern, "").trimEnd();
+  return { cleanContent, questions };
+}
+
+const INPUT_MIN_LINES = 1;
+const INPUT_MAX_LINES = 3;
+const INPUT_LINE_HEIGHT_PX = 22;
+const INPUT_VERTICAL_PADDING_PX = 22; // py-[11px] top + bottom
+const MIN_TEXTAREA_HEIGHT = INPUT_MIN_LINES * INPUT_LINE_HEIGHT_PX + INPUT_VERTICAL_PADDING_PX;
+const MAX_TEXTAREA_HEIGHT = INPUT_MAX_LINES * INPUT_LINE_HEIGHT_PX + INPUT_VERTICAL_PADDING_PX;
+const INPUT_SCROLLBAR_ACTIVE_MS = 260;
+const MAX_PENDING_UPLOAD_IMAGES = 4;
+const UPLOADED_IMAGE_HINT_PREFIX = "已上传图片：";
+const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+
 export function QAShell({
-  title = "HDMS 问答",
-  subtitle = "基于上传资料的智能问答",
+  title = "HDMS 城市设计问答",
+  subtitle = "基于课题知识库的智能问答",
+  embedded = false,
   messages,
   input,
   isSending = false,
   quickQuestions = [],
   onInputChange,
   onSend,
+  onStop,
   onFeedback,
 }: QAShellProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const inputScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingImagesRef = useRef<PendingUploadImage[]>([]);
+  const userScrolledUpRef = useRef(false);
+  const programmaticScrollRef = useRef(false);
+  const { lightboxSrc, open: openLightbox, close: closeLightbox } = useImageLightbox();
+  const [pendingImages, setPendingImages] = useState<PendingUploadImage[]>([]);
+  const [isInputScrollbarActive, setIsInputScrollbarActive] = useState(false);
+  const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(0);
+  const [backScrollPos, setBackScrollPos] = useState<number | null>(null);
+
+  // Detect if user has scrolled away from the bottom
+  const syncScrollPositionState = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) {
+      userScrolledUpRef.current = false;
+      setShowJumpToBottom(false);
+      return;
+    }
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const isAwayFromBottom = distanceFromBottom > SCROLL_BOTTOM_THRESHOLD_PX;
+    userScrolledUpRef.current = isAwayFromBottom;
+    setShowJumpToBottom(isAwayFromBottom);
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    syncScrollPositionState();
+    // Only dismiss back-to-citation button on user-initiated scroll
+    if (!programmaticScrollRef.current) {
+      setBackScrollPos(null);
+    }
+  }, [syncScrollPositionState]);
+
+  const handleJumpToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    userScrolledUpRef.current = false;
+    setShowJumpToBottom(false);
+  }, []);
+
+  const handleCitationJump = useCallback((savedScrollTop: number) => {
+    programmaticScrollRef.current = true;
+    setBackScrollPos(savedScrollTop);
+    // Clear the flag after smooth scroll settles (~600ms)
+    setTimeout(() => { programmaticScrollRef.current = false; }, 600);
+  }, []);
+
+  const handleBackToCitation = useCallback(() => {
+    const el = scrollRef.current;
+    if (el === null || backScrollPos === null) return;
+    el.scrollTo({ top: backScrollPos, behavior: "smooth" });
+    setBackScrollPos(null);
+  }, [backScrollPos]);
+
+  // When a new user message is sent, reset scroll lock so we follow the response
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role === "user") {
+      userScrolledUpRef.current = false;
+      setShowJumpToBottom(false);
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      });
+    }
+  }, [messages.length]);
 
   useEffect(() => {
-    if (!scrollRef.current) return;
+    if (!scrollRef.current || userScrolledUpRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    setShowJumpToBottom(false);
   }, [messages, isSending]);
 
-  const canSend = !isSending && input.trim().length > 0;
+  useEffect(() => {
+    syncScrollPositionState();
+  }, [messages.length, isSending, syncScrollPositionState]);
+
+  // Auto-resize textarea based on content, up to MAX_TEXTAREA_HEIGHT
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const nextHeight = Math.max(
+      MIN_TEXTAREA_HEIGHT,
+      Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)
+    );
+    el.style.height = `${nextHeight}px`;
+  }, [input, pendingImages.length]);
+
+  useEffect(() => {
+    pendingImagesRef.current = pendingImages;
+  }, [pendingImages]);
+
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+
+    const syncHeight = () => setComposerHeight(el.offsetHeight);
+    syncHeight();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => syncHeight());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (inputScrollTimerRef.current) {
+        clearTimeout(inputScrollTimerRef.current);
+      }
+      pendingImagesRef.current.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    };
+  }, []);
+
+  const clearPendingImages = useCallback(() => {
+    setPendingImages((prev) => {
+      prev.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+      return [];
+    });
+  }, []);
+
+  const buildOutgoingQuestion = useCallback(() => {
+    const text = input.trim();
+    if (pendingImages.length === 0) return text;
+    const uploadedHint = `${UPLOADED_IMAGE_HINT_PREFIX}${pendingImages.map((img) => img.name).join("、")}`;
+    return text ? `${text}\n\n${uploadedHint}` : uploadedHint;
+  }, [input, pendingImages]);
+
+  const hasPendingImages = pendingImages.length > 0;
+  const canSend = !isSending && (input.trim().length > 0 || pendingImages.length > 0);
+
+  const handleSendFromComposer = useCallback(() => {
+    const question = buildOutgoingQuestion();
+    if (!question) return;
+    onSend(question);
+    clearPendingImages();
+  }, [buildOutgoingQuestion, clearPendingImages, onSend]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       if (canSend) {
-        onSend();
+        handleSendFromComposer();
       }
     }
   };
 
-  return (
-    <div className="flex h-screen w-full flex-col bg-background text-foreground">
-      <header className="flex items-center justify-between border-b border-border bg-card px-6 py-4">
-        <div>
-          <h1 className="text-lg font-semibold">{title}</h1>
-          <p className="text-xs text-muted-foreground">{subtitle}</p>
-        </div>
-        <QAExportButton messages={messages} disabled={isSending} />
-      </header>
+  const handleInputScroll = useCallback(() => {
+    setIsInputScrollbarActive(true);
+    if (inputScrollTimerRef.current) {
+      clearTimeout(inputScrollTimerRef.current);
+    }
+    inputScrollTimerRef.current = setTimeout(() => {
+      setIsInputScrollbarActive(false);
+      inputScrollTimerRef.current = null;
+    }, INPUT_SCROLLBAR_ACTIVE_MS);
+  }, []);
 
-      <div className="flex-1 overflow-y-auto px-6 py-4" ref={scrollRef}>
-        <div className="space-y-4">
-          {messages.map((message, idx) => {
-            let precedingQuestion: string | undefined;
-            if (message.role === "assistant") {
-              for (let i = idx - 1; i >= 0; i--) {
-                if (messages[i].role === "user") {
-                  precedingQuestion = messages[i].content;
-                  break;
+  const handleImageUploadChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files ?? []).filter((file) => file.type.startsWith("image/"));
+    if (selectedFiles.length === 0) {
+      event.target.value = "";
+      return;
+    }
+
+    setPendingImages((prev) => {
+      const remainingSlots = Math.max(0, MAX_PENDING_UPLOAD_IMAGES - prev.length);
+      if (remainingSlots === 0) return prev;
+      const additions = selectedFiles.slice(0, remainingSlots).map((file) => ({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: file.name,
+        previewUrl: URL.createObjectURL(file),
+      }));
+      return [...prev, ...additions];
+    });
+
+    event.target.value = "";
+  }, []);
+
+  const handleRemovePendingImage = useCallback((id: string) => {
+    setPendingImages((prev) => {
+      const target = prev.find((img) => img.id === id);
+      if (target) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((img) => img.id !== id);
+    });
+  }, []);
+
+  const handleOpenImageUpload = useCallback(() => {
+    imageInputRef.current?.click();
+  }, []);
+
+  const handlePrimaryAction = useCallback(() => {
+    if (isSending) {
+      onStop?.();
+      return;
+    }
+    if (!canSend) return;
+    handleSendFromComposer();
+  }, [canSend, handleSendFromComposer, isSending, onStop]);
+
+  // Only show quick questions before the user has sent any message
+  const hasUserMessage = messages.some((m) => m.role === "user");
+  const showQuickQuestions = !hasUserMessage && quickQuestions.length > 0;
+
+  return (
+    <div
+      className={cn(
+        "relative flex min-h-0 w-full flex-col overflow-hidden bg-white text-foreground dark:bg-background",
+        embedded ? "h-full flex-1" : "h-screen"
+      )}
+    >
+      {!embedded && (
+        <header className="flex items-center justify-between border-b border-border bg-card px-6 py-4">
+          <div>
+            <h1 className="text-lg font-semibold">{title}</h1>
+            <p className="text-xs text-muted-foreground">{subtitle}</p>
+          </div>
+          <QAExportButton messages={messages} disabled={isSending} />
+        </header>
+      )}
+
+      <div className="relative flex-1 min-h-0">
+        {backScrollPos !== null && (
+          <button
+            type="button"
+            className="absolute left-1/2 top-3 z-30 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border/70 bg-white/95 px-3 py-1.5 text-xs text-muted-foreground shadow-sm transition-colors hover:bg-white hover:text-foreground dark:bg-card/95 dark:hover:bg-card"
+            onClick={handleBackToCitation}
+            aria-label="返回引用位置"
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+            返回引用位置
+          </button>
+        )}
+        <div className="qa-scrollbar h-full overflow-x-hidden overflow-y-auto bg-white px-6 py-4 dark:bg-background" ref={scrollRef} onScroll={handleScroll}>
+          <div className="space-y-4">
+            {messages.map((message, idx) => {
+              let precedingQuestion: string | undefined;
+              if (message.role === "assistant") {
+                for (let i = idx - 1; i >= 0; i--) {
+                  if (messages[i].role === "user") {
+                    precedingQuestion = messages[i].content;
+                    break;
+                  }
                 }
               }
-            }
 
-            return (
-              <div
-                key={message.id}
-                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-              >
+              const assistantCard = message.role === "assistant";
+
+              return (
                 <div
-                  className={`max-w-[80%] rounded-lg px-4 py-2 text-sm leading-relaxed ${
-                    message.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-foreground"
-                  }`}
+                  key={message.id}
+                  className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}
                 >
-                  {message.role === "assistant" ? (
-                    <AssistantContent
-                      message={message}
-                      precedingQuestion={precedingQuestion}
-                      onFeedback={onFeedback}
-                    />
-                  ) : (
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                  <div
+                  className={cn(
+                    "rounded-lg px-4 py-2 text-sm leading-relaxed",
+                    message.role === "user"
+                      ? "max-w-[80%] bg-primary text-primary-foreground"
+                      : "w-full max-w-[min(1100px,95%)] border border-border/60 bg-white text-foreground dark:bg-card"
                   )}
-                  <p
-                    className={`mt-1 text-[11px] ${
-                      message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
-                    }`}
-                  >
-                    {message.createdAt}
-                  </p>
+                >
+                    {assistantCard ? (
+                      <AssistantContent
+                        message={message}
+                        embedded={embedded}
+                        precedingQuestion={precedingQuestion}
+                        onFeedback={onFeedback}
+                        onSend={onSend}
+                        onFillInput={onInputChange}
+                        onImageClick={openLightbox}
+                        onCitationJump={handleCitationJump}
+                      />
+                    ) : (
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                    )}
+                    <p
+                      className={cn(
+                        "mt-1 text-[11px]",
+                        message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
+                      )}
+                    >
+                      {message.createdAt}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {quickQuestions.length > 0 && (
+      {showQuickQuestions && (
         <div className="border-t border-border bg-card px-6 py-3">
           <div className="flex flex-wrap gap-2">
             {quickQuestions.map((question) => (
@@ -122,7 +400,7 @@ export function QAShell({
                 variant="secondary"
                 size="sm"
                 className="text-xs"
-                onClick={() => onSend(question)}
+                onClick={() => onInputChange(question)}
                 disabled={isSending}
               >
                 {question}
@@ -132,133 +410,278 @@ export function QAShell({
         </div>
       )}
 
-      <div className="border-t border-border bg-card px-6 py-4">
-        <div className="flex gap-3">
+      {showJumpToBottom && (
+        <button
+          type="button"
+          className="absolute left-1/2 z-30 inline-flex -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-white/95 p-0 text-muted-foreground shadow-sm transition-colors hover:bg-white hover:text-foreground"
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: "9999px",
+            bottom: `${Math.max(composerHeight + 12, 80)}px`,
+          }}
+          onClick={handleJumpToBottom}
+          aria-label="回到底部"
+          title="回到底部"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
+      )}
+
+      <div ref={composerRef} className="relative bg-white px-6 pb-4 pt-2 dark:bg-background">
+        <div
+          className={cn(
+            "relative rounded-2xl border bg-white transition-[border-color,box-shadow] dark:bg-card",
+            isComposerFocused || input.trim().length > 0 || pendingImages.length > 0
+              ? "border-primary/55 shadow-[0_0_0_1px_rgba(59,130,246,0.2),0_0_16px_rgba(59,130,246,0.16)] dark:shadow-[0_0_0_1px_rgba(96,165,250,0.35),0_0_18px_rgba(96,165,250,0.2)]"
+              : "border-border/70"
+          )}
+        >
+          {pendingImages.length > 0 && (
+            <div className="flex flex-wrap gap-2 border-b border-border/70 px-3 py-2">
+              {pendingImages.map((img) => (
+                <div key={img.id} className="relative h-12 w-12 overflow-hidden rounded-md border border-border/70">
+                  <img src={img.previewUrl} alt={img.name} className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    className="absolute right-0 top-0 inline-flex h-4 w-4 items-center justify-center rounded-bl bg-black/65 text-white"
+                    onClick={() => handleRemovePendingImage(img.id)}
+                    aria-label={`移除 ${img.name}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <Textarea
+            ref={textareaRef}
             value={input}
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入你的问题，按 Enter 发送，Shift+Enter 换行"
-            className="min-h-[56px] resize-none"
+            onScroll={handleInputScroll}
+            onFocus={() => setIsComposerFocused(true)}
+            onBlur={() => setIsComposerFocused(false)}
+            placeholder="有什么我能帮你的吗？"
+            className={cn(
+              "min-h-[44px] max-h-[82px] resize-none overflow-y-auto border-0 bg-transparent py-[11px] pr-[88px] leading-[22px] shadow-none focus-visible:ring-0",
+              "qa-input-scrollbar",
+              isInputScrollbarActive && "qa-input-scrollbar--active"
+            )}
+            rows={1}
           />
-          <Button
-            onClick={() => onSend()}
-            disabled={!canSend}
-            className="h-[56px] px-4"
-          >
-            <Send className="mr-2 h-4 w-4" />
-            {isSending ? "发送中" : "发送"}
-          </Button>
+
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handleImageUploadChange}
+          />
+
+          <div className="pointer-events-none absolute bottom-2 right-2 flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "pointer-events-auto h-8 w-8 cursor-pointer border text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed",
+                hasPendingImages
+                  ? "rounded-md border-border bg-muted/60 text-foreground hover:bg-muted/80"
+                  : "rounded-full border-transparent hover:bg-muted/60"
+              )}
+              onClick={handleOpenImageUpload}
+              disabled={isSending || pendingImages.length >= MAX_PENDING_UPLOAD_IMAGES}
+              title={pendingImages.length >= MAX_PENDING_UPLOAD_IMAGES ? `最多上传 ${MAX_PENDING_UPLOAD_IMAGES} 张图片` : "上传图片"}
+            >
+              <ImagePlus className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "pointer-events-auto h-8 w-8 cursor-pointer rounded-lg border-0 text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary disabled:cursor-not-allowed"
+              )}
+              onClick={handlePrimaryAction}
+              disabled={isSending ? !onStop : !canSend}
+              title={isSending ? "中止生成" : "发送"}
+            >
+              {isSending ? <Square className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
         </div>
       </div>
+
+      {/* Image lightbox */}
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={closeLightbox}
+        >
+          <img
+            src={lightboxSrc}
+            alt="放大查看"
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-/** Renders assistant message with thinking, retrieval stats, markdown, citations, sources, and feedback. */
+/** Renders assistant message: orchestrates markdown renderer, citation/source panel, thinking, graph, feedback. */
 function AssistantContent({
   message,
+  embedded,
   precedingQuestion,
   onFeedback,
+  onSend,
+  onFillInput,
+  onImageClick,
+  onCitationJump,
+  scrollRef,
 }: {
   message: ChatMessage;
+  embedded?: boolean;
   precedingQuestion?: string;
   onFeedback?: (messageId: string, feedback: "useful" | "not_useful") => void;
+  onSend?: (question?: string) => void;
+  onFillInput?: (value: string) => void;
+  onImageClick?: (src: string) => void;
+  onCitationJump?: (savedScrollTop: number) => void;
+  scrollRef?: React.RefObject<HTMLElement | null>;
 }) {
-  const { content, thinking, sources, retrievalStats, feedback, isStreaming } = message;
+  const {
+    content,
+    thinking,
+    sources,
+    retrievalStats,
+    feedback,
+    isStreaming,
+    thinkingDone,
+    finalizedByServer,
+  } = message;
+
+  // --- Citation state (isolated module) ---
+  const {
+    sourcesNormalized,
+    handleCitationSelect,
+    citationAnchorComponent,
+  } = useCitationState({ sources, messageId: message.id, scrollRef, onCitationJump });
+
+  // --- Render state derivation ---
+  const renderState = deriveAssistantRenderState(message);
+  const answerRenderPhase = resolveAnswerRenderPhase({
+    state: renderState,
+    isStreaming: Boolean(isStreaming),
+  });
+
+  const { cleanContent, questions: recommendedQuestions } = useMemo(
+    () => (isStreaming ? { cleanContent: content, questions: [] } : extractRecommendedQuestions(content)),
+    [content, isStreaming]
+  );
+
+  const answerMarkdown = useMemo(() => {
+    return buildAnswerMarkdown({
+      content: cleanContent,
+      sources: sourcesNormalized,
+      isStreaming: Boolean(isStreaming),
+      renderPhase: answerRenderPhase,
+      precedingQuestion,
+      finalizedByServer,
+    });
+  }, [cleanContent, sourcesNormalized, isStreaming, answerRenderPhase, precedingQuestion, finalizedByServer]);
+
+  const hasThinkingTokens = Boolean((thinking || "").trim());
+  const renderModel = buildAssistantRenderModel({
+    state: renderState,
+    isStreaming: Boolean(isStreaming),
+    hasThinking: hasThinkingTokens,
+    hasAnswer: Boolean(content),
+    hasRetrievalStats: Boolean(retrievalStats),
+  });
+
+  const hasSourcePanel = Boolean(sourcesNormalized && sourcesNormalized.length > 0 && !isStreaming);
+  const useSidebarSourceLayout = hasSourcePanel && !embedded;
 
   return (
     <div>
-      {/* Thinking process (collapsible) */}
-      {thinking && (
-        <ThinkingProcess thinking={thinking} isStreaming={!!isStreaming} />
+      {renderModel.showThinking && (
+        <ThinkingProcess
+          thinking={thinking || ""}
+          isStreaming={!!isStreaming}
+          thinkingDone={!!thinkingDone}
+        />
       )}
 
-      {/* Retrieval stats (collapsible) */}
-      {retrievalStats && (
-        <QARetrievalStats stats={retrievalStats} isStreaming={!!isStreaming} />
+      {/* Knowledge Graph Visualization */}
+      {message.subgraph && message.subgraph.nodes.length > 0 && (
+        <details className="my-2" open={!isStreaming}>
+          <summary className="cursor-pointer select-none text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+            知识图谱推理路径 ({message.subgraph.nodes.length} 个节点, {message.subgraph.edges.length} 条关系)
+          </summary>
+          <div className="mt-1 rounded-lg border border-border overflow-hidden">
+            <KnowledgeGraph
+              subgraph={message.subgraph}
+              isStreaming={!!isStreaming}
+              height={300}
+            />
+          </div>
+        </details>
       )}
 
-      {/* Main answer with markdown */}
-      {content ? (
-        <div className="qa-markdown prose prose-sm dark:prose-invert max-w-none">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-              ul: ({ children }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
-              ol: ({ children }) => <ol className="mb-2 list-decimal pl-5">{children}</ol>,
-              li: ({ children }) => <li className="mb-1 last:mb-0">{children}</li>,
-              strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-              em: ({ children }) => <em className="italic">{children}</em>,
-              code: ({ children, className }) => {
-                const isBlock = className?.includes("language-");
-                return isBlock ? (
-                  <code className={`${className ?? ""} block overflow-x-auto rounded bg-muted p-2 text-xs`}>
-                    {children}
-                  </code>
-                ) : (
-                  <code className="rounded bg-muted px-1 py-0.5 text-xs">{children}</code>
-                );
-              },
-              pre: ({ children }) => <pre className="mb-2 overflow-x-auto">{children}</pre>,
-              blockquote: ({ children }) => (
-                <blockquote className="border-l-2 border-border pl-3 italic text-muted-foreground">
-                  {children}
-                </blockquote>
-              ),
-              table: ({ children }) => (
-                <div className="mb-2 overflow-x-auto">
-                  <table className="min-w-full border-collapse text-xs">{children}</table>
-                </div>
-              ),
-              th: ({ children }) => (
-                <th className="border border-border bg-muted px-2 py-1 text-left font-semibold">
-                  {children}
-                </th>
-              ),
-              td: ({ children }) => (
-                <td className="border border-border px-2 py-1">{children}</td>
-              ),
-              // Render citation links [1] as clickable anchors
-              a: ({ href, children }) => {
-                // Check if it's a citation anchor like #source-1
-                if (href?.startsWith("#source-")) {
-                  return (
-                    <a
-                      href={href}
-                      className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded bg-primary/10 px-0.5 text-[10px] font-semibold text-primary no-underline hover:bg-primary/20"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        const el = document.getElementById(href.slice(1));
-                        el?.scrollIntoView({ behavior: "smooth", block: "center" });
-                      }}
-                    >
-                      {children}
-                    </a>
-                  );
-                }
-                return <a href={href} className="text-primary underline">{children}</a>;
-              },
-            }}
-          >
-            {content}
-          </ReactMarkdown>
-          {/* Streaming cursor */}
-          {isStreaming && (
-            <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-foreground" />
+      {renderModel.showAnswer && content ? (
+        <div
+          className={cn(
+            useSidebarSourceLayout && "mt-1 grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]"
+          )}
+        >
+          {/* Markdown rendering (isolated module) */}
+          <QAMarkdownRenderer
+            markdown={answerMarkdown}
+            componentOverrides={{ a: citationAnchorComponent }}
+            showStreamingCursor={renderModel.showStreamingCursor}
+            onImageClick={onImageClick}
+          />
+
+          {/* Citation source panel (isolated module) */}
+          {hasSourcePanel && (
+            <QACitationSourcePanel
+              sources={sourcesNormalized}
+              messageId={message.id}
+              query={precedingQuestion}
+              onCitationSelect={handleCitationSelect}
+              layout={useSidebarSourceLayout ? "sidebar" : "inline"}
+            />
           )}
         </div>
-      ) : isStreaming ? (
+      ) : renderModel.showStreamingCursor ? (
         <span className="inline-block h-4 w-0.5 animate-pulse bg-foreground" />
       ) : null}
 
-      {/* Source citations */}
-      {sources && sources.length > 0 && !isStreaming && (
-        <QASources sources={sources} query={precedingQuestion} />
+      {/* Recommended questions */}
+      {!isStreaming && recommendedQuestions.length > 0 && (
+        <div className="mt-3 pt-2">
+          <p className="mb-1.5 text-xs text-muted-foreground">您可能还想了解：</p>
+          <div className="flex flex-wrap gap-1.5">
+            {recommendedQuestions.map((q) => (
+              <button
+                key={q}
+                type="button"
+                className="rounded-md border border-border/50 bg-card/80 px-3 py-1 text-xs text-muted-foreground shadow-sm transition-all hover:border-primary/40 hover:text-foreground hover:shadow"
+                onClick={() => onFillInput?.(q)}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
-      {/* Feedback buttons */}
       {content && !isStreaming && onFeedback && precedingQuestion && (
         <QAFeedback
           messageId={message.id}

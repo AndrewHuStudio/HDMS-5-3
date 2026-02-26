@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { resolveApiBase } from "@/lib/api-base";
 import type { SetbackViolationResult } from "@/lib/setback-violation-types";
 
 interface SetbackCheckPanelProps {
@@ -27,7 +27,6 @@ export function SetbackCheckPanel({
   showHighlights,
   onShowHighlightsChange,
 }: SetbackCheckPanelProps) {
-  const apiBase = normalizeApiBase(API_BASE);
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SetbackViolationResult | null>(null);
@@ -59,6 +58,7 @@ export function SetbackCheckPanel({
 
     const formData = new FormData();
     formData.append("file", modelFile);
+    const apiBase = await resolveApiBase();
 
     const uploadResponse = await fetch(`${apiBase}/models/import?skip_layers=true`, {
       method: "POST",
@@ -88,6 +88,7 @@ export function SetbackCheckPanel({
 
       const resolvedModelPath = await resolveModelPath();
       if (!resolvedModelPath) return;
+      const apiBase = await resolveApiBase();
 
       const response = await fetch(`${apiBase}/setback-check`, {
         method: "POST",
@@ -119,6 +120,7 @@ export function SetbackCheckPanel({
     } catch (err) {
       console.error("退线检测失败:", err);
       if (err instanceof TypeError && err.message.includes("Failed to fetch")) {
+        const apiBase = await resolveApiBase({ forceRefresh: true });
         setError(`无法连接后端服务，请确认后端已启动（${apiBase}）`);
       } else {
         setError(err instanceof Error ? err.message : "未知错误");

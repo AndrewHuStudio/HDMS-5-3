@@ -8,7 +8,7 @@ import { Slider } from "@/components/ui/slider";
 import { AlertCircle, Navigation, Trash2, Eye, CheckCircle2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { resolveApiBase } from "@/lib/api-base";
 import type {
   SightCorridorResult,
   SightCorridorPosition,
@@ -76,7 +76,6 @@ export function SightCorridorPanel({
   showBlockingLabels,
   onShowBlockingLabelsChange,
 }: SightCorridorPanelProps) {
-  const apiBase = normalizeApiBase(API_BASE);
   const [isPlacementMode, setIsPlacementMode] = useState(false);
   const [position, setPosition] = useState<SightCorridorPosition | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -219,6 +218,7 @@ export function SightCorridorPanel({
       try {
         const formData = new FormData();
         formData.append("file", modelFile);
+        const apiBase = await resolveApiBase();
 
         const uploadUrl = `${apiBase}/models/import?skip_layers=true`;
         const uploadResponse = await fetch(uploadUrl, {
@@ -253,7 +253,7 @@ export function SightCorridorPanel({
     })();
 
     return uploadInFlightRef.current;
-  }, [apiBase, effectiveModelPath, modelFile, onModelPathResolved]);
+  }, [effectiveModelPath, modelFile, onModelPathResolved]);
 
   const isPointInsideBuilding = (point: SightCorridorPosition, building: PlanViewBuilding) => {
     const [minX, minY] = building.min;
@@ -489,6 +489,7 @@ export function SightCorridorPanel({
         y: pos.y / safeScale,
         z: pos.z / safeScale,
       };
+      const apiBase = await resolveApiBase();
       const checkUrl = `${apiBase}/sight-corridor/check`;
       const response = await fetch(checkUrl, {
         method: "POST",

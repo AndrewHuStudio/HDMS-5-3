@@ -28,7 +28,6 @@ export interface SceneSnapshot {
   selectedImportedMesh: SceneImportedMeshInfo | null;
   externalModelUrl?: string | null;
   externalModelType?: SceneModelFileType | null;
-  showDemoModel?: boolean;
   viewMode?: SceneViewMode;
   modelBounds?: THREE.Box3 | null;
   modelScale?: number;

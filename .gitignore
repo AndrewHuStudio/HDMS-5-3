@@ -31,7 +31,7 @@ next-env.d.ts
 .env.local
 .env.development.local
 .env.test.local
-.env.production.local
+.env.test
 
 # 上传文件和缓存（保留目录结构，但忽略内容）
 data/uploads/*

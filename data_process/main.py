@@ -9,7 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from data_process.core import config
 from data_process.core.database.manager import db_manager
 from data_process.KG_process.graph.api import router as graph_router
+from data_process.KG_process.graph.cleanup_api import router as cleanup_router
 from data_process.vector_process.ingestion.api import router as ingestion_router
+from data_process.ocr_process.server import router as ocr_router
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,11 @@ app = FastAPI(title="HDMS Data Process API")
 async def _init_databases() -> None:
     try:
         logger.info("Initializing database connections...")
-        await asyncio.to_thread(db_manager.initialize)
+        await asyncio.to_thread(
+            db_manager.ensure_initialized,
+            config.DB_INIT_MAX_RETRIES,
+            config.DB_INIT_RETRY_DELAY_SECONDS,
+        )
         logger.info("Database connections initialized successfully")
     except Exception as exc:
         logger.error("Failed to initialize databases: %s", exc)
@@ -58,6 +64,8 @@ app.add_middleware(
 
 app.include_router(ingestion_router)
 app.include_router(graph_router)
+app.include_router(cleanup_router)
+app.include_router(ocr_router)
 
 
 @app.get("/health")

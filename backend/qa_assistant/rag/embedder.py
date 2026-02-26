@@ -49,6 +49,9 @@ class EmbeddingService:
         Returns:
             Embedding vector as list of floats
         """
+        import time
+        start_time = time.perf_counter()
+
         # Check cache first
         cache_key = hashlib.sha256(
             text.strip().lower().encode("utf-8")
@@ -56,8 +59,12 @@ class EmbeddingService:
 
         if cache_key in self._cache:
             self._cache.move_to_end(cache_key)
-            logger.debug("Embedding cache hit")
+            elapsed = (time.perf_counter() - start_time) * 1000
+            logger.info(f"[TIMING] Embedding cache hit - took {elapsed:.2f}ms")
             return self._cache[cache_key]
+
+        logger.info(f"[TIMING] Embedding API call starting for text length {len(text)}")
+        api_start = time.perf_counter()
 
         endpoint = f"{self.base_url}/embeddings"
         payload = {
@@ -78,6 +85,9 @@ class EmbeddingService:
                 body = response.read().decode("utf-8")
                 result = json.loads(body)
 
+            api_elapsed = (time.perf_counter() - api_start) * 1000
+            logger.info(f"[TIMING] Embedding API call completed - took {api_elapsed:.2f}ms")
+
             embedding = result["data"][0]["embedding"]
             logger.debug(f"Generated embedding with dimension {len(embedding)}")
 
@@ -86,6 +96,8 @@ class EmbeddingService:
             if len(self._cache) > self._cache_max_size:
                 self._cache.popitem(last=False)
 
+            total_elapsed = (time.perf_counter() - start_time) * 1000
+            logger.info(f"[TIMING] embed_text() total - took {total_elapsed:.2f}ms")
             return embedding
 
         except Exception as e:

@@ -206,9 +206,10 @@ class IngestionPipeline:
             self.DOCUMENTS_COLLECTION,
             {"_id": {"$in": list(target_set)}} if target_set else {},
             limit=None,
-            projection={"_id": 1},
+            projection={"_id": 1, "file_name": 1},
         )
         mongo_doc_ids = {str(doc.get("_id")) for doc in docs if doc.get("_id")}
+        mongo_file_names = {str(doc.get("file_name")) for doc in docs if doc.get("file_name")}
 
         chunks = self.mongodb.find_by_query(
             self.CHUNKS_COLLECTION,
@@ -231,12 +232,24 @@ class IngestionPipeline:
             if doc_id not in mongo_doc_ids and chunk_id:
                 orphan_chunk_ids.append(chunk_id)
 
-        milvus_rows = self.milvus.query_by_expr(
-            config.MILVUS_COLLECTION_TEXT,
-            'doc_id != ""',
-            output_fields=["id", "doc_id"],
-            limit=50000,
-        )
+        # Paginated Milvus scan to handle collections larger than query limit
+        _MILVUS_PAGE = 16384
+        milvus_rows: List[Dict[str, Any]] = []
+        _offset = 0
+        while True:
+            page = self.milvus.query_by_expr(
+                config.MILVUS_COLLECTION_TEXT,
+                'doc_id != ""',
+                output_fields=["id", "doc_id"],
+                limit=_MILVUS_PAGE,
+                offset=_offset,
+            )
+            if not page:
+                break
+            milvus_rows.extend(page)
+            if len(page) < _MILVUS_PAGE:
+                break
+            _offset += len(page)
         milvus_doc_counts: Dict[str, int] = {}
         orphan_vector_ids: List[str] = []
         for row in milvus_rows:
@@ -253,10 +266,14 @@ class IngestionPipeline:
                 orphan_vector_ids.append(vector_id)
 
         graph_doc_ids: List[str] = []
+        graph_source_names: List[str] = []
         if self.neo4j:
             graph_doc_ids = self.neo4j.get_document_doc_ids()
+            graph_source_names = self.neo4j.get_source_doc_names()
         if target_set:
             graph_doc_ids = [doc_id for doc_id in graph_doc_ids if doc_id in target_set]
+        # Match graph coverage by Document node doc_id OR by source_doc file name
+        graph_covered = set(graph_doc_ids) | (mongo_file_names & set(graph_source_names))
         orphan_graph_doc_ids = [doc_id for doc_id in graph_doc_ids if doc_id not in mongo_doc_ids]
 
         inconsistent_docs: List[Dict[str, Any]] = []
@@ -321,7 +338,7 @@ class IngestionPipeline:
             "mongo_documents": len(mongo_doc_ids),
             "mongo_chunks": len(chunks),
             "milvus_vectors_scanned": len(milvus_rows),
-            "graph_documents": len(graph_doc_ids),
+            "graph_documents": len(graph_covered),
             "orphan_chunks": len(orphan_chunk_ids),
             "orphan_vectors": len(orphan_vector_ids),
             "orphan_graph_documents": len(orphan_graph_doc_ids),
@@ -406,6 +423,7 @@ class IngestionPipeline:
             "category": metadata.get("category", ""),
             "pages": metadata.get("pages", 0),
             "markdown_path": markdown_path,
+            "images_dir": images_dir or "",
             "full_text": markdown_text,
             "metadata": metadata,
             "ingested_at": now,
@@ -490,28 +508,49 @@ class IngestionPipeline:
                 chunk_records = []
                 for chunk, embedding in zip(chunks_to_upsert, embeddings):
                     chunk_id = str(chunk["_id"])
+                    milvus_meta = {
+                        "section_title": chunk["section_title"],
+                        "has_table": chunk["has_table"],
+                        "has_image": chunk["has_image"],
+                        "file_name": metadata.get("file_name", ""),
+                        "category": metadata.get("category", ""),
+                        "chunk_hash": chunk["chunk_hash"],
+                        "version": version,
+                    }
+                    # Propagate page info into Milvus JSON metadata
+                    if chunk.get("page") is not None:
+                        milvus_meta["page"] = int(chunk["page"])
+                    if chunk.get("page_end") is not None:
+                        milvus_meta["page_end"] = int(chunk["page_end"])
+
                     milvus_data.append({
                         "id": chunk_id,
                         "embedding": embedding,
                         "text": chunk["enhanced_text"],
                         "doc_id": doc_id,
                         "chunk_index": chunk["chunk_index"],
-                        "metadata": {
-                            "section_title": chunk["section_title"],
-                            "has_table": chunk["has_table"],
-                            "has_image": chunk["has_image"],
-                            "file_name": metadata.get("file_name", ""),
-                            "category": metadata.get("category", ""),
-                            "chunk_hash": chunk["chunk_hash"],
-                            "version": version,
-                        }
+                        "metadata": milvus_meta,
                     })
                     chunk_record = dict(chunk)
                     chunk_record["embedding_dimension"] = len(embedding)
                     chunk_records.append(chunk_record)
 
                 self.milvus.insert_vectors(config.MILVUS_COLLECTION_TEXT, milvus_data)
-                self.mongodb.insert_many(self.CHUNKS_COLLECTION, chunk_records)
+                try:
+                    self.mongodb.insert_many(self.CHUNKS_COLLECTION, chunk_records)
+                except Exception as mongo_err:
+                    # Rollback Milvus vectors to prevent orphans
+                    inserted_ids = [str(d["id"]) for d in milvus_data]
+                    try:
+                        self.milvus.delete_by_ids(config.MILVUS_COLLECTION_TEXT, inserted_ids)
+                        logger.warning(
+                            f"Rolled back {len(inserted_ids)} Milvus vectors after MongoDB failure for {doc_id}"
+                        )
+                    except Exception as rollback_err:
+                        logger.error(
+                            f"Failed to rollback Milvus vectors for {doc_id}: {rollback_err}"
+                        )
+                    raise mongo_err
 
             operation = "created"
             if existing_doc:
@@ -574,22 +613,26 @@ class IngestionPipeline:
         for chunk in chunks:
             chunk_index = int(chunk.get("chunk_index") or 0)
             enhanced_text = self._build_enhanced_chunk_text(chunk, image_descriptions)
-            payloads.append(
-                {
-                    "_id": f"{doc_id}_{chunk_index}",
-                    "doc_id": doc_id,
-                    "chunk_index": chunk_index,
-                    "text": chunk.get("text", ""),
-                    "enhanced_text": enhanced_text,
-                    "section_title": chunk.get("section_title", ""),
-                    "has_table": bool(chunk.get("has_table")),
-                    "has_image": bool(chunk.get("has_image")),
-                    "chunk_hash": self._hash_text(enhanced_text),
-                    "version": version,
-                    "file_name": metadata.get("file_name", ""),
-                    "category": metadata.get("category", ""),
-                }
-            )
+            payload: Dict[str, Any] = {
+                "_id": f"{doc_id}_{chunk_index}",
+                "doc_id": doc_id,
+                "chunk_index": chunk_index,
+                "text": chunk.get("text", ""),
+                "enhanced_text": enhanced_text,
+                "section_title": chunk.get("section_title", ""),
+                "has_table": bool(chunk.get("has_table")),
+                "has_image": bool(chunk.get("has_image")),
+                "chunk_hash": self._hash_text(enhanced_text),
+                "version": version,
+                "file_name": metadata.get("file_name", ""),
+                "category": metadata.get("category", ""),
+            }
+            # Page info injected by chunker (may be absent for legacy data)
+            if chunk.get("page") is not None:
+                payload["page"] = int(chunk["page"])
+            if chunk.get("page_end") is not None:
+                payload["page_end"] = int(chunk["page_end"])
+            payloads.append(payload)
         return payloads
 
     def _diff_chunks(
@@ -917,9 +960,16 @@ class IngestionPipeline:
             if not output_path.exists() or not output_path.is_dir():
                 logger.warning(f"OCR output directory not found: {output_path}")
                 return results
-            for cat_dir in output_path.iterdir():
-                if cat_dir.is_dir():
-                    doc_dirs.extend(cat_dir.iterdir())
+            for sub_dir in output_path.iterdir():
+                if not sub_dir.is_dir():
+                    continue
+                # If sub_dir contains .md files directly, it's a doc dir (flat structure)
+                has_md = any(f.suffix == ".md" for f in sub_dir.iterdir() if f.is_file())
+                if has_md:
+                    doc_dirs.append(sub_dir)
+                else:
+                    # Otherwise treat as category dir (nested structure)
+                    doc_dirs.extend(sub_dir.iterdir())
 
         results["total"] = len(doc_dirs)
 

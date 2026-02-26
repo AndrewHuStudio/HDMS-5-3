@@ -69,12 +69,26 @@ class DatabaseManager:
             )
             self.neo4j.connect()
 
-            # Create constraints for unique properties
+            # Create constraints for unique properties (new schema: Chinese labels)
             try:
-                self.neo4j.create_constraint("Plot", "name")
-                self.neo4j.create_constraint("Document", "doc_id")
+                self.neo4j.create_constraint("地块", "name")
+                self.neo4j.create_constraint("片区", "name")
+                self.neo4j.create_constraint("法规", "name")
+                self.neo4j.create_constraint("标准", "name")
+                self.neo4j.create_constraint("导则", "name")
             except Exception as e:
                 logger.warning(f"Constraints may already exist: {e}")
+
+            # Create full-text search index for concept queries (6 entity types)
+            try:
+                self.neo4j.query("""
+                    CREATE FULLTEXT INDEX concept_search IF NOT EXISTS
+                    FOR (n:片区|地块|空间要素|法规|标准|导则)
+                    ON EACH [n.name, n.description]
+                """)
+                logger.info("Full-text index 'concept_search' ensured")
+            except Exception as e:
+                logger.warning(f"Full-text index may already exist: {e}")
 
             self._initialized = True
             logger.info("All database connections initialized successfully")

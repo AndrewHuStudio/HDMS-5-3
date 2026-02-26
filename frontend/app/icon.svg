@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <!-- 背景渐变 -->
+    <linearGradient id="skyGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2563eb;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- 建筑渐变 - 正面 -->
+    <linearGradient id="buildingFront" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f0f9ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e0f2fe;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- 建筑渐变 - 侧面（深色） -->
+    <linearGradient id="buildingSide" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#bae6fd;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7dd3fc;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- 建筑渐变 - 顶面 -->
+    <linearGradient id="buildingTop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f0f9ff;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- 阴影 -->
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="1" stdDeviation="0.5" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="32" height="32" rx="6" fill="url(#skyGradient)"/>
+
+  <!-- 等轴测城市建筑群 -->
+
+  <!-- 左侧建筑 -->
+  <g filter="url(#shadow)">
+    <!-- 正面 -->
+    <polygon points="4,20 4,26 9,26 9,20" fill="url(#buildingFront)"/>
+    <!-- 侧面 -->
+    <polygon points="9,20 9,26 11,25 11,19" fill="url(#buildingSide)"/>
+    <!-- 顶面 -->
+    <polygon points="4,20 9,20 11,19 6,19" fill="url(#buildingTop)"/>
+    <!-- 窗户 -->
+    <rect x="5" y="22" width="1" height="1" fill="#3b82f6" opacity="0.4"/>
+    <rect x="7" y="22" width="1" height="1" fill="#3b82f6" opacity="0.4"/>
+    <rect x="5" y="24" width="1" height="1" fill="#3b82f6" opacity="0.4"/>
+    <rect x="7" y="24" width="1" height="1" fill="#3b82f6" opacity="0.4"/>
+  </g>
+
+  <!-- 中间高楼 -->
+  <g filter="url(#shadow)">
+    <!-- 正面 -->
+    <polygon points="12,12 12,27 17,27 17,12" fill="url(#buildingFront)"/>
+    <!-- 侧面 -->
+    <polygon points="17,12 17,27 20,25.5 20,10.5" fill="url(#buildingSide)"/>
+    <!-- 顶面 -->
+    <polygon points="12,12 17,12 20,10.5 15,10.5" fill="url(#buildingTop)"/>
+    <!-- 窗户 -->
+    <rect x="13" y="14" width="1.2" height="1.2" fill="#3b82f6" opacity="0.4"/>
+    <rect x="15.3" y="14" width="1.2" height="1.2" fill="#3b82f6" opacity="0.4"/>
+    <rect x="13" y="17" width="1.2" height="1.2" fill="#3b82f6" opacity="0.4"/>
+    <rect x="15.3" y="17" width="1.2" height="1.2" fill="#3b82f6" opacity="0.4"/>
+    <rect x="13" y="20" width="1.2" height="1.2" fill="#3b82f6" opacity="0.4"/>
+    <rect x="15.3" y="20" width="1.2" height="1.2" fill="#3b82f6" opacity="0.4"/>
+    <rect x="13" y="23" width="1.2" height="1.2" fill="#3b82f6" opacity="0.4"/>
+    <rect x="15.3" y="23" width="1.2" height="1.2" fill="#3b82f6" opacity="0.4"/>
+  </g>
+
+  <!-- 右侧建筑 -->
+  <g filter="url(#shadow)">
+    <!-- 正面 -->
+    <polygon points="21,16 21,26 26,26 26,16" fill="url(#buildingFront)"/>
+    <!-- 侧面 -->
+    <polygon points="26,16 26,26 28,25 28,15" fill="url(#buildingSide)"/>
+    <!-- 顶面 -->
+    <polygon points="21,16 26,16 28,15 23,15" fill="url(#buildingTop)"/>
+    <!-- 窗户 -->
+    <rect x="22" y="18" width="1" height="1" fill="#3b82f6" opacity="0.4"/>
+    <rect x="24" y="18" width="1" height="1" fill="#3b82f6" opacity="0.4"/>
+    <rect x="22" y="20.5" width="1" height="1" fill="#3b82f6" opacity="0.4"/>
+    <rect x="24" y="20.5" width="1" height="1" fill="#3b82f6" opacity="0.4"/>
+    <rect x="22" y="23" width="1" height="1" fill="#3b82f6" opacity="0.4"/>
+    <rect x="24" y="23" width="1" height="1" fill="#3b82f6" opacity="0.4"/>
+  </g>
+</svg>

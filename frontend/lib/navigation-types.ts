@@ -34,6 +34,7 @@ export interface ControlToolMeta {
 
 // 活动视图类型（用于主页面状态管理）
 export type ActiveView =
-  | "qa-assistant"           // 管控问答助手
-  | "approval-checklist"     // 管控审批清单
-  | ControlToolType;         // 管控工具（动态注册）
+  | "data-upload"         // 管控资料上传
+  | "qa-assistant"        // 管控问答助手
+  | "approval-checklist"  // 管控审批清单
+  | ControlToolType;       // 管控工具（动态注册）

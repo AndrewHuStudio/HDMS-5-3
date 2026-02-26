@@ -1,56 +1,98 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@/components/ui/collapsible";
 import { ChevronRight, Brain } from "lucide-react";
+import { TextShimmer } from "@/components/ui/text-shimmer";
+import { resolveThinkingHeaderState } from "./qa-thinking-status";
+import { getThinkingEllipsisDots } from "./qa-thinking-ellipsis";
+import {
+  resolveThinkingFinishedState,
+  shouldAutoCollapseThinking,
+} from "./qa-thinking-collapse";
 
 interface ThinkingProcessProps {
   thinking: string;
   isStreaming: boolean;
+  thinkingDone?: boolean;
 }
 
-export function ThinkingProcess({ thinking, isStreaming }: ThinkingProcessProps) {
+export function ThinkingProcess({
+  thinking,
+  isStreaming,
+  thinkingDone,
+}: ThinkingProcessProps) {
   const [isOpen, setIsOpen] = useState(true);
+  const hasThinking = Boolean(thinking.trim());
+  const headerState = resolveThinkingHeaderState({
+    isStreaming,
+    thinkingDone,
+    hasThinkingTokens: hasThinking,
+  });
+  const showThinkingAnimation = headerState === "thinking";
+  const showThinkingResult = headerState === "history" && hasThinking;
+  const ellipsisDots = getThinkingEllipsisDots();
+  const thinkingFinished = resolveThinkingFinishedState({
+    hasThinkingTokens: hasThinking,
+    isStreaming,
+    thinkingDone,
+  });
+  const previousThinkingFinishedRef = useRef(thinkingFinished);
 
-  // Auto-collapse when streaming ends
   useEffect(() => {
-    if (!isStreaming && thinking) {
+    if (shouldAutoCollapseThinking(previousThinkingFinishedRef.current, thinkingFinished)) {
       setIsOpen(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to streaming state change
-  }, [isStreaming]);
+    previousThinkingFinishedRef.current = thinkingFinished;
+  }, [thinkingFinished]);
 
-  if (!thinking) return null;
+  if (!isStreaming && !hasThinking) return null;
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mb-3">
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted/50 transition-colors">
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mb-2">
+      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40">
         <ChevronRight
           className={`h-3 w-3 shrink-0 transition-transform duration-200 ${
             isOpen ? "rotate-90" : ""
           }`}
         />
         <Brain className="h-3 w-3 shrink-0" />
-        <span className="font-medium">
-          {isStreaming ? "思考中..." : "思考过程"}
-        </span>
-        {isStreaming && (
-          <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+        {showThinkingAnimation ? (
+          <span className="inline-flex items-center">
+            <TextShimmer
+              as="span"
+              duration={1.15}
+              className="text-xs font-medium [--base-color:color-mix(in_oklab,var(--muted-foreground)_70%,var(--foreground)_30%)] [--base-gradient-color:var(--foreground)]"
+            >
+              思考中
+            </TextShimmer>
+            <span aria-hidden="true" className="ml-0.5 inline-flex gap-0.5">
+              {ellipsisDots.map((dot, index) => (
+                <span
+                  key={`${dot}-${index}`}
+                  className={`qa-thinking-ellipsis-dot qa-thinking-ellipsis-dot--${index + 1}`}
+                >
+                  {dot}
+                </span>
+              ))}
+            </span>
+          </span>
+        ) : (
+          <span className="font-medium text-foreground">思考过程</span>
         )}
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1 ml-6 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
-          <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
-            {thinking}
-            {isStreaming && (
-              <span className="ml-0.5 inline-block h-3 w-0.5 animate-pulse bg-muted-foreground" />
-            )}
-          </p>
-        </div>
+        {showThinkingResult ? (
+          <div className="mt-1 ml-2.5 border-l border-border/70 pl-3">
+            <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground break-words [overflow-wrap:anywhere]">
+              {thinking}
+            </p>
+          </div>
+        ) : null}
       </CollapsibleContent>
     </Collapsible>
   );

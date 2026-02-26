@@ -15,7 +15,6 @@ interface ModelState {
   externalModelType: ModelFileType | null;
   externalModelName: string | null;
   externalModelFile: File | null;
-  showDemoModel: boolean;
   modelFilePath: string | null;
   modelLayers: LayerInfo[];
   modelBounds: ModelBounds;
@@ -29,7 +28,6 @@ interface ModelState {
     name?: string | null;
     file?: File | null;
   }) => void;
-  setShowDemoModel: (show: boolean) => void;
   setModelFilePath: (path: string | null) => void;
   setModelLayers: (layers: LayerInfo[]) => void;
   setModelBounds: (bounds: ModelBounds) => void;
@@ -45,7 +43,6 @@ const initialState = {
   externalModelType: null,
   externalModelName: null,
   externalModelFile: null,
-  showDemoModel: true,
   modelFilePath: null,
   modelLayers: [] as LayerInfo[],
   modelBounds: undefined as ModelBounds,
@@ -64,7 +61,6 @@ export const useModelStore = create<ModelState>((set) => ({
       externalModelName: name ?? null,
       externalModelFile: file ?? null,
     }),
-  setShowDemoModel: (show) => set({ showDemoModel: show }),
   setModelFilePath: (path) => set({ modelFilePath: path }),
   setModelLayers: (layers) => set({ modelLayers: layers }),
   setModelBounds: (bounds) => set({ modelBounds: bounds }),

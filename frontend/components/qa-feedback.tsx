@@ -25,6 +25,8 @@ export function QAFeedback({
   const handleFeedback = async (rating: "useful" | "not_useful") => {
     if (currentFeedback === rating || submitting) return;
 
+    // Optimistic UI: reflect user choice immediately for faster feedback.
+    onFeedbackChange(rating);
     setSubmitting(true);
     try {
       await submitFeedback({
@@ -33,10 +35,8 @@ export function QAFeedback({
         answer,
         rating,
       });
-      onFeedbackChange(rating);
     } catch (err) {
       console.warn("Feedback submission failed:", err);
-      onFeedbackChange(rating);
     } finally {
       setSubmitting(false);
     }

@@ -16,6 +16,7 @@ class DocumentChunker:
     _TABLE_SEPARATOR_RE = re.compile(
         r"^\s*\|?\s*:?[-]{3,}\s*:?(\s*\|\s*:?[-]{3,}\s*:?\s*)+\|?\s*$"
     )
+    _PAGE_MARKER_RE = re.compile(r"^<!--\s*PAGE\s+(\d+)\s*-->$")
 
     def __init__(self, chunk_size: int = 800, overlap: int = 100):
         """
@@ -42,22 +43,28 @@ class DocumentChunker:
         Chunk markdown document by semantic sections.
 
         Strategy:
+        - Extract and strip ``<!-- PAGE N -->`` markers to build a page map
         - Split by headers (# ## ###)
         - Split tables into manageable chunks
         - Maintain chunk size with overlap
+        - Assign page / page_end to each chunk via the page map
 
         Args:
-            markdown_text: Markdown content
+            markdown_text: Markdown content (may contain page markers)
             doc_id: Document identifier
             metadata: Document metadata
 
         Returns:
-            List of chunk dictionaries with text, metadata, and flags
+            List of chunk dictionaries with text, metadata, page info, and flags
         """
-        chunks = []
+        # --- 1. Build page map and strip markers -------------------------
+        page_map = self._build_page_map(markdown_text)
+        clean_text = self._strip_page_markers(markdown_text)
 
-        # Split by headers
-        sections = self._split_by_headers(markdown_text)
+        # --- 2. Normal chunking on clean text ----------------------------
+        chunks: List[Dict[str, Any]] = []
+
+        sections = self._split_by_headers(clean_text)
 
         for section in sections:
             section_title = section.get("title", "")
@@ -94,8 +101,142 @@ class DocumentChunker:
                             "metadata": metadata
                         })
 
+        # --- 3. Assign page numbers to each chunk -----------------------
+        if page_map:
+            self._assign_page_numbers(chunks, clean_text, page_map)
+
         logger.info(f"Chunked document {doc_id} into {len(chunks)} chunks")
         return chunks
+
+    # -----------------------------------------------------------------
+    # Page-marker helpers
+    # -----------------------------------------------------------------
+
+    def _build_page_map(self, text: str) -> List[tuple]:
+        """Parse ``<!-- PAGE N -->`` markers and return [(char_offset, page_num)].
+
+        The offsets refer to the *original* text (with markers still present)
+        so that we can later map them to the stripped text.
+        """
+        entries: List[tuple] = []
+        offset = 0
+        for line in text.split("\n"):
+            m = self._PAGE_MARKER_RE.match(line.strip())
+            if m:
+                entries.append((offset, int(m.group(1))))
+            offset += len(line) + 1  # +1 for the newline
+        return entries
+
+    @classmethod
+    def _strip_page_markers(cls, text: str) -> str:
+        """Remove ``<!-- PAGE N -->`` lines from markdown text."""
+        lines = text.split("\n")
+        return "\n".join(
+            line for line in lines
+            if not cls._PAGE_MARKER_RE.match(line.strip())
+        )
+
+    def _assign_page_numbers(
+        self,
+        chunks: List[Dict[str, Any]],
+        clean_text: str,
+        page_map: List[tuple],
+    ) -> None:
+        """Assign ``page`` and ``page_end`` to each chunk in-place.
+
+        For each chunk we locate its text inside *clean_text*, then look up
+        which page(s) that character range falls into using *page_map*.
+
+        ``page_map`` offsets refer to the original (marker-containing) text,
+        so we first convert them to clean-text offsets by subtracting the
+        cumulative length of stripped marker lines before each entry.
+        """
+        if not page_map:
+            return
+
+        # Convert page_map offsets from original text to clean text offsets.
+        # Each stripped marker line removes (len("<!-- PAGE N -->") + 1) chars.
+        # We rebuild by scanning the original text once.
+        clean_entries: List[tuple] = []
+        stripped_chars = 0
+        orig_offset = 0
+        marker_idx = 0
+        # Sort page_map by offset (should already be sorted)
+        sorted_map = sorted(page_map, key=lambda x: x[0])
+
+        # Walk through original text line by line to compute clean offsets
+        orig_lines = []
+        # We need the original text to compute this, but we only have clean_text
+        # and page_map. Reconstruct by noting that page_map entries are at
+        # specific offsets. Instead, use a simpler approach: for each page_map
+        # entry, count how many marker lines precede it.
+        marker_offsets = {offset for offset, _ in sorted_map}
+        cumulative_stripped = 0
+        line_start = 0
+
+        # We need the original text. Since _strip_page_markers removes lines,
+        # we can reconstruct the adjustment: each marker before a given offset
+        # removes its line length + newline.
+        # Simpler: just count markers before each entry.
+        marker_line_lengths: List[int] = []
+        for offset, page_num in sorted_map:
+            # Approximate marker line length: "<!-- PAGE N -->" + newline
+            marker_line_lengths.append(len(f"<!-- PAGE {page_num} -->") + 1)
+
+        for i, (offset, page_num) in enumerate(sorted_map):
+            preceding_stripped = sum(marker_line_lengths[:i])
+            clean_offset = max(0, offset - preceding_stripped)
+            clean_entries.append((clean_offset, page_num))
+
+        if not clean_entries:
+            return
+
+        # For each chunk, find its position in clean_text and determine page(s)
+        search_start = 0
+        for chunk in chunks:
+            chunk_text = chunk.get("text", "")
+            if not chunk_text:
+                continue
+
+            # Find chunk position in clean_text (use a short prefix for speed)
+            prefix = chunk_text[:200]
+            pos = clean_text.find(prefix, search_start)
+            if pos == -1:
+                # Fallback: search from beginning
+                pos = clean_text.find(prefix)
+            if pos == -1:
+                continue
+
+            chunk_start = pos
+            chunk_end = pos + len(chunk_text)
+            # Advance search_start for next chunk (chunks are sequential)
+            search_start = pos
+
+            # Find page for chunk_start
+            page_start = self._page_at_offset(clean_entries, chunk_start)
+            # Find page for chunk_end
+            page_end = self._page_at_offset(clean_entries, chunk_end)
+
+            if page_start is not None:
+                chunk["page"] = page_start
+                chunk["page_end"] = page_end if page_end != page_start else page_start
+
+    @staticmethod
+    def _page_at_offset(clean_entries: List[tuple], offset: int) -> Optional[int]:
+        """Binary-search for the page number at a given character offset."""
+        if not clean_entries:
+            return None
+        # Find the last entry whose offset <= given offset
+        lo, hi = 0, len(clean_entries) - 1
+        result = None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if clean_entries[mid][0] <= offset:
+                result = clean_entries[mid][1]
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return result
 
     def _split_by_headers(self, text: str) -> List[Dict[str, str]]:
         """

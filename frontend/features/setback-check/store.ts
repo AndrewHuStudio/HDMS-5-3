@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { SetbackViolationResult } from "@/lib/setback-violation-types";
+import type { SetbackViolationResult } from "./types";
 
 interface SetbackCheckState {
   result: SetbackViolationResult | null;

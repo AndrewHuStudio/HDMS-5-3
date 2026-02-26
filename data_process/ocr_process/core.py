@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import bisect
 import http.client
 import json
 import logging
@@ -59,9 +60,9 @@ def _project_root() -> Path:
     env_path = _find_env_file()
     if env_path:
         return env_path.parent.resolve()
-    # data_process/ocr_process/core.py -> data_process -> repo root
+    # data_process/ocr_process/core.py -> ocr_process -> data_process -> repo root
     try:
-        return Path(__file__).resolve().parents[3]
+        return Path(__file__).resolve().parents[2]
     except Exception:
         return Path.cwd().resolve()
 
@@ -213,10 +214,143 @@ def _normalize_error_message(message: str, exc_type: str = "") -> str:
 def _count_pdf_pages(file_path: Path) -> int:
     try:
         from pypdf import PdfReader  # type: ignore
-
-        return len(PdfReader(str(file_path)).pages)
-    except Exception:
+    except Exception as exc:
+        logger.warning("pypdf not available; cannot count pages: %s", exc)
         return 0
+
+    try:
+        reader = PdfReader(str(file_path), strict=False)
+        if getattr(reader, "is_encrypted", False):
+            try:
+                reader.decrypt("")  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        return len(reader.pages)
+    except Exception as exc:
+        logger.warning("Failed to read PDF pages for %s: %s", file_path, exc)
+        return 0
+
+
+def _extract_pdf_page_texts(file_path: Path) -> list[str]:
+    """Extract per-page plain text from a PDF using pypdf.
+
+    Returns a list where index *i* holds the text of page *i+1*.
+    On failure (missing lib, encrypted, etc.) returns an empty list so the
+    caller can gracefully skip page-marker injection.
+    """
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except Exception:
+        return []
+
+    try:
+        reader = PdfReader(str(file_path), strict=False)
+        if getattr(reader, "is_encrypted", False):
+            try:
+                reader.decrypt("")
+            except Exception:
+                pass
+        return [page.extract_text() or "" for page in reader.pages]
+    except Exception as exc:
+        logger.warning("Failed to extract page texts from %s: %s", file_path, exc)
+        return []
+
+
+def _normalize_for_match(text: str) -> str:
+    """Collapse whitespace and strip for fuzzy matching."""
+    import re as _re
+    return _re.sub(r"\s+", "", text).lower()
+
+
+def _inject_page_markers(md_text: str, page_texts: list[str]) -> str:
+    """Inject ``<!-- PAGE N -->`` markers into MinerU markdown.
+
+    Strategy:
+    For each page boundary (page 2, 3, ...) we find a *signature* --
+    the first ~60 non-whitespace characters of that page's raw text --
+    and locate it inside the markdown.  We insert a marker **before**
+    the line that contains the signature.
+
+    Page 1 always gets a marker at the very top.
+
+    Signatures are searched **forward-only** from the last matched
+    position so that table-of-contents entries (which repeat chapter
+    titles early in the document) do not steal later page markers.
+
+    If a signature cannot be located (OCR differences, tables, etc.)
+    we skip that boundary; the chunker will inherit the last-known page.
+    """
+    if not page_texts or len(page_texts) < 1:
+        return md_text
+
+    lines = md_text.split("\n")
+    # Map: line_index -> page_number to insert BEFORE that line
+    insert_map: dict[int, int] = {0: 1}  # page 1 at top
+
+    md_norm = _normalize_for_match(md_text)
+
+    # Pre-compute cumulative normalized lengths per line for fast offset->line mapping
+    line_norm_lengths: list[int] = [len(_normalize_for_match(line)) for line in lines]
+    cum_norm: list[int] = []
+    _acc = 0
+    for _lnl in line_norm_lengths:
+        cum_norm.append(_acc)
+        _acc += _lnl
+
+    # Forward-only search: track where the previous page boundary was found
+    search_from = 0        # character offset in md_norm
+    last_matched_line = 0  # line index of last matched boundary
+
+    for page_idx in range(1, len(page_texts)):
+        raw = page_texts[page_idx]
+        if not raw or not raw.strip():
+            continue
+
+        # Build a signature from the first meaningful characters of this page
+        norm_page = _normalize_for_match(raw)
+        # Try progressively shorter signatures for robustness
+        for sig_len in (60, 40, 25):
+            sig = norm_page[:sig_len]
+            if len(sig) < 10:
+                break
+            pos = md_norm.find(sig, search_from)
+            if pos == -1:
+                continue
+
+            # Map character position back to line number (binary search on cum_norm)
+            target_line = bisect.bisect_right(cum_norm, pos) - 1
+            if target_line < 0:
+                target_line = 0
+
+            # Ensure monotonically increasing line numbers
+            if target_line <= last_matched_line and last_matched_line > 0:
+                target_line = last_matched_line + 1
+
+            if target_line > 0 and target_line < len(lines) and target_line not in insert_map:
+                insert_map[target_line] = page_idx + 1  # 1-based page
+                # Advance search_from past this match for the next page
+                search_from = pos + len(sig)
+                last_matched_line = target_line
+            break
+
+    if len(insert_map) <= 1 and len(page_texts) > 1:
+        # Fallback: evenly distribute page markers when matching fails
+        total_lines = len(lines)
+        for page_idx in range(1, len(page_texts)):
+            approx_line = int(total_lines * page_idx / len(page_texts))
+            if approx_line not in insert_map:
+                insert_map[approx_line] = page_idx + 1
+
+    # Build output with markers injected
+    result: list[str] = []
+    for li, line in enumerate(lines):
+        if li in insert_map:
+            result.append(f"<!-- PAGE {insert_map[li]} -->")
+        result.append(line)
+
+    injected = len(insert_map)
+    logger.info("Injected %d page markers for %d-page PDF", injected, len(page_texts))
+    return "\n".join(result)
 
 
 def _download_and_extract_markdown(zip_url: str) -> tuple[str, str, list[tuple[str, bytes]]]:
@@ -529,6 +663,13 @@ def _process_one_file(
 
             logger.info(f"[Job {job_id[:8]}] Downloading and extracting markdown")
             md_name, md_text, image_items = _download_and_extract_markdown(zip_url)
+
+            # Inject page boundary markers using per-page text from pypdf
+            if suffix == ".pdf" and total_pages > 0:
+                page_texts = _extract_pdf_page_texts(tmp_file)
+                if page_texts:
+                    md_text = _inject_page_markers(md_text, page_texts)
+                    logger.info(f"[Job {job_id[:8]}] Page markers injected ({len(page_texts)} pages)")
 
             doc_name = Path(original_name or tmp_file.name).stem
             category_safe = category.strip()
@@ -843,6 +984,7 @@ def get_summary() -> dict:
                     "category": category,
                     "markdown_path": str(md),
                     "pages": pages,
+                    "images": doc_images,
                     "updated_at": meta.get("updated_at")
                     or time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(md.stat().st_mtime)),
                 }

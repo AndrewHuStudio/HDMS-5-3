@@ -1,10 +1,16 @@
 // 导航配置文件 - 定义主导航结构和管控工具的元数据
 
-import { MessageSquare, ClipboardCheck } from "lucide-react";
+import { MessageSquare, ClipboardCheck, Upload } from "lucide-react";
 import type { NavigationItem } from "./navigation-types";
 
 // 主导航配置（不包含子菜单，子菜单在主页面动态生成）
 export const mainNavigation: NavigationItem[] = [
+  {
+    id: "data-upload",
+    label: "管控资料上传",
+    icon: Upload,
+    description: "资料上传与处理流程",
+  },
   {
     id: "qa-assistant",
     label: "管控问答助手",

@@ -3,7 +3,9 @@ Schemas for RAG API endpoints.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
+
+from core import config as app_config
 
 
 class RAGChatMessage(BaseModel):
@@ -19,7 +21,12 @@ class RAGChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000, description="User question")
     history: List[RAGChatMessage] = Field(default_factory=list, description="Conversation history")
     use_retrieval: bool = Field(True, description="Whether to use retrieval")
-    top_k: int = Field(5, ge=1, le=20, description="Number of retrieval results")
+    top_k: int = Field(
+        app_config.QA_DEFAULT_TOP_K,
+        ge=app_config.QA_TOP_K_MIN,
+        le=app_config.QA_TOP_K_MAX,
+        description="Number of retrieval results",
+    )
 
 
 class SourceInfo(BaseModel):
@@ -27,9 +34,28 @@ class SourceInfo(BaseModel):
 
     type: str = Field(..., description="Source type (document, plot, etc.)")
     name: str = Field(..., description="Source name")
+    citation_label: str = Field("", description="Citation label for display (e.g. '1-1', '2-3' for docs, '1' for graph)")
+    doc_num: Optional[int] = Field(None, description="Document group number (N in N-M format)")
+    chunk_seq: Optional[int] = Field(None, description="Chunk sequence within document (M in N-M format)")
     section: Optional[str] = Field(None, description="Document section")
     source: str = Field(..., description="Retrieval source (vector_search, knowledge_graph)")
     chunk_id: Optional[str] = Field(None, description="Chunk ID for fetching preview text")
+    chunk_ids: Optional[List[str]] = Field(None, description="All chunk IDs in this source")
+    doc_id: Optional[str] = Field(None, description="Document ID in MongoDB")
+    chunk_index: Optional[int] = Field(None, description="Chunk index within the source document")
+    page: Optional[int] = Field(None, description="Best-effort page hint for PDF locating")
+    page_end: Optional[int] = Field(None, description="End page when chunk spans multiple pages")
+    score: Optional[float] = Field(None, description="Retriever score for this source")
+    quote: Optional[str] = Field(None, description="Short quote/excerpt from the source chunk")
+    pdf_url: Optional[str] = Field(None, description="Direct PDF URL if available")
+    has_table: Optional[bool] = Field(None, description="Whether this source chunk contains a table")
+    table_markdown: Optional[str] = Field(None, description="First extracted markdown table from this chunk, if available")
+    image_url: Optional[str] = Field(None, description="Preview image URL if chunk contains an image")
+    image_name: Optional[str] = Field(None, description="Image file name for the preview")
+    image_urls: Optional[List[str]] = Field(None, description="All image URLs in this chunk")
+    image_names: Optional[List[str]] = Field(None, description="All image file names in this chunk")
+    image_figures: Optional[List[str]] = Field(None, description="Figure labels aligned with image_urls (e.g. '图3.0.1')")
+    image_captions: Optional[List[str]] = Field(None, description="Best-effort captions aligned with image_urls")
 
 
 class RAGChatResponse(BaseModel):
@@ -53,13 +79,39 @@ class RetrievalStats(BaseModel):
     weights: Dict[str, float] = Field(default_factory=dict, description="Fusion weights used")
 
 
+class GraphNode(BaseModel):
+    """A node in the knowledge graph subgraph."""
+
+    id: str = Field(..., description="Neo4j element ID")
+    label: str = Field(..., description="Node label (片区, 地块, 空间要素, 法规, 标准, 导则)")
+    name: str = Field(..., description="Node name")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Additional properties")
+
+
+class GraphEdge(BaseModel):
+    """An edge in the knowledge graph subgraph."""
+
+    id: str = Field(..., description="Neo4j element ID")
+    type: str = Field(..., description="Relationship type (PART_OF, CONTAINS, APPLIES_TO, etc.)")
+    source: str = Field(..., description="Source node ID")
+    target: str = Field(..., description="Target node ID")
+    properties: Dict[str, Any] = Field(default_factory=dict, description="Edge properties")
+
+
+class SubgraphData(BaseModel):
+    """Subgraph data for frontend knowledge graph visualization."""
+
+    nodes: List[GraphNode] = Field(default_factory=list, description="Graph nodes")
+    edges: List[GraphEdge] = Field(default_factory=list, description="Graph edges")
+
+
 class FeedbackRequest(BaseModel):
     """Request to submit answer quality feedback."""
 
     message_id: str = Field(..., min_length=1, description="Frontend message ID")
     question: str = Field(..., min_length=1, description="The original question")
     answer: str = Field(..., description="The answer that was rated")
-    rating: str = Field(..., description="'useful' or 'not_useful'")
+    rating: Literal["useful", "not_useful"] = Field(..., description="'useful' or 'not_useful'")
     comment: Optional[str] = Field(None, max_length=500, description="Optional user comment")
 
 
@@ -70,11 +122,31 @@ class FeedbackResponse(BaseModel):
     feedback_id: str
 
 
+class IntentResult(BaseModel):
+    """Result from LLM intent classification."""
+
+    intent: str = Field(..., description="Classified intent: greeting|domain|follow_up|out_of_scope|meta|clarification")
+    rewritten_query: Optional[str] = Field(None, description="Rewritten query for retrieval (follow_up/domain)")
+    confidence: float = Field(0.0, ge=0.0, le=1.0, description="Classification confidence")
+    use_retrieval: bool = Field(True, description="Whether retrieval is needed")
+    suggested_top_k: int = Field(
+        app_config.QA_DEFAULT_TOP_K,
+        ge=app_config.QA_TOP_K_MIN,
+        le=app_config.QA_TOP_K_MAX,
+        description="Suggested retrieval depth",
+    )
+
+
 class RAGSearchRequest(BaseModel):
     """Request for RAG search (retrieval only)."""
 
     query: str = Field(..., min_length=1, max_length=500, description="Search query")
-    top_k: int = Field(5, ge=1, le=20, description="Number of results")
+    top_k: int = Field(
+        app_config.QA_DEFAULT_TOP_K,
+        ge=app_config.QA_TOP_K_MIN,
+        le=app_config.QA_TOP_K_MAX,
+        description="Number of results",
+    )
     use_vector: bool = Field(True, description="Use vector search")
     use_graph: bool = Field(True, description="Use graph search")
     use_keyword: bool = Field(True, description="Use keyword search")

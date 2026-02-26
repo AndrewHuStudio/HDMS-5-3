@@ -220,7 +220,8 @@ class MongoDBClient:
         self,
         collection: str,
         query: str,
-        limit: int = 10
+        limit: int = 10,
+        filter_query: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Perform full-text search.
@@ -233,8 +234,13 @@ class MongoDBClient:
         Returns:
             List of matching documents
         """
+        find_query: Dict[str, Any] = {"$text": {"$search": query}}
+        if filter_query:
+            # Merge additional constraints (e.g. {"has_image": True}).
+            find_query = {**filter_query, **find_query}
+
         cursor = self.db[collection].find(
-            {"$text": {"$search": query}},
+            find_query,
             {"score": {"$meta": "textScore"}}
         ).sort([("score", {"$meta": "textScore"})]).limit(limit)
         return list(cursor)

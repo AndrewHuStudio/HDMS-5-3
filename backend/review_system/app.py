@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core import config
-from routes import fire_ladder, height_check, models, setback_check, sight_corridor
+from routes import fire_ladder, height_check, models, setback_check, sight_corridor, sky_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ app.include_router(height_check.router)
 app.include_router(setback_check.router)
 app.include_router(sight_corridor.router)
 app.include_router(fire_ladder.router)
+app.include_router(sky_bridge.router)
 
 
 @app.get("/health")
