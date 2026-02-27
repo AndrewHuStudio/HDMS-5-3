@@ -35,13 +35,13 @@ type ServiceConfig = {
 
 type ComputePreferredApiBaseArgs = {
   configuredBase: string;
-  runtime: Pick<RuntimeInfo, "isBrowser" | "hostname" | "origin">;
+  runtime: Pick<RuntimeInfo, "isBrowser" | "hostname" | "origin" | "protocol">;
   fallbackPort: number;
 };
 
 type BuildLocalProbeCandidatesArgs = {
   configuredBase: string;
-  runtime: Pick<RuntimeInfo, "isBrowser" | "hostname" | "origin">;
+  runtime: Pick<RuntimeInfo, "isBrowser" | "hostname" | "origin" | "protocol">;
   ports: number[];
   preferredBase?: string;
 };
