@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase, API_BASE, normalizeApiBase } from "@/lib/api-base";
 import { toolRegistry } from "@/lib/registries/tool-registry";
+import { ExportChecklistDialog } from "@/features/export-checklist/dialog";
 
 // Feature stores
 import { useHeightCheckStore } from "@/features/height-check/store";
@@ -347,22 +348,8 @@ async function runCheck(id: FeatureId, modelPath: string): Promise<void> {
 
 // ---- export helper ----
 
-function exportResults() {
-  const timestamp = new Date().toISOString();
-  const results = {
-    timestamp,
-    features: FEATURES.map((f) => {
-      const state = getFeatureRawState(f.id);
-      return { id: f.id, name: f.name, ...state };
-    }),
-  };
-  const blob = new Blob([JSON.stringify(results, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `审批清单_${timestamp.slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+function openExportDialog(setExportDialogOpen: (open: boolean) => void) {
+  setExportDialogOpen(true);
 }
 
 function getFeatureRawState(id: FeatureId) {
@@ -507,6 +494,7 @@ export function ApprovalChecklistPanel() {
   const [checkingId, setCheckingId] = useState<FeatureId | null>(null);
   const [isCheckingAll, setIsCheckingAll] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<FeatureId, string>>>({});
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
   // 离开审批清单时清除所有检测结果和高亮
   useEffect(() => {
@@ -615,7 +603,7 @@ export function ApprovalChecklistPanel() {
             size="sm"
             variant="outline"
             className="h-7 text-xs"
-            onClick={exportResults}
+            onClick={() => openExportDialog(setExportDialogOpen)}
           >
             <Download className="h-3 w-3 mr-1" />
             导出
@@ -642,6 +630,22 @@ export function ApprovalChecklistPanel() {
           </div>
         ))}
       </div>
+
+      {/* Export Dialog */}
+      <ExportChecklistDialog
+        open={exportDialogOpen}
+        onOpenChange={setExportDialogOpen}
+        features={FEATURES.map((f) => {
+          const state = getFeatureRawState(f.id);
+          const { summary } = useFeatureStatus(f.id);
+          return {
+            id: f.id,
+            name: f.name,
+            summary,
+            rawResult: state,
+          };
+        })}
+      />
     </div>
   );
 }
