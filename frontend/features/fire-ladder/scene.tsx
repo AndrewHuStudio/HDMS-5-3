@@ -5,6 +5,7 @@ import { useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useSceneSnapshot } from "@/components/scene/scene-context";
+import { shouldRenderFeatureVisuals } from "@/lib/scene-visibility";
 import { useModelStore } from "@/lib/stores/model-store";
 import { useFireLadderStore } from "./store";
 
@@ -22,6 +23,7 @@ export function FireLadderSceneLayer() {
   const modelTransform = useModelStore((state) => state.modelTransform);
   const results = useFireLadderStore((state) => state.results);
   const showLabels = useFireLadderStore((state) => state.showLabels);
+  const shouldRenderVisuals = shouldRenderFeatureVisuals(showLabels, results.length);
 
   const meshList = sceneSnapshot?.meshList ?? [];
   const hiddenMeshState = useRef<Map<string, boolean>>(new Map());
@@ -117,7 +119,7 @@ export function FireLadderSceneLayer() {
   };
 
   const labels = useMemo(() => {
-    if (!showLabels || results.length === 0) return [];
+    if (!shouldRenderVisuals) return [];
     return results.map((result) => {
       const position = applyModelTransform(
         new THREE.Vector3(
@@ -138,10 +140,10 @@ export function FireLadderSceneLayer() {
         position: [position.x, position.y, position.z] as [number, number, number],
       };
     });
-  }, [results, showLabels, modelTransform]);
+  }, [results, shouldRenderVisuals, modelTransform]);
 
   const ladderFaces = useMemo(() => {
-    if (results.length === 0) return [];
+    if (!shouldRenderVisuals) return [];
     const faces: {
       key: string;
       shape: THREE.Shape;
@@ -169,9 +171,9 @@ export function FireLadderSceneLayer() {
       });
     });
     return faces;
-  }, [results]);
+  }, [results, shouldRenderVisuals]);
 
-  if (results.length === 0) return null;
+  if (!shouldRenderVisuals) return null;
 
   return (
     <>
@@ -208,25 +210,24 @@ export function FireLadderSceneLayer() {
             </mesh>
           </group>
         ))}
-      {showLabels &&
-        labels.map((label) => (
-          <Html key={label.key} position={label.position} center sprite style={{ pointerEvents: "none" }}>
-            <div
-              className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
-                label.status === "pass"
-                  ? "border-green-500 bg-green-50/90 text-green-700"
-                  : "border-red-500 bg-red-50/90 text-red-700"
-              }`}
-            >
-              <div className="font-medium">{label.name}</div>
-              {label.reasons.map((reason) => (
-                <div key={reason} className="text-[9px]">
-                  {reason}
-                </div>
-              ))}
-            </div>
-          </Html>
-        ))}
+      {labels.map((label) => (
+        <Html key={label.key} position={label.position} center sprite style={{ pointerEvents: "none" }}>
+          <div
+            className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
+              label.status === "pass"
+                ? "border-green-500 bg-green-50/90 text-green-700"
+                : "border-red-500 bg-red-50/90 text-red-700"
+            }`}
+          >
+            <div className="font-medium">{label.name}</div>
+            {label.reasons.map((reason) => (
+              <div key={reason} className="text-[9px]">
+                {reason}
+              </div>
+            ))}
+          </div>
+        </Html>
+      ))}
     </>
   );
 }

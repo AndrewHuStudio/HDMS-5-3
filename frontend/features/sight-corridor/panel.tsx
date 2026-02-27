@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import * as THREE from "three";
 import { PlanViewport } from "@/components/city-scene";
@@ -6,32 +6,22 @@ import { SightCorridorPanel } from "@/components/sight-corridor-panel";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
 import { useSightCorridorStore } from "./store";
+import { SIGHT_CORRIDOR_DISPLAY_ELEVATION } from "./constants";
 
 export function SightCorridorPanelAdapter() {
   const modelFilePath = useModelStore((state) => state.modelFilePath);
   const modelFile = useModelStore((state) => state.externalModelFile);
-  const setModelFilePath = useModelStore((state) => state.setModelFilePath);
   const externalModelUrl = useModelStore((state) => state.externalModelUrl);
   const externalModelType = useModelStore((state) => state.externalModelType);
   const modelBounds = useModelStore((state) => state.modelBounds);
-  const modelScale = useModelStore((state) => state.modelScale);
   const modelTransform = useModelStore((state) => state.modelTransform);
-  const modelBuildings = useModelStore((state) => state.modelBuildings);
   const setModelError = useModelStore((state) => state.setModelError);
 
-  const position = useSightCorridorStore((state) => state.position);
-  const radius = useSightCorridorStore((state) => state.radius);
-  const result = useSightCorridorStore((state) => state.result);
   const collisionResult = useSightCorridorStore((state) => state.collisionResult);
   const showCorridorLayer = useSightCorridorStore((state) => state.showCorridorLayer);
-  const showLabels = useSightCorridorStore((state) => state.showLabels);
   const showBlockingLabels = useSightCorridorStore((state) => state.showBlockingLabels);
-  const setPosition = useSightCorridorStore((state) => state.setPosition);
-  const setRadius = useSightCorridorStore((state) => state.setRadius);
-  const setResult = useSightCorridorStore((state) => state.setResult);
   const setCollisionResult = useSightCorridorStore((state) => state.setCollisionResult);
   const setShowCorridorLayer = useSightCorridorStore((state) => state.setShowCorridorLayer);
-  const setShowLabels = useSightCorridorStore((state) => state.setShowLabels);
   const setShowBlockingLabels = useSightCorridorStore((state) => state.setShowBlockingLabels);
 
   const handleCorridorCheckRequest = async () => {
@@ -84,16 +74,11 @@ export function SightCorridorPanelAdapter() {
       modelBounds={viewportBounds}
       externalModelUrl={externalModelUrl}
       externalModelType={externalModelType}
-      sightCorridorPosition={position}
-      sightCorridorScale={modelScale}
-      sightCorridorRadius={radius}
-      sightCorridorResult={position ? result : null}
       corridorCollisionResult={collisionResult}
       showSightCorridorLayer={showCorridorLayer}
-      showSightCorridorLabels={showLabels}
       showBlockingLabels={showBlockingLabels}
+      sightCorridorDisplayElevation={SIGHT_CORRIDOR_DISPLAY_ELEVATION}
       modelTransform={modelTransform}
-      onPlanViewClick={setPosition}
       onModelError={setModelError}
       withCard={false}
       sceneUpAxis="z"
@@ -104,22 +89,10 @@ export function SightCorridorPanelAdapter() {
     <SightCorridorPanel
       modelFilePath={modelFilePath}
       modelFile={modelFile}
-      onModelPathResolved={setModelFilePath}
-      sceneScale={modelScale}
-      hemisphereRadius={radius}
-      onHemisphereRadiusChange={setRadius}
-      currentPosition={position}
-      onPositionChange={setPosition}
-      onResultChange={setResult}
-      sightCorridorResult={result}
-      modelBounds={modelBounds}
-      buildings={modelBuildings}
       corridorCollisionResult={collisionResult}
       corridorLayerVisible={showCorridorLayer}
       onCorridorCheckRequest={handleCorridorCheckRequest}
       onCorridorCheckClear={handleCorridorCheckClear}
-      showSightCorridorLabels={showLabels}
-      onShowSightCorridorLabelsChange={setShowLabels}
       showBlockingLabels={showBlockingLabels}
       onShowBlockingLabelsChange={setShowBlockingLabels}
       planViewportComponent={planViewport}

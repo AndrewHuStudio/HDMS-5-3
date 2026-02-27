@@ -14,7 +14,6 @@ import {
   Layers,
   CircleCheck,
   CircleX,
-  X,
   Play,
   RotateCcw,
   RefreshCw,
@@ -410,7 +409,6 @@ export function VectorUploadPanel() {
                     <th className="px-2 py-1.5 w-16 text-center">状态</th>
                     <th className="px-2 py-1.5 w-28 text-center">进度</th>
                     <th className="px-2 py-1.5 w-16 text-right">Chunks</th>
-                    <th className="px-2 py-1.5 w-14 text-right">版本</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -493,9 +491,6 @@ export function VectorUploadPanel() {
                         </td>
                         <td className="px-2 py-1.5 text-right text-xs text-muted-foreground">
                           {ing?.chunks_count ?? "--"}
-                        </td>
-                        <td className="px-2 py-1.5 text-right text-xs text-muted-foreground">
-                          {ing?.version ?? "--"}
                         </td>
                       </tr>
                     );

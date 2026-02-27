@@ -49,7 +49,7 @@ function formatDuration(ms: number): string {
 }
 
 /** 从多源数据聚合生成校验报告 */
-function buildReport(
+export function buildReport(
   healthDb: HealthDbResponse,
   consistency: ConsistencyRepairResponse,
   graphStats: GraphStatistics | null,
@@ -99,18 +99,7 @@ function buildReport(
       : `Milvus ${milvusVectors} / Mongo Chunks ${mongoChunks}, 差异 ${Math.abs(milvusVectors - mongoChunks)}`,
   });
 
-  // 3. 孤儿数据
-  const hasOrphans = consistency.orphan_chunks > 0 || consistency.orphan_vectors > 0 || consistency.orphan_graph_documents > 0;
-  checks.push({
-    id: "orphans",
-    label: "无孤儿数据",
-    passed: !hasOrphans,
-    detail: hasOrphans
-      ? `孤儿 chunks: ${consistency.orphan_chunks}, 孤儿向量: ${consistency.orphan_vectors}, 孤儿图谱文档: ${consistency.orphan_graph_documents}`
-      : "无孤儿 chunks / 向量 / 图谱文档",
-  });
-
-  // 4. 文档一致性（chunk/vector 计数不匹配的文档）
+  // 3. 文档一致性（chunk/vector 计数不匹配的文档）
   const inconsistentCount = consistency.inconsistent_docs.length;
   checks.push({
     id: "doc_consistency",
@@ -121,7 +110,7 @@ function buildReport(
       : `${inconsistentCount} 个文档存在 chunk/vector 计数不匹配`,
   });
 
-  // 5. 图谱覆盖率
+  // 4. 图谱覆盖率
   const graphCoverage = mongoDocuments > 0 ? consistency.graph_documents / mongoDocuments : 0;
   const graphCoverageOk = mongoDocuments === 0 || graphCoverage >= 0.8;
   checks.push({
@@ -133,7 +122,7 @@ function buildReport(
       : `${consistency.graph_documents}/${mongoDocuments} (${(graphCoverage * 100).toFixed(0)}%)`,
   });
 
-  // 6. OCR 产出 vs 入库对比
+  // 5. OCR 产出 vs 入库对比
   if (ocrFiles > 0) {
     const ingestCoverage = mongoDocuments >= ocrFiles;
     checks.push({

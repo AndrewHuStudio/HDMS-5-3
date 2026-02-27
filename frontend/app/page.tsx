@@ -5,7 +5,7 @@ import "@/features";
 import { Button } from "@/components/ui/button";
 import { CityScene, type ImportedMeshInfo, type ModelFileType, type ViewMode } from "@/components/city-scene";
 import { ViewControls } from "@/components/view-controls";
-import { ReviewPanel } from "@/components/review-panel";
+import { ApprovalChecklistPanel } from "@/components/approval-checklist-panel";
 import { QAPanel } from "@/components/qa-panel";
 import { DataUploadPanel } from "@/components/data-upload-panel";
 import { ModelUploader, type LayerInfo } from "@/components/model-uploader";
@@ -621,7 +621,7 @@ export default function CityControlSystem() {
             </div>
           ) : (
             <div className="h-full min-h-0 overflow-auto">
-              {activeView === "approval-checklist" && <ReviewPanel />}
+              {activeView === "approval-checklist" && <ApprovalChecklistPanel />}
               {activeTool && (
                 <ToolPanelWrapper tool={activeTool}>
                   {activeTool.Panel ? <activeTool.Panel /> : null}

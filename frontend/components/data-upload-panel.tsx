@@ -47,7 +47,7 @@ const processSections = [
 export function DataUploadPanel() {
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-background">
-      <div className="mx-auto w-full max-w-7xl space-y-6 p-6">
+      <div className="w-full space-y-6 px-4 py-6">
         {processSections.map((section) => {
           const SectionIcon = section.icon;
           return (

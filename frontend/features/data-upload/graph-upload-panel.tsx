@@ -60,6 +60,12 @@ function getGraphProgressValue(status: GraphProgressRow["status"]): number {
   return 0;
 }
 
+const CHINESE_GRAPH_ENTITY_TYPES = new Set(["片区", "地块", "空间要素", "法规", "标准", "导则"]);
+
+export function getDisplayEntityTypes(entityTypes: string[]): string[] {
+  return entityTypes.filter((type) => CHINESE_GRAPH_ENTITY_TYPES.has(type));
+}
+
 export function GraphUploadPanel() {
   const [elapsed, setElapsed] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -500,12 +506,12 @@ export function GraphUploadPanel() {
           </div>
 
           {/* 底部实体类型统计 */}
-          {statistics && statistics.entity_types.length > 0 && (
+          {statistics && getDisplayEntityTypes(statistics.entity_types).length > 0 && (
             <div className="mt-3 pt-3 border-t border-border/50 shrink-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Network className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">实体分布:</span>
-                {statistics.entity_types.map((type) => (
+                {getDisplayEntityTypes(statistics.entity_types).map((type) => (
                   <Badge key={type} variant="outline" className="text-xs">
                     {type} {statistics.entity_counts[type] ?? 0}
                   </Badge>
@@ -597,7 +603,6 @@ export function GraphUploadPanel() {
               <KnowledgeGraph
                 subgraph={graphSubgraph}
                 isStreaming={graphLoading}
-                height={560}
               />
             </div>
           </div>

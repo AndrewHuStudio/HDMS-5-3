@@ -85,10 +85,12 @@ interface KnowledgeGraphProps {
 export function KnowledgeGraph({
   subgraph,
   isStreaming,
-  height = 300,
+  height,
 }: KnowledgeGraphProps) {
   const graphRef = useRef<any>(null);
+  const graphViewportRef = useRef<HTMLDivElement | null>(null);
   const resizingLegendRef = useRef(false);
+  const [graphViewportSize, setGraphViewportSize] = useState({ width: 0, height: 0 });
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [hiddenNodeTypes, setHiddenNodeTypes] = useState<Set<string>>(new Set());
@@ -96,6 +98,10 @@ export function KnowledgeGraph({
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const bgColor = isDark ? "#0f172a" : "#ffffff";
+  const containerStyle = useMemo(
+    () => (height == null ? { height: "100%" } : { height }),
+    [height]
+  );
 
   const rawGraphData = useMemo(() => {
     if (!subgraph || !subgraph.nodes || subgraph.nodes.length === 0) {
@@ -262,6 +268,34 @@ export function KnowledgeGraph({
     };
   }, []);
 
+  useEffect(() => {
+    if (graphData.nodes.length === 0) return;
+
+    const target = graphViewportRef.current;
+    if (!target) return;
+
+    const updateViewportSize = () => {
+      const nextWidth = target.clientWidth;
+      const nextHeight = target.clientHeight;
+      setGraphViewportSize((prev) =>
+        prev.width === nextWidth && prev.height === nextHeight
+          ? prev
+          : { width: nextWidth, height: nextHeight }
+      );
+    };
+
+    updateViewportSize();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateViewportSize);
+      return () => window.removeEventListener("resize", updateViewportSize);
+    }
+
+    const observer = new ResizeObserver(updateViewportSize);
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [graphData.nodes.length]);
+
   const selectedNode = selectedNodeId ? nodeMap.get(selectedNodeId) ?? null : null;
   const selectedNodeColor = selectedNode ? NODE_COLORS[selectedNode.label] || "#6b7280" : "#6b7280";
 
@@ -276,11 +310,16 @@ export function KnowledgeGraph({
     });
   }, [selectedNodeId, selectedNode, graphData.links, nodeMap]);
 
+  const fallbackGraphHeight = height == null ? 240 : Math.max(180, height - 40);
+  const forceGraphHeight =
+    graphViewportSize.height > 0 ? graphViewportSize.height : fallbackGraphHeight;
+  const forceGraphWidth = graphViewportSize.width > 0 ? graphViewportSize.width : 640;
+
   if (!subgraph || rawGraphData.nodes.length === 0) {
     return (
       <div
         className="flex items-center justify-center text-xs text-muted-foreground"
-        style={{ height }}
+        style={containerStyle}
       >
         {isStreaming ? "正在检索知识图谱..." : "提问后将展示知识推理路径"}
       </div>
@@ -288,7 +327,7 @@ export function KnowledgeGraph({
   }
 
   return (
-    <div className="flex h-full min-h-0 rounded-md border border-border/50 bg-background" style={{ height }}>
+    <div className="flex h-full min-h-0 rounded-md border border-border/50 bg-background" style={containerStyle}>
       <aside
         className="w-[24rem] shrink-0 border-r border-border/50 bg-muted/20 grid"
         style={{ gridTemplateColumns: `${legendWidth}px 8px minmax(0,1fr)` }}
@@ -406,7 +445,7 @@ export function KnowledgeGraph({
             <Badge variant="outline" className="text-[10px]">类型 {visibleTypeCount}</Badge>
           </div>
         </div>
-        <div className="relative flex-1 min-h-0 overflow-hidden">
+        <div ref={graphViewportRef} className="relative flex-1 min-h-0 overflow-hidden">
           {graphData.nodes.length === 0 ? (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
               当前已隐藏全部类型，请在左侧图例点击眼睛恢复显示
@@ -441,7 +480,8 @@ export function KnowledgeGraph({
               }}
               linkDirectionalArrowLength={3.2}
               linkDirectionalArrowRelPos={0.85}
-              height={Math.max(180, height - 40)}
+              width={forceGraphWidth}
+              height={forceGraphHeight}
               backgroundColor={bgColor}
               warmupTicks={graphData.nodes.length > 500 ? 60 : 0}
               cooldownTicks={graphData.nodes.length > 500 ? 200 : 120}

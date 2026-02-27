@@ -13,6 +13,7 @@ import { useTheme } from "next-themes";
 import type { CityElement } from "@/lib/city-data";
 import { mockCityElements, elementTypeNames } from "@/lib/city-data";
 import type { HeightCheckSetbackVolume } from "@/lib/height-check-types";
+import { shouldRenderSetbackRateVisuals } from "@/lib/scene-visibility";
 import type { SetbackCheckResult } from "@/lib/setback-check-types";
 import type { BuildingResult } from "@/components/height-check-panel-pure";
 import type {
@@ -27,8 +28,6 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { Rhino3dmLoader } from "three/examples/jsm/loaders/3DMLoader.js";
 import { InfiniteGrid } from "./infinite-grid";
-import { PersonModel } from "./person-model";
-import { HemisphereModel } from "./hemisphere-model";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SceneContext } from "@/components/scene/scene-context";
 import { SceneExtensions, SceneOverlays } from "@/components/scene/scene-extensions";
@@ -67,7 +66,6 @@ const CLIP_FAR_MARGIN = 2;
 const CLIP_MIN_NEAR = 0.01;
 const CLIP_MIN_FAR = GRID_PLANE_SIZE;
 const CLIP_MAX_NEAR_RATIO = 0.05;
-const PERSON_SCALE_MULTIPLIER = 5;
 const BUILDING_LAYER_NAME = "模型_建筑体块";
 const SIGHT_CORRIDOR_LAYER_NAME = "限制_视线通廊";
 type Axis = "x" | "y" | "z";
@@ -753,6 +751,7 @@ interface ExternalModelProps {
   sightCorridorResult?: SightCorridorResult | null;
   corridorCollisionResult?: CorridorCollisionResult | null;
   showSightCorridorLayer?: boolean;
+  sightCorridorDisplayElevation?: number;
   showSightCorridorLabels?: boolean;
   showBlockingLabels?: boolean;
   setbackVolumes?: HeightCheckSetbackVolume[];
@@ -782,6 +781,7 @@ function ExternalModel({
   sightCorridorResult = null,
   corridorCollisionResult = null,
   showSightCorridorLayer = false,
+  sightCorridorDisplayElevation = 0,
   showSightCorridorLabels = false,
   showBlockingLabels = false,
   setbackVolumes = [],
@@ -1120,6 +1120,25 @@ function ExternalModel({
     });
   }, [corridorMeshes, showSightCorridorLayer]);
 
+  useEffect(() => {
+    if (!corridorMeshes.length) return;
+    const elevation = Number.isFinite(sightCorridorDisplayElevation)
+      ? Math.max(0, sightCorridorDisplayElevation)
+      : 0;
+    const upIndex = AXIS_INDEX[sceneUpAxis];
+
+    corridorMeshes.forEach((meshInfo) => {
+      const mesh = meshInfo.mesh;
+      if (!Array.isArray(mesh.userData.corridorBasePosition)) {
+        mesh.userData.corridorBasePosition = [mesh.position.x, mesh.position.y, mesh.position.z];
+      }
+      const [baseX, baseY, baseZ] = mesh.userData.corridorBasePosition as [number, number, number];
+      mesh.position.set(baseX, baseY, baseZ);
+      mesh.position.setComponent(upIndex, mesh.position.getComponent(upIndex) + elevation);
+      mesh.updateMatrixWorld();
+    });
+  }, [corridorMeshes, sceneUpAxis, sightCorridorDisplayElevation]);
+
   const sightCorridorVisibility = useMemo(() => {
     const byLayerIndex = new Map<number, "visible" | "blocked" | "out">();
     const byLayerName = new Map<string, "visible" | "blocked" | "out">();
@@ -1334,7 +1353,11 @@ function ExternalModel({
   }, []);
 
   const baseHighlightGeometry = useMemo(() => {
-    if (!setbackHighlightResult || !setbackHighlightResult.plots?.length) {
+    if (
+      !shouldRenderSetbackRateVisuals(showSetbackLabels) ||
+      !setbackHighlightResult ||
+      !setbackHighlightResult.plots?.length
+    ) {
       return null;
     }
     const baseSegments: [number, number, number][][] = [];
@@ -1345,10 +1368,14 @@ function ExternalModel({
       }
     });
     return buildLineGeometry(baseSegments);
-  }, [setbackHighlightResult, buildLineGeometry]);
+  }, [setbackHighlightResult, buildLineGeometry, showSetbackLabels]);
 
   const activeHighlightGeometry = useMemo(() => {
-    if (!setbackHighlightResult || !setbackHighlightResult.plots?.length) {
+    if (
+      !shouldRenderSetbackRateVisuals(showSetbackLabels) ||
+      !setbackHighlightResult ||
+      !setbackHighlightResult.plots?.length
+    ) {
       return null;
     }
     const targetType = setbackHighlightTarget?.type ?? null;
@@ -1364,7 +1391,7 @@ function ExternalModel({
       }
     });
     return buildLineGeometry(activeSegments);
-  }, [setbackHighlightResult, setbackHighlightTarget, buildLineGeometry]);
+  }, [setbackHighlightResult, setbackHighlightTarget, buildLineGeometry, showSetbackLabels]);
 
   useEffect(() => {
     return () => {
@@ -1379,7 +1406,11 @@ function ExternalModel({
   }, [activeHighlightGeometry]);
 
   const setbackPlotOverlays = useMemo(() => {
-    if (!setbackHighlightResult || !setbackHighlightResult.plots?.length) {
+    if (
+      !shouldRenderSetbackRateVisuals(showSetbackLabels) ||
+      !setbackHighlightResult ||
+      !setbackHighlightResult.plots?.length
+    ) {
       return [];
     }
 
@@ -1425,7 +1456,7 @@ function ExternalModel({
         frontageRate: number;
         isCompliant: boolean | null;
       }>;
-  }, [setbackHighlightResult]);
+  }, [setbackHighlightResult, showSetbackLabels]);
 
   const getHoverLabelPosition = (box: THREE.Box3) => {
     const centerX = (box.min.x + box.max.x) / 2;
@@ -1672,7 +1703,7 @@ function ExternalModel({
       )}
 
       {/* 贴线率高亮线 - 蓝色为常规与强调 */}
-      {modelTransform && baseHighlightGeometry && (
+      {modelTransform && shouldRenderSetbackRateVisuals(showSetbackLabels) && baseHighlightGeometry && (
         <group
           position={modelTransform.position}
           quaternion={modelTransform.quaternion}
@@ -1691,7 +1722,7 @@ function ExternalModel({
           </lineSegments>
         </group>
       )}
-      {modelTransform && activeHighlightGeometry && (
+      {modelTransform && shouldRenderSetbackRateVisuals(showSetbackLabels) && activeHighlightGeometry && (
         <group
           position={modelTransform.position}
           quaternion={modelTransform.quaternion}
@@ -1712,7 +1743,7 @@ function ExternalModel({
       )}
 
       {/* 贴线率地块标签与点击区域 */}
-      {modelTransform && setbackPlotOverlays.length > 0 && (
+      {modelTransform && shouldRenderSetbackRateVisuals(showSetbackLabels) && setbackPlotOverlays.length > 0 && (
         <>
           {setbackPlotOverlays.map((plot) => (
             <group
@@ -1858,6 +1889,7 @@ interface PlanViewportProps {
   sightCorridorPosition?: SightCorridorPosition | null;
   sightCorridorScale?: number;
   sightCorridorRadius?: number;
+  sightCorridorDisplayElevation?: number;
   sightCorridorResult?: SightCorridorResult | null;
   corridorCollisionResult?: CorridorCollisionResult | null;
   showSightCorridorLayer?: boolean;
@@ -2055,9 +2087,7 @@ export function PlanViewport({
   modelBounds,
   externalModelUrl,
   externalModelType,
-  sightCorridorPosition = null,
-  sightCorridorScale = 1,
-  sightCorridorRadius = 100,
+  sightCorridorDisplayElevation = 0,
   sightCorridorResult = null,
   corridorCollisionResult = null,
   showSightCorridorLayer = false,
@@ -2073,8 +2103,6 @@ export function PlanViewport({
   visibleLayerPrefixes,
   sceneUpAxis,
 }: PlanViewportProps) {
-  const personScale = 2 * sightCorridorScale * PERSON_SCALE_MULTIPLIER;
-  const hemisphereRadius = Math.max(0, sightCorridorRadius) * sightCorridorScale;
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const controlsRef = useRef<any | null>(null);
   const modelRootRef = useRef<THREE.Group | null>(null);
@@ -2171,6 +2199,7 @@ export function PlanViewport({
                   sightCorridorResult={sightCorridorResult}
                   corridorCollisionResult={corridorCollisionResult}
                   showSightCorridorLayer={showSightCorridorLayer}
+                  sightCorridorDisplayElevation={sightCorridorDisplayElevation}
                   showSightCorridorLabels={showSightCorridorLabels}
                   showBlockingLabels={showBlockingLabels}
                   sceneUpAxis={sceneUpAxis}
@@ -2185,19 +2214,6 @@ export function PlanViewport({
             />
 
             {overlayContent}
-            {sightCorridorPosition && (
-              <>
-                <PersonModel
-                  position={[sightCorridorPosition.x, sightCorridorPosition.y, sightCorridorPosition.z]}
-                  scale={personScale}
-                />
-                <HemisphereModel
-                  position={[sightCorridorPosition.x, sightCorridorPosition.y, sightCorridorPosition.z]}
-                  radius={hemisphereRadius}
-                  upAxis={sceneUpAxis}
-                />
-              </>
-            )}
 
             <OrbitControls
               ref={controlsRef}
@@ -2363,6 +2379,7 @@ export interface CitySceneProps {
   showSightCorridorLayer?: boolean;
   showSightCorridorLabels?: boolean;
   showBlockingLabels?: boolean;
+  sightCorridorDisplayElevation?: number;
   onModelBoundsComputed?: (bounds: THREE.Box3 | null) => void;
   onModelScaleComputed?: (scale: number) => void;
   onModelTransformComputed?: (transform: ModelTransformSnapshot | null) => void;
@@ -2389,14 +2406,12 @@ export function CityScene({
   setbackHighlightResult = null,
   setbackHighlightTarget = { type: null },
   onSetbackPlotSelect,
-  sightCorridorPosition = null,
-  sightCorridorScale = 1,
-  sightCorridorRadius = 100,
   sightCorridorResult = null,
   corridorCollisionResult = null,
   showSightCorridorLayer = false,
   showSightCorridorLabels = true,
   showBlockingLabels = false,
+  sightCorridorDisplayElevation = 0,
   onModelBoundsComputed,
   onModelScaleComputed,
   onModelTransformComputed,
@@ -2413,8 +2428,6 @@ export function CityScene({
   const hemiLightPosition: [number, number, number] = sceneUpAxis === "z" ? [0, 0, 1] : [0, 1, 0];
   const orthoCameraPosition = toSceneUp([50, 50, 50], sceneUpAxis);
   const perspectiveCameraPosition = toSceneUp([30, 24, 30], sceneUpAxis);
-  const personScale = 2 * sightCorridorScale * PERSON_SCALE_MULTIPLIER;
-  const hemisphereRadius = Math.max(0, sightCorridorRadius) * sightCorridorScale;
   const [modelBounds, setModelBounds] = useState<THREE.Box3 | null>(null);
   const { resolvedTheme } = useTheme();
   const isDarkTheme = resolvedTheme === "dark";
@@ -2602,6 +2615,7 @@ export function CityScene({
               sightCorridorResult={sightCorridorResult}
               corridorCollisionResult={corridorCollisionResult}
               showSightCorridorLayer={showSightCorridorLayer}
+              sightCorridorDisplayElevation={sightCorridorDisplayElevation}
               showSightCorridorLabels={showSightCorridorLabels}
               showBlockingLabels={showBlockingLabels}
               setbackVolumes={setbackVolumes}
@@ -2614,23 +2628,6 @@ export function CityScene({
               onSetbackPlotSelect={onSetbackPlotSelect}
               sceneUpAxis={sceneUpAxis}
             />
-          )}
-
-          {/* 视线通廊检测 - 人形模型和半球体 */}
-          {sightCorridorPosition && (
-            <>
-              {/* 小人模型：位置在监测点，高度1.8m */}
-              <PersonModel
-                position={[sightCorridorPosition.x, sightCorridorPosition.y, sightCorridorPosition.z]}
-                scale={personScale}
-              />
-              {/* 半球体：球心贴地（z=0），向上延伸 */}
-              <HemisphereModel
-                position={[sightCorridorPosition.x, sightCorridorPosition.y, sightCorridorPosition.z]}
-                radius={hemisphereRadius}
-                upAxis={sceneUpAxis}
-              />
-            </>
           )}
 
           <SceneExtensions />
