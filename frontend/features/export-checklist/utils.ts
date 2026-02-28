@@ -3,8 +3,32 @@ import type { DetailedStatistics } from "./types";
 /**
  * 将限高检测结果转换为详细统计
  */
-export function convertHeightCheckToStats(results: any[]): DetailedStatistics {
-  if (!results || results.length === 0) {
+export function convertHeightCheckToStats(rawResult: any): DetailedStatistics {
+  // 处理不同的数据结构
+  let results: any[] = [];
+
+  if (!rawResult) {
+    return {
+      passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
+      failed: { items: [], totalPlots: 0, totalBuildings: 0 },
+      summary: "无检测数据",
+    };
+  }
+
+  // 如果是数组，直接使用
+  if (Array.isArray(rawResult)) {
+    results = rawResult;
+  }
+  // 如果是对象，尝试提取 results 字段
+  else if (rawResult.results && Array.isArray(rawResult.results)) {
+    results = rawResult.results;
+  }
+  // 如果是对象，尝试提取 buildings 字段
+  else if (rawResult.buildings && Array.isArray(rawResult.buildings)) {
+    results = rawResult.buildings;
+  }
+
+  if (results.length === 0) {
     return {
       passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
       failed: { items: [], totalPlots: 0, totalBuildings: 0 },
