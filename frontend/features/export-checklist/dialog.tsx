@@ -330,9 +330,9 @@ function MiddlePreview({
         ref={pageRef}
         className="bg-white mx-auto shadow-lg"
         style={{
-          width: "210mm",
-          minHeight: "297mm",
-          padding: "20mm",
+          width: "794px", // A4 宽度 210mm ≈ 794px (at 96 DPI)
+          minHeight: "1123px", // A4 高度 297mm ≈ 1123px
+          padding: "60px", // 20mm ≈ 60px
           fontFamily: "SimSun, serif",
         }}
       >
