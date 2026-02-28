@@ -51,6 +51,7 @@ export function ExportChecklistDialog({
     if (open && features.length > 0) {
       const initialItems: FeatureChecklistItem[] = features.map((f) => {
         const detailedStats = convertResultToStats(f.id, f.rawResult);
+        console.log('Feature:', f.id, 'Stats:', detailedStats);
         return {
           id: f.id,
           name: f.name,
@@ -64,6 +65,7 @@ export function ExportChecklistDialog({
           govSuggestion: "",
         };
       });
+      console.log('Initial items:', initialItems);
       setItems(initialItems);
       // 移除自动截图
     }
@@ -320,6 +322,8 @@ function MiddlePreview({
 }) {
   const date = new Date().toLocaleDateString("zh-CN");
 
+  console.log('MiddlePreview items:', items);
+
   return (
     <div className="flex-1 overflow-y-auto bg-gray-100 p-6">
       <div
@@ -345,6 +349,11 @@ function MiddlePreview({
 
         {/* 检测项列表 */}
         <div className="space-y-8">
+          {items.length === 0 && (
+            <div className="text-center text-gray-500 py-8">
+              暂无检测数据
+            </div>
+          )}
           {items.map((item, index) => (
             <ChecklistItemDetail
               key={item.id}
