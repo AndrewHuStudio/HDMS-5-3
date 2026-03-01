@@ -7,6 +7,7 @@ export interface PedestrianEntranceCheckParams {
   entrance_layer?: string;
   redline_layer?: string;
   redline_layers?: string[];
+  plot_layer?: string;
   on_curve_tolerance?: number;
   min_required_count?: number;
 }

@@ -8,6 +8,7 @@ export interface VehicleEntranceCheckParams {
   main_intersection_layer?: string;
   secondary_intersection_layer?: string;
   branch_intersection_layer?: string;
+  plot_layer?: string;
   min_main_distance?: number;
   min_secondary_distance?: number;
   min_branch_distance?: number;

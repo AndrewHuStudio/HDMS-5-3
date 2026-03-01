@@ -24,9 +24,9 @@ python -m uvicorn app:app --reload --host 0.0.0.0 --port 8022 --env-file ..\..\.
 cd ..\review_system
 python -m uvicorn app:app --reload --host 0.0.0.0 --port 8023 --env-file ..\..\.env.external
 
-# approval (optional)
-cd ..\approval_checklist
-python -m uvicorn app:app --reload --host 0.0.0.0 --port 8024 --env-file ..\..\.env.external
+# approval_checklist（推荐用 Docker 固定模板）
+cd ..\..
+docker compose -f docker-compose.external.yml -p hdms_external --profile approval up -d approval_checklist
 
 # data process
 cd ..\..\data_process
@@ -59,4 +59,5 @@ systemctl reload nginx
 ## 6) Verify from another network
 - `https://YOUR_DOMAIN`
 - `https://YOUR_DOMAIN/qa/health`
+- `https://YOUR_DOMAIN/approval/health`
 - Upload a test file and verify output in `data/ocr_output_external`.

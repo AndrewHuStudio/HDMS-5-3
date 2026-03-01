@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2, Loader2, Eye, X } from "lucide-react";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
+import { sortReviewItems } from "@/lib/review-result-sort";
 import { checkHeight } from "./api";
 import { useHeightCheckStore } from "./store";
 
@@ -127,6 +128,15 @@ export function HeightCheckPanel() {
 
   const exceededVolumeCount = volumes.filter((v) => v.is_exceeded).length;
   const buildingCount = results.length;
+  const sortedResults = useMemo(
+    () =>
+      sortReviewItems(results, {
+        getStatus: (building) => (building.is_exceeded ? "fail" : "pass"),
+        getIndexHint: (building) => building.building_index,
+        getName: (building) => building.building_name ?? building.plot_name,
+      }),
+    [results]
+  );
   const hasResults = results.length > 0 || warnings.length > 0 || volumes.length > 0;
 
   return (
@@ -248,7 +258,7 @@ export function HeightCheckPanel() {
             </div>
           </CardHeader>
           <CardContent className="space-y-2.5 max-h-[400px] overflow-y-auto pt-2">
-            {results.map((building) => (
+            {sortedResults.map((building) => (
               <div
                 key={building.building_index}
                 className={`border rounded-lg p-3 transition-all hover:shadow-sm ${

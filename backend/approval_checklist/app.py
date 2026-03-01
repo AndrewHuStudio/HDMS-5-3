@@ -9,7 +9,11 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routes import ai_suggestion
+from core.config import load_env_file
+
+load_env_file()
+
+from routes import ai_suggestion, pdf_export
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,9 +31,20 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(ai_suggestion.router)
+app.include_router(pdf_export.router)
+
+# 兼容反向代理前缀：允许通过 /approval/* 访问
+app.include_router(ai_suggestion.router, prefix="/approval")
+app.include_router(pdf_export.router, prefix="/approval")
 
 
 @app.get("/health")
 def health() -> dict:
     """健康检查端点"""
+    return {"status": "ok", "service": "approval_checklist"}
+
+
+@app.get("/approval/health")
+def health_with_prefix() -> dict:
+    """兼容带 /approval 前缀的健康检查端点"""
     return {"status": "ok", "service": "approval_checklist"}

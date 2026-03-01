@@ -1,4 +1,34 @@
 services:
+  approval_checklist:
+    image: python:3.11-slim
+    container_name: hdms-approval-checklist
+    restart: unless-stopped
+    working_dir: /workspace/backend/approval_checklist
+    command: >
+      sh -lc "python -m pip install --no-cache-dir -r requirements.txt &&
+      python -m uvicorn app:app --reload --host 0.0.0.0 --port 8004"
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      HDMS_QA_BASE_URL: ${HDMS_APPROVAL_QA_BASE_URL:-http://host.docker.internal:8002}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./:/workspace
+    ports:
+      - "8004:8004"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/approval/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    profiles:
+      - approval
+    networks:
+      - hdms-network
+
   postgres:
     image: postgres:15-alpine
     container_name: hdms-postgres

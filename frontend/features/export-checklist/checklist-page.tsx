@@ -45,13 +45,32 @@ export function ChecklistPage({
             </h2>
 
             {/* 渲染图 */}
-            {item.screenshot && (
-              <div className="mb-3">
-                <img
-                  src={item.screenshot}
-                  alt={`${item.name}渲染图`}
-                  className="w-full max-w-md border border-gray-300"
-                />
+            {(item.screenshots.northeast || item.screenshots.northwest) && (
+              <div className="mb-3 grid grid-cols-2 gap-3">
+                {item.screenshots.northeast && (
+                  <div>
+                    <img
+                      src={item.screenshots.northeast}
+                      alt={`${item.name}东北视角检测结果图`}
+                      className="w-full border border-gray-300"
+                    />
+                    <p className="mt-1 text-[11px] text-gray-500 text-center">
+                      {item.name}东北视角检测结果图
+                    </p>
+                  </div>
+                )}
+                {item.screenshots.northwest && (
+                  <div>
+                    <img
+                      src={item.screenshots.northwest}
+                      alt={`${item.name}西北视角检测结果图`}
+                      className="w-full border border-gray-300"
+                    />
+                    <p className="mt-1 text-[11px] text-gray-500 text-center">
+                      {item.name}西北视角检测结果图
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

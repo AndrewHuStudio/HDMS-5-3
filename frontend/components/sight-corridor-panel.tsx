@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { sortReviewItems } from "@/lib/review-result-sort";
 import type { CorridorCollisionResult } from "@/lib/sight-corridor-types";
 
 interface SightCorridorPanelProps {
@@ -37,6 +38,15 @@ export function SightCorridorPanel({
   const corridorBlockedBuildings = corridorCollisionResult?.blocked_buildings ?? [];
   const corridorStatus = corridorCollisionResult?.status ?? null;
   const hasCorridorBlocks = corridorBlockedBuildings.length > 0;
+  const sortedBlockedBuildings = useMemo(
+    () =>
+      sortReviewItems(corridorBlockedBuildings, {
+        getStatus: () => "fail",
+        getIndexHint: (building) => building.layer_index ?? building.building_name,
+        getName: (building) => building.building_name,
+      }),
+    [corridorBlockedBuildings]
+  );
   const showBlocking = showBlockingLabels ?? localShowBlockingLabels;
   const hasCorridorResult = corridorStatus === "clear" || corridorStatus === "blocked";
 
@@ -156,7 +166,7 @@ export function SightCorridorPanel({
           )}
 
           {corridorStatus === "blocked" &&
-            corridorBlockedBuildings.map((building, index) => (
+            sortedBlockedBuildings.map((building, index) => (
               <div
                 key={`${building.mesh_id ?? building.building_name}-${index}`}
                 className="border rounded-lg p-3 transition-all hover:shadow-sm border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"

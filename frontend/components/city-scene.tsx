@@ -20,7 +20,6 @@ import type {
   SightCorridorPosition,
   PlanViewBuilding,
   PlanViewPoint,
-  SightCorridorResult,
   CorridorCollisionResult,
 } from "@/lib/sight-corridor-types";
 import type { ThreeEvent } from "@react-three/fiber";
@@ -61,6 +60,7 @@ const RHINO_AUTO_RATIO_MARGIN = 0.85;
 const RHINO_ALIGN_PLANE_TO_GROUND = true;
 const RHINO_PLANE_EIGEN_RATIO = 0.02;
 const RHINO_PLANE_SAMPLE_LIMIT = 5000;
+export const SCENE_HTML_Z_INDEX_RANGE: [number, number] = [20, 0];
 const CLIP_NEAR_MARGIN = 1.5;
 const CLIP_FAR_MARGIN = 2;
 const CLIP_MIN_NEAR = 0.01;
@@ -405,6 +405,7 @@ function CityElementMesh({
           position={[0, element.scale[1] / 2 + 0.3, 0]}
           center
           sprite
+          zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
           style={{ pointerEvents: 'none' }}
         >
           <div className="bg-white/95 border border-slate-200 rounded px-1.5 py-0.5 shadow-sm whitespace-nowrap">
@@ -748,11 +749,9 @@ interface ExternalModelProps {
   onTransformComputed?: (transform: ModelTransformSnapshot) => void;
   onBuildingsExtracted?: (buildings: PlanViewBuilding[]) => void;
   transformOverride?: ModelTransformSnapshot;
-  sightCorridorResult?: SightCorridorResult | null;
   corridorCollisionResult?: CorridorCollisionResult | null;
   showSightCorridorLayer?: boolean;
   sightCorridorDisplayElevation?: number;
-  showSightCorridorLabels?: boolean;
   showBlockingLabels?: boolean;
   setbackVolumes?: HeightCheckSetbackVolume[];
   showSetbackVolumes?: boolean;
@@ -778,11 +777,9 @@ function ExternalModel({
   onTransformComputed,
   onBuildingsExtracted,
   transformOverride,
-  sightCorridorResult = null,
   corridorCollisionResult = null,
   showSightCorridorLayer = false,
   sightCorridorDisplayElevation = 0,
-  showSightCorridorLabels = false,
   showBlockingLabels = false,
   setbackVolumes = [],
   showSetbackVolumes = false,
@@ -1139,72 +1136,6 @@ function ExternalModel({
     });
   }, [corridorMeshes, sceneUpAxis, sightCorridorDisplayElevation]);
 
-  const sightCorridorVisibility = useMemo(() => {
-    const byLayerIndex = new Map<number, "visible" | "blocked" | "out">();
-    const byLayerName = new Map<string, "visible" | "blocked" | "out">();
-    const byName = new Map<string, "visible" | "blocked" | "out">();
-
-    const normalizeKey = (value?: string | null) => normalizeLayerName(value);
-
-    const addEntry = (
-      entry: { building_name: string; layer_index?: number; layer_name?: string },
-      status: "visible" | "blocked" | "out"
-    ) => {
-      if (typeof entry.layer_index === "number") {
-        byLayerIndex.set(entry.layer_index, status);
-      }
-      const layerKey = normalizeKey(entry.layer_name);
-      if (layerKey) {
-        byLayerName.set(layerKey, status);
-      }
-      const nameKey = normalizeKey(entry.building_name);
-      if (nameKey) {
-        byName.set(nameKey, status);
-      }
-    };
-
-    if (sightCorridorResult) {
-      sightCorridorResult.visible_buildings.forEach((entry) => addEntry(entry, "visible"));
-      sightCorridorResult.invisible_buildings.forEach((entry) => {
-        const status = entry.reason === "被遮挡" ? "blocked" : "out";
-        addEntry(entry, status);
-      });
-    }
-
-    return { byLayerIndex, byLayerName, byName };
-  }, [sightCorridorResult]);
-
-  const resolveVisibilityStatus = useCallback((meshInfo: ImportedMeshInfo) => {
-    const inBuildingLayer = meshInfo.layerName ? isBuildingLayerName(meshInfo.layerName) : true;
-    if (!inBuildingLayer) return null;
-
-    const nameKey = normalizeLayerName(meshInfo.name);
-    if (nameKey) {
-      const status = sightCorridorVisibility.byName.get(nameKey);
-      if (status) return status;
-    }
-
-    const hasNameEntries = sightCorridorVisibility.byName.size > 0;
-    if (!hasNameEntries) {
-      if (typeof meshInfo.layerIndex === "number") {
-        const status = sightCorridorVisibility.byLayerIndex.get(meshInfo.layerIndex);
-        if (status) return status;
-      }
-      const layerKey = normalizeLayerName(meshInfo.layerName);
-      if (layerKey) {
-        const status = sightCorridorVisibility.byLayerName.get(layerKey);
-        if (status) return status;
-      }
-    }
-
-    return null;
-  }, [sightCorridorVisibility]);
-
-  const visibilityColors = useMemo(() => ({
-    visible: { fill: 0xd1fae5, edge: 0x22c55e, opacity: 1 },
-    blocked: { fill: 0xfef3c7, edge: 0xf59e0b, opacity: 1 },
-    out: { fill: 0xfee2e2, edge: 0xef4444, opacity: 1 },
-  } as const), []);
   const corridorHighlightColors = useMemo(() => ({
     fill: 0xfee2e2,
     edge: 0xf87171,
@@ -1219,19 +1150,10 @@ function ExternalModel({
       selectGreen: new THREE.MeshStandardMaterial({ ...base, color: 0x86efac }),
       hoverBlue: new THREE.MeshStandardMaterial({ ...base, color: 0xbfdbfe }),
       corridorBlocked: new THREE.MeshStandardMaterial({ ...base, color: 0xfee2e2, transparent: false, depthWrite: true }),
-      statusVisible: new THREE.MeshStandardMaterial({ ...base, color: 0xd1fae5, transparent: false, depthWrite: true }),
-      statusBlocked: new THREE.MeshStandardMaterial({ ...base, color: 0xfef3c7, transparent: false, depthWrite: true }),
-      statusOut: new THREE.MeshStandardMaterial({ ...base, color: 0xfee2e2, transparent: false, depthWrite: true }),
     };
   }, []);
 
-  const statusMaterialMap = useMemo(() => ({
-    visible: sharedMaterials.statusVisible,
-    blocked: sharedMaterials.statusBlocked,
-    out: sharedMaterials.statusOut,
-  }), [sharedMaterials]);
-
-  // 处理高亮效果 + 视线通廊结果着色
+  // 处理高亮效果 + 视线通廊碰撞着色
   useEffect(() => {
     const setEdgeColor = (mesh: THREE.Mesh, hex: number) => {
       mesh.children.forEach((child) => {
@@ -1252,7 +1174,6 @@ function ExternalModel({
       const isSelected = selectedMesh?.id === meshInfo.id;
       const isHovered = hoveredMesh === meshInfo.id;
       const isCorridorBlocked = isCorridorBlockedMesh(meshInfo);
-      const visibilityStatus = resolveVisibilityStatus(meshInfo);
 
       if (isSelected || isHovered) {
         mesh.material = isSelected ? sharedMaterials.selectGreen : sharedMaterials.hoverBlue;
@@ -1266,12 +1187,6 @@ function ExternalModel({
         return;
       }
 
-      if (!corridorCollisionResult && visibilityStatus) {
-        mesh.material = statusMaterialMap[visibilityStatus];
-        setEdgeColor(mesh, visibilityColors[visibilityStatus].edge);
-        return;
-      }
-
       // 恢复白膜材质
       mesh.material = sharedMaterials.white;
       setEdgeColor(mesh, 0x475569);
@@ -1280,13 +1195,10 @@ function ExternalModel({
     selectedMesh,
     hoveredMesh,
     meshList,
-    resolveVisibilityStatus,
-    visibilityColors,
     corridorHighlightColors,
     isCorridorBlockedMesh,
     corridorCollisionResult,
     sharedMaterials,
-    statusMaterialMap,
   ]);
 
   const setbackMeshes = useMemo(() => {
@@ -1469,43 +1381,6 @@ function ExternalModel({
 
     return [centerX, box.max.y + 0.3, centerZ] as [number, number, number];
   };
-
-  const visibilityLabelStyles: Record<"visible" | "blocked" | "out", string> = {
-    visible: "border-green-500 bg-green-50/90 text-green-700",
-    blocked: "border-orange-500 bg-orange-50/90 text-orange-700",
-    out: "border-red-500 bg-red-50/90 text-red-700",
-  };
-
-  const visibilityLabelText: Record<"visible" | "blocked" | "out", string> = {
-    visible: "可见",
-    blocked: "被遮挡",
-    out: "视野外",
-  };
-
-  const sightCorridorLabels = useMemo(() => {
-    if (!sightCorridorResult || !showSightCorridorLabels) return [];
-
-    return meshList
-      .map((meshInfo) => {
-        if (selectedMesh?.id === meshInfo.id || hoveredMesh === meshInfo.id) {
-          return null;
-        }
-        const status = resolveVisibilityStatus(meshInfo);
-        if (!status) return null;
-        return {
-          key: `sight-label-${meshInfo.id}`,
-          name: meshInfo.name,
-          status,
-      position: getHoverLabelPosition(meshInfo.boundingBox),
-    };
-  })
-  .filter(Boolean) as Array<{
-      key: string;
-      name: string;
-      status: "visible" | "blocked" | "out";
-      position: [number, number, number];
-    }>;
-  }, [meshList, selectedMesh, hoveredMesh, resolveVisibilityStatus, sightCorridorResult, showSightCorridorLabels]);
 
   const corridorBlockingLabels = useMemo(() => {
     if (!corridorCollisionResult || !showBlockingLabels) return [];
@@ -1763,7 +1638,13 @@ function ExternalModel({
                 <meshBasicMaterial transparent opacity={0} depthWrite={false} />
               </mesh>
               {showSetbackLabels && (
-                <Html position={plot.labelPosition} center sprite style={{ pointerEvents: "none" }}>
+                <Html
+                  position={plot.labelPosition}
+                  center
+                  sprite
+                  zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
+                  style={{ pointerEvents: "none" }}
+                >
                   <div
                     className={`rounded px-2 py-1 text-[11px] shadow-sm border min-w-[70px] text-center ${
                       plot.isCompliant === true
@@ -1786,7 +1667,14 @@ function ExternalModel({
       )}
 
       {heightCheckLabels.map((label) => (
-        <Html key={label.key} position={label.position} center sprite style={{ pointerEvents: "none" }}>
+        <Html
+          key={label.key}
+          position={label.position}
+          center
+          sprite
+          zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
+          style={{ pointerEvents: "none" }}
+        >
           <div
             className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
               label.isExceeded
@@ -1805,19 +1693,15 @@ function ExternalModel({
         </Html>
       ))}
 
-      {sightCorridorLabels.map((label) => (
-        <Html key={label.key} position={label.position} center sprite style={{ pointerEvents: "none" }}>
-          <div
-            className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${visibilityLabelStyles[label.status]}`}
-          >
-            <div className="font-medium">{label.name}</div>
-            <div className="text-[9px]">{visibilityLabelText[label.status]}</div>
-          </div>
-        </Html>
-      ))}
-
       {corridorBlockingLabels.map((label) => (
-        <Html key={label.key} position={label.position} center sprite style={{ pointerEvents: "none" }}>
+        <Html
+          key={label.key}
+          position={label.position}
+          center
+          sprite
+          zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
+          style={{ pointerEvents: "none" }}
+        >
           <div className="rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap border-red-300 bg-red-50/80 text-red-700">
             <div className="font-medium">{label.name}</div>
           </div>
@@ -1834,6 +1718,7 @@ function ExternalModel({
               position={getHoverLabelPosition(hovered.boundingBox)}
               center
               sprite
+              zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
               style={{ pointerEvents: 'none' }}
             >
               <div className="bg-white/95 border border-slate-200 rounded px-1.5 py-0.5 shadow-sm whitespace-nowrap">
@@ -1890,10 +1775,8 @@ interface PlanViewportProps {
   sightCorridorScale?: number;
   sightCorridorRadius?: number;
   sightCorridorDisplayElevation?: number;
-  sightCorridorResult?: SightCorridorResult | null;
   corridorCollisionResult?: CorridorCollisionResult | null;
   showSightCorridorLayer?: boolean;
-  showSightCorridorLabels?: boolean;
   showBlockingLabels?: boolean;
   modelTransform?: ModelTransformSnapshot | null;
   onPlanViewClick?: (position: SightCorridorPosition) => void;
@@ -2088,10 +1971,8 @@ export function PlanViewport({
   externalModelUrl,
   externalModelType,
   sightCorridorDisplayElevation = 0,
-  sightCorridorResult = null,
   corridorCollisionResult = null,
   showSightCorridorLayer = false,
-  showSightCorridorLabels = false,
   showBlockingLabels = false,
   modelTransform = null,
   onPlanViewClick,
@@ -2150,7 +2031,7 @@ export function PlanViewport({
 
   const viewportContent = (
     <>
-      <div className="w-full aspect-square" onClick={handleCanvasClick}>
+      <div className="w-full aspect-square relative z-0" onClick={handleCanvasClick}>
         <Canvas
           shadows
           style={{ background: planBackground, width: "100%", height: "100%" }}
@@ -2196,11 +2077,9 @@ export function PlanViewport({
                     setPlanModelBounds(bounds.clone());
                   }}
                   transformOverride={modelTransform ?? undefined}
-                  sightCorridorResult={sightCorridorResult}
                   corridorCollisionResult={corridorCollisionResult}
                   showSightCorridorLayer={showSightCorridorLayer}
                   sightCorridorDisplayElevation={sightCorridorDisplayElevation}
-                  showSightCorridorLabels={showSightCorridorLabels}
                   showBlockingLabels={showBlockingLabels}
                   sceneUpAxis={sceneUpAxis}
                 />
@@ -2241,11 +2120,11 @@ export function PlanViewport({
   );
 
   if (!withCard) {
-    return <div className="space-y-2">{viewportContent}</div>;
+    return <div className="space-y-2 relative z-0">{viewportContent}</div>;
   }
 
   return (
-    <Card className="gap-0">
+    <Card className="gap-0 relative z-0">
       <CardHeader className="px-3 py-0">
         <CardTitle className="text-sm">{title}</CardTitle>
       </CardHeader>
@@ -2361,6 +2240,7 @@ export interface CitySceneProps {
   onImportedMeshSelect?: (mesh: ImportedMeshInfo | null) => void;
   selectedImportedMesh?: ImportedMeshInfo | null;
   viewMode?: ViewMode;
+  activeViewId?: string;
   selectionMode?: "building" | "setback" | null;
   onGeometrySelect?: (geometry: any, type: "building" | "setback") => void;
   setbackVolumes?: HeightCheckSetbackVolume[];
@@ -2374,10 +2254,8 @@ export interface CitySceneProps {
   sightCorridorPosition?: SightCorridorPosition | null;
   sightCorridorScale?: number;
   sightCorridorRadius?: number;
-  sightCorridorResult?: SightCorridorResult | null;
   corridorCollisionResult?: CorridorCollisionResult | null;
   showSightCorridorLayer?: boolean;
-  showSightCorridorLabels?: boolean;
   showBlockingLabels?: boolean;
   sightCorridorDisplayElevation?: number;
   onModelBoundsComputed?: (bounds: THREE.Box3 | null) => void;
@@ -2396,6 +2274,7 @@ export function CityScene({
   onImportedMeshSelect,
   selectedImportedMesh,
   viewMode = "perspective",
+  activeViewId = "approval-checklist",
   selectionMode = null,
   onGeometrySelect,
   setbackVolumes = [],
@@ -2406,10 +2285,8 @@ export function CityScene({
   setbackHighlightResult = null,
   setbackHighlightTarget = { type: null },
   onSetbackPlotSelect,
-  sightCorridorResult = null,
   corridorCollisionResult = null,
   showSightCorridorLayer = false,
-  showSightCorridorLabels = true,
   showBlockingLabels = false,
   sightCorridorDisplayElevation = 0,
   onModelBoundsComputed,
@@ -2502,6 +2379,7 @@ export function CityScene({
     <SceneContext.Provider value={sceneSnapshot}>
       <div
         className="w-full h-full relative"
+        data-scene-capture-root
         onContextMenu={(e) => e.preventDefault()}
         style={{ touchAction: 'none' }}
       >
@@ -2612,11 +2490,9 @@ export function CityScene({
                 onModelTransformComputed?.(transform);
               }}
               onBuildingsExtracted={onBuildingsExtracted}
-              sightCorridorResult={sightCorridorResult}
               corridorCollisionResult={corridorCollisionResult}
               showSightCorridorLayer={showSightCorridorLayer}
               sightCorridorDisplayElevation={sightCorridorDisplayElevation}
-              showSightCorridorLabels={showSightCorridorLabels}
               showBlockingLabels={showBlockingLabels}
               setbackVolumes={setbackVolumes}
               showSetbackVolumes={showSetbackVolumes}
@@ -2630,7 +2506,7 @@ export function CityScene({
             />
           )}
 
-          <SceneExtensions />
+          <SceneExtensions activeViewId={activeViewId} />
 
           <OrbitControls
             ref={controlsRef}
@@ -2662,7 +2538,7 @@ export function CityScene({
           />
         </Suspense>
       </Canvas>
-      <SceneOverlays />
+      <SceneOverlays activeViewId={activeViewId} />
     </div>
     </SceneContext.Provider>
   );

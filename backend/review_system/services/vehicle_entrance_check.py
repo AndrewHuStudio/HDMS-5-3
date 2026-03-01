@@ -143,6 +143,68 @@ def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
     return fallback
 
 
+def _candidate_plot_layers(file3dm: rhino3dm.File3dm, preferred_layer: str) -> List[str]:
+    """返回地块图层候选列表：优先传入图层，其次自动发现包含“地块”的图层"""
+    candidates: List[str] = []
+    if preferred_layer and preferred_layer.strip():
+        candidates.append(preferred_layer)
+
+    seen = {_normalize_layer_name(name) for name in candidates}
+    for layer in file3dm.Layers:
+        for name in _layer_name_candidates(layer):
+            if "地块" not in name:
+                continue
+            normalized = _normalize_layer_name(name)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            candidates.append(name)
+            break
+    return candidates
+
+
+def _resolve_plot_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
+    """从对象 UserText 或 Attributes 中读取地块名称，找不到时返回 fallback"""
+    name = (
+        _get_user_text(obj, "地块名称")
+        or _get_user_text(obj, "地块")
+        or _get_user_text(obj, "名称")
+    )
+    if name:
+        return name
+    return _resolve_object_name(obj, fallback)
+
+
+def _point_in_bbox_xy(point: Point3D, bbox: rhino3dm.BoundingBox, tol: float = 0.0) -> bool:
+    """判断点在 XY 平面上是否位于 BoundingBox 内（含容差）"""
+    return (
+        (bbox.Min.X - tol) <= point.X <= (bbox.Max.X + tol)
+        and (bbox.Min.Y - tol) <= point.Y <= (bbox.Max.Y + tol)
+    )
+
+
+def _match_plot_name_by_point(
+    point: Point3D, plot_entries: List[Dict[str, object]], tol: float = 0.0
+) -> Optional[str]:
+    """根据点坐标匹配所属地块：优先 bbox 包含，失败时回退最近地块中心"""
+    for entry in plot_entries:
+        bbox = entry.get("bbox")
+        if isinstance(bbox, rhino3dm.BoundingBox) and _point_in_bbox_xy(point, bbox, tol):
+            return str(entry["name"])
+
+    best_name: Optional[str] = None
+    best_dist = float("inf")
+    for entry in plot_entries:
+        center = entry.get("center")
+        if not isinstance(center, rhino3dm.Point3d):
+            continue
+        dist = math.hypot(point.X - center.X, point.Y - center.Y)
+        if dist < best_dist:
+            best_dist = dist
+            best_name = str(entry["name"])
+    return best_name
+
+
 def check_vehicle_entrance_distance(
     *,
     model_path: Path,
@@ -150,6 +212,7 @@ def check_vehicle_entrance_distance(
     main_intersection_layer: str = "场地_主干路交叉口",
     secondary_intersection_layer: str = "场地_次干路交叉口",
     branch_intersection_layer: str = "场地_支路交叉口",
+    plot_layer: str = "场景_地块",
     min_main_distance: float = 100.0,
     min_secondary_distance: float = 80.0,
     min_branch_distance: float = 50.0,
@@ -175,6 +238,27 @@ def check_vehicle_entrance_distance(
     main_points = [pt for _, geom in main_objects if (pt := _geometry_to_point(geom))]
     secondary_points = [pt for _, geom in secondary_objects if (pt := _geometry_to_point(geom))]
     branch_points = [pt for _, geom in branch_objects if (pt := _geometry_to_point(geom))]
+    detected_plot_layer = plot_layer
+    plot_objects: List[Tuple[rhino3dm.File3dmObject, rhino3dm.CommonObject]] = []
+    for candidate in _candidate_plot_layers(file3dm, plot_layer):
+        objs = _load_objects_from_layer(file3dm, candidate)
+        if objs:
+            plot_objects = objs
+            detected_plot_layer = candidate
+            break
+
+    plot_entries: List[Dict[str, object]] = []
+    for plot_index, (plot_obj, plot_geometry) in enumerate(plot_objects):
+        bbox = _get_bounding_box(plot_geometry)
+        if bbox is None:
+            continue
+        plot_entries.append(
+            {
+                "name": _resolve_plot_name(plot_obj, f"地块{plot_index + 1}"),
+                "bbox": bbox,
+                "center": bbox.Center,
+            }
+        )
 
     warnings: List[str] = []
     if not main_points:
@@ -183,6 +267,8 @@ def check_vehicle_entrance_distance(
         warnings.append("未找到次干路交叉口，已默认通过该项")
     if not branch_points:
         warnings.append("未找到支路交叉口，已默认通过该项")
+    if not plot_entries:
+        warnings.append("未找到地块图层或无有效地块边界，出入口无法映射地块名称")
 
     results = []
     passed = 0
@@ -220,6 +306,7 @@ def check_vehicle_entrance_distance(
                 "name": name,
                 "object_id": str(object_id) if object_id else None,
                 "point": [float(point.X), float(point.Y), float(point.Z)],
+                "plot_name": _match_plot_name_by_point(point, plot_entries, 0.0),
                 "status": status,
                 "reasons": reasons,
                 "distances": {
@@ -244,6 +331,7 @@ def check_vehicle_entrance_distance(
             "main_intersection_layer": main_intersection_layer,
             "secondary_intersection_layer": secondary_intersection_layer,
             "branch_intersection_layer": branch_intersection_layer,
+            "plot_layer": detected_plot_layer,
             "min_main_distance": min_main_distance,
             "min_secondary_distance": min_secondary_distance,
             "min_branch_distance": min_branch_distance,

@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
+import { sortReviewItems } from "@/lib/review-result-sort";
 import { checkVehicleEntrance } from "./api";
 import { useVehicleEntranceStore } from "./store";
 import type { VehicleEntranceResult } from "./types";
@@ -24,6 +25,7 @@ const DEFAULT_LAYERS = {
   mainIntersection: "场地_主干路交叉口",
   secondaryIntersection: "场地_次干路交叉口",
   branchIntersection: "场地_支路交叉口",
+  plot: "场景_地块",
 };
 
 const reasonLabels: Record<string, string> = {
@@ -108,6 +110,7 @@ export function VehicleEntrancePanel() {
         main_intersection_layer: DEFAULT_LAYERS.mainIntersection,
         secondary_intersection_layer: DEFAULT_LAYERS.secondaryIntersection,
         branch_intersection_layer: DEFAULT_LAYERS.branchIntersection,
+        plot_layer: DEFAULT_LAYERS.plot,
         min_main_distance: minMainDistance,
         min_secondary_distance: minSecondaryDistance,
         min_branch_distance: minBranchDistance,
@@ -138,7 +141,15 @@ export function VehicleEntrancePanel() {
   const passed = result?.summary?.passed ?? 0;
   const failed = result?.summary?.failed ?? 0;
 
-  const items = useMemo(() => result?.results ?? [], [result]);
+  const items = useMemo(
+    () =>
+      sortReviewItems(result?.results ?? [], {
+        getStatus: (item) => (item.status === "pass" ? "pass" : "fail"),
+        getIndexHint: (item) => item.index,
+        getName: (item) => item.name,
+      }),
+    [result]
+  );
 
   useEffect(() => {
     if (!selectedEntranceId) return;

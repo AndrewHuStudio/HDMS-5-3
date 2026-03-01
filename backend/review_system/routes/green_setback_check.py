@@ -25,6 +25,7 @@ class GreenSetbackCheckRequest(BaseModel):
     model_path: str
     green_setback_layer: str = "场地_绿地退线"
     building_layer: str = "模型_建筑体块"
+    plot_layer: str = "场景_地块"
     ignore_height: float = 2.0
 
 
@@ -48,13 +49,15 @@ def green_setback_check(request: GreenSetbackCheckRequest) -> Dict[str, Any]:
             model_path=resolved_path,
             green_setback_layer=request.green_setback_layer,
             building_layer=request.building_layer,
+            plot_layer=request.plot_layer,
             ignore_height=request.ignore_height,
         )
     except ValueError as exc:
         logger.warning(
-            "Green setback check failed: %s (green_setback_layer=%s, building_layer=%s)",
+            "Green setback check failed: %s (green_setback_layer=%s, building_layer=%s, plot_layer=%s)",
             exc,
             request.green_setback_layer,
             request.building_layer,
+            request.plot_layer,
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc

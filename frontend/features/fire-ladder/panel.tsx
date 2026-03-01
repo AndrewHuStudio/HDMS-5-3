@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { AlertCircle, CheckCircle2, Loader2, X, Eye } from "lucide-react";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
+import { sortReviewItems } from "@/lib/review-result-sort";
 import { checkFireLadder } from "./api";
 import { useFireLadderStore } from "./store";
 
@@ -134,6 +135,15 @@ export function FireLadderPanel() {
   };
 
   const hasResults = results.length > 0 || warnings.length > 0;
+  const sortedResults = useMemo(
+    () =>
+      sortReviewItems(results, {
+        getStatus: (item) => (item.status === "pass" ? "pass" : "fail"),
+        getIndexHint: (item) => item.redline_index,
+        getName: (item) => item.redline_name,
+      }),
+    [results]
+  );
   const passedCount = results.filter((item) => item.status === "pass").length;
   const failedCount = results.filter((item) => item.status === "fail").length;
 
@@ -246,7 +256,7 @@ export function FireLadderPanel() {
             </div>
           </CardHeader>
           <CardContent className="space-y-2.5 max-h-[320px] overflow-y-auto pt-2">
-            {results.map((item) => (
+            {sortedResults.map((item) => (
               <div
                 key={item.redline_index}
                 className={`border rounded-lg p-3 transition-all hover:shadow-sm ${

@@ -27,6 +27,7 @@ class VehicleEntranceCheckRequest(BaseModel):
     main_intersection_layer: str = "场地_主干路交叉口"
     secondary_intersection_layer: str = "场地_次干路交叉口"
     branch_intersection_layer: str = "场地_支路交叉口"
+    plot_layer: str = "场景_地块"
     min_main_distance: float = 100.0
     min_secondary_distance: float = 80.0
     min_branch_distance: float = 50.0
@@ -54,6 +55,7 @@ def vehicle_entrance_check(request: VehicleEntranceCheckRequest) -> Dict[str, An
             main_intersection_layer=request.main_intersection_layer,
             secondary_intersection_layer=request.secondary_intersection_layer,
             branch_intersection_layer=request.branch_intersection_layer,
+            plot_layer=request.plot_layer,
             min_main_distance=request.min_main_distance,
             min_secondary_distance=request.min_secondary_distance,
             min_branch_distance=request.min_branch_distance,

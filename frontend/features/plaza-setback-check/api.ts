@@ -6,6 +6,7 @@ export interface PlazaSetbackCheckParams {
   model_path: string;
   plaza_setback_layer?: string;
   building_layer?: string;
+  plot_layer?: string;
   ignore_height?: number;
 }
 

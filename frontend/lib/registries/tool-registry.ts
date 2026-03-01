@@ -12,6 +12,7 @@ import type { LucideIcon } from "lucide-react";
 import type { ControlCategory } from "@/lib/city-data";
 import type { ToolStatus } from "@/lib/navigation-types";
 import type { CitySceneProps } from "@/components/city-scene";
+import { filterToolsByView, resolveVisibleToolIds } from "@/lib/tool-view-state";
 
 export interface ToolRegistration {
   id: string;
@@ -63,8 +64,20 @@ export const toolRegistry = new ToolRegistry();
 
 const useEmptySceneState = () => ({});
 
-export const useToolSceneProps = (): Partial<CitySceneProps> => {
+export const getToolsForActiveView = (activeView: string): ToolRegistration[] =>
+  filterToolsByView(toolRegistry.getAll(), activeView);
+
+export const useToolSceneProps = (activeView: string): Partial<CitySceneProps> => {
   const tools = toolRegistry.getAll();
-  const scenePropsList = tools.map((tool) => (tool.useSceneState ?? useEmptySceneState)());
-  return scenePropsList.reduce((acc, current) => ({ ...acc, ...current }), {});
+  const visibleToolIds = new Set(resolveVisibleToolIds(activeView, tools.map((tool) => tool.id)));
+  const scenePropsByTool = tools.map((tool) => ({
+    id: tool.id,
+    props: (tool.useSceneState ?? useEmptySceneState)(),
+  }));
+  return scenePropsByTool.reduce<Partial<CitySceneProps>>((acc, toolState) => {
+    if (!visibleToolIds.has(toolState.id)) {
+      return acc;
+    }
+    return { ...acc, ...toolState.props };
+  }, {});
 };

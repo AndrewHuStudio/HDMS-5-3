@@ -5,7 +5,6 @@ import { ChevronRight, ChevronDown, Eye, EyeOff, Loader2, Download, PlayCircle }
 import { Button } from "@/components/ui/button";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase, API_BASE, normalizeApiBase } from "@/lib/api-base";
-import { toolRegistry } from "@/lib/registries/tool-registry";
 import { ExportChecklistDialog } from "@/features/export-checklist/dialog";
 
 // Feature stores
@@ -19,6 +18,11 @@ import { usePedestrianEntranceStore } from "@/features/pedestrian-entrance-check
 import { useGreenSetbackStore } from "@/features/green-setback-check/store";
 import { usePlazaSetbackStore } from "@/features/plaza-setback-check/store";
 import { useSetbackRateCheckStore } from "@/features/setback-rate-check/store";
+import {
+  hideAllReviewToolVisuals,
+  showOnlyReviewToolVisuals,
+} from "@/lib/review-visual-controls";
+import { getPedestrianEntranceViolationCount } from "@/lib/approval-checklist-status";
 
 // Feature APIs
 import { checkHeight } from "@/features/height-check/api";
@@ -74,8 +78,6 @@ const FEATURES: FeatureMeta[] = [
   { id: "setback-rate-check", name: "贴线率检测", Panel: SetbackRatePanel },
 ];
 
-// ---- visibility helpers ----
-
 function useFeatureVisible(id: FeatureId): boolean {
   const heightVisible = useHeightCheckStore((s) => s.showSetbackVolumes || s.showHeightCheckLabels);
   const setbackVisible = useSetbackCheckStore((s) => s.showHighlights);
@@ -103,62 +105,9 @@ function useFeatureVisible(id: FeatureId): boolean {
   return map[id];
 }
 
-function hideAll() {
-  useHeightCheckStore.getState().setShowSetbackVolumes(false);
-  useHeightCheckStore.getState().setShowHeightCheckLabels(false);
-  useSetbackCheckStore.getState().setShowHighlights(false);
-  useSightCorridorStore.getState().setShowCorridorLayer(false);
-  useSightCorridorStore.getState().setShowBlockingLabels(false);
-  useFireLadderStore.getState().setShowLabels(false);
-  useSkyBridgeStore.getState().setShowLabels(false);
-  useVehicleEntranceStore.getState().setShowHighlights(false);
-  usePedestrianEntranceStore.getState().setShowHighlights(false);
-  useGreenSetbackStore.getState().setShowHighlights(false);
-  usePlazaSetbackStore.getState().setShowHighlights(false);
-  useSetbackRateCheckStore.getState().setShowSetbackLabels(false);
-}
-
-function showFeature(id: FeatureId) {
-  hideAll();
-  switch (id) {
-    case "height-check":
-      useHeightCheckStore.getState().setShowSetbackVolumes(true);
-      useHeightCheckStore.getState().setShowHeightCheckLabels(true);
-      break;
-    case "setback-check":
-      useSetbackCheckStore.getState().setShowHighlights(true);
-      break;
-    case "sight-corridor":
-      useSightCorridorStore.getState().setShowCorridorLayer(true);
-      useSightCorridorStore.getState().setShowBlockingLabels(true);
-      break;
-    case "fire-ladder":
-      useFireLadderStore.getState().setShowLabels(true);
-      break;
-    case "sky-bridge":
-      useSkyBridgeStore.getState().setShowLabels(true);
-      break;
-    case "vehicle-entrance-check":
-      useVehicleEntranceStore.getState().setShowHighlights(true);
-      break;
-    case "pedestrian-entrance-check":
-      usePedestrianEntranceStore.getState().setShowHighlights(true);
-      break;
-    case "green-setback-check":
-      useGreenSetbackStore.getState().setShowHighlights(true);
-      break;
-    case "plaza-setback-check":
-      usePlazaSetbackStore.getState().setShowHighlights(true);
-      break;
-    case "setback-rate-check":
-      useSetbackRateCheckStore.getState().setShowSetbackLabels(true);
-      break;
-  }
-}
-
 // ---- result summary helpers ----
 
-function useFeatureStatus(id: FeatureId): { checked: boolean; summary: string } {
+function useFeatureStatus(id: FeatureId): { checked: boolean; summary: string; isPass: boolean } {
   const heightResults = useHeightCheckStore((s) => s.results);
   const setbackResult = useSetbackCheckStore((s) => s.result);
   const corridorResult = useSightCorridorStore((s) => s.collisionResult);
@@ -172,83 +121,93 @@ function useFeatureStatus(id: FeatureId): { checked: boolean; summary: string } 
 
   switch (id) {
     case "height-check": {
-      if (!heightResults.length) return { checked: false, summary: "未检测" };
+      if (!heightResults.length) return { checked: false, summary: "未检测", isPass: false };
       const exceeded = heightResults.filter((r) => r.is_exceeded).length;
       return {
         checked: true,
         summary: exceeded > 0 ? `${exceeded} 项超高` : `全部通过 (${heightResults.length})`,
+        isPass: exceeded === 0,
       };
     }
     case "setback-check": {
-      if (!setbackResult) return { checked: false, summary: "未检测" };
+      if (!setbackResult) return { checked: false, summary: "未检测", isPass: false };
       const { exceeded_count, total_buildings } = setbackResult.summary;
       return {
         checked: true,
         summary: exceeded_count > 0 ? `${exceeded_count} 项违规` : `全部通过 (${total_buildings})`,
+        isPass: exceeded_count === 0,
       };
     }
     case "sight-corridor": {
-      if (!corridorResult) return { checked: false, summary: "未检测" };
+      if (!corridorResult) return { checked: false, summary: "未检测", isPass: false };
       const blocking = corridorResult.blocked_buildings?.length ?? 0;
       return {
         checked: true,
         summary: blocking > 0 ? `${blocking} 栋遮挡` : "通廊畅通",
+        isPass: blocking === 0,
       };
     }
     case "fire-ladder": {
-      if (!fireLadderResults.length) return { checked: false, summary: "未检测" };
+      if (!fireLadderResults.length) return { checked: false, summary: "未检测", isPass: false };
       const failed = fireLadderResults.filter((r) => r.status === "fail").length;
       return {
         checked: true,
         summary: failed > 0 ? `${failed} 项不合格` : `全部通过 (${fireLadderResults.length})`,
+        isPass: failed === 0,
       };
     }
     case "sky-bridge": {
-      if (!skyBridgeResults.length) return { checked: false, summary: "未检测" };
+      if (!skyBridgeResults.length) return { checked: false, summary: "未检测", isPass: false };
       const failed = skyBridgeResults.filter((r) => r.status === "fail").length;
       return {
         checked: true,
         summary: failed > 0 ? `${failed} 项不合格` : `全部通过 (${skyBridgeResults.length})`,
+        isPass: failed === 0,
       };
     }
     case "vehicle-entrance-check": {
-      if (!vehicleResult) return { checked: false, summary: "未检测" };
+      if (!vehicleResult) return { checked: false, summary: "未检测", isPass: false };
       const violations = vehicleResult.results?.filter((r) => r.status === "fail").length ?? 0;
       return {
         checked: true,
         summary: violations > 0 ? `${violations} 项违规` : `全部通过`,
+        isPass: violations === 0,
       };
     }
     case "pedestrian-entrance-check": {
-      if (!pedestrianResult) return { checked: false, summary: "未检测" };
-      const violations = pedestrianResult.results?.filter((r) => r.status === "fail").length ?? 0;
+      if (!pedestrianResult) return { checked: false, summary: "未检测", isPass: false };
+      const violations = getPedestrianEntranceViolationCount(pedestrianResult);
       return {
         checked: true,
         summary: violations > 0 ? `${violations} 项违规` : `全部通过`,
+        isPass: violations === 0,
       };
     }
     case "green-setback-check": {
-      if (!greenResult) return { checked: false, summary: "未检测" };
+      if (!greenResult) return { checked: false, summary: "未检测", isPass: false };
       const violations = greenResult.summary?.violations ?? 0;
       return {
         checked: true,
         summary: violations > 0 ? `${violations} 项违规` : `全部通过`,
+        isPass: violations === 0,
       };
     }
     case "plaza-setback-check": {
-      if (!plazaResult) return { checked: false, summary: "未检测" };
+      if (!plazaResult) return { checked: false, summary: "未检测", isPass: false };
       const violations = plazaResult.summary?.violations ?? 0;
       return {
         checked: true,
         summary: violations > 0 ? `${violations} 项违规` : `全部通过`,
+        isPass: violations === 0,
       };
     }
     case "setback-rate-check": {
-      if (!setbackRateResult) return { checked: false, summary: "未检测" };
+      if (!setbackRateResult) return { checked: false, summary: "未检测", isPass: false };
       const failed = setbackRateResult.plots?.filter((p) => p.is_compliant === false).length ?? 0;
       return {
         checked: true,
         summary: failed > 0 ? `${failed} 个地块不达标` : `全部通过`,
+        isPass: failed === 0,
       };
     }
   }
@@ -299,12 +258,18 @@ async function runCheck(id: FeatureId, modelPath: string): Promise<void> {
       break;
     }
     case "vehicle-entrance-check": {
-      const data = await checkVehicleEntrance({ model_path: modelPath });
+      const data = await checkVehicleEntrance({
+        model_path: modelPath,
+        plot_layer: "场景_地块",
+      });
       useVehicleEntranceStore.getState().setResult(data);
       break;
     }
     case "pedestrian-entrance-check": {
-      const data = await checkPedestrianEntrance({ model_path: modelPath });
+      const data = await checkPedestrianEntrance({
+        model_path: modelPath,
+        plot_layer: "场景_地块",
+      });
       usePedestrianEntranceStore.getState().setResult(data);
       break;
     }
@@ -343,7 +308,7 @@ async function runCheck(id: FeatureId, modelPath: string): Promise<void> {
     }
   }
   // 检测完成后确保不自动显示高亮（需用户主动点击眼睛）
-  hideAll();
+  hideAllReviewToolVisuals();
 }
 
 // ---- export helper ----
@@ -355,25 +320,25 @@ function openExportDialog(setExportDialogOpen: (open: boolean) => void) {
 function getFeatureRawState(id: FeatureId) {
   switch (id) {
     case "height-check":
-      return { results: useHeightCheckStore.getState().results };
+      return useHeightCheckStore.getState().results;
     case "setback-check":
-      return { result: useSetbackCheckStore.getState().result };
+      return useSetbackCheckStore.getState().result;
     case "sight-corridor":
-      return { result: useSightCorridorStore.getState().collisionResult };
+      return useSightCorridorStore.getState().collisionResult;
     case "fire-ladder":
       return { results: useFireLadderStore.getState().results };
     case "sky-bridge":
       return { results: useSkyBridgeStore.getState().results };
     case "vehicle-entrance-check":
-      return { result: useVehicleEntranceStore.getState().result };
+      return useVehicleEntranceStore.getState().result;
     case "pedestrian-entrance-check":
-      return { result: usePedestrianEntranceStore.getState().result };
+      return usePedestrianEntranceStore.getState().result;
     case "green-setback-check":
-      return { result: useGreenSetbackStore.getState().result };
+      return useGreenSetbackStore.getState().result;
     case "plaza-setback-check":
-      return { result: usePlazaSetbackStore.getState().result };
+      return usePlazaSetbackStore.getState().result;
     case "setback-rate-check":
-      return { result: useSetbackRateCheckStore.getState().result };
+      return useSetbackRateCheckStore.getState().result;
   }
 }
 
@@ -393,14 +358,14 @@ function ChecklistItem({
   onRunCheck: () => void;
 }) {
   const isVisible = useFeatureVisible(feature.id);
-  const { checked, summary } = useFeatureStatus(feature.id);
+  const { checked, summary, isPass } = useFeatureStatus(feature.id);
 
   const handleEyeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isVisible) {
-      hideAll();
+      hideAllReviewToolVisuals();
     } else {
-      showFeature(feature.id);
+      showOnlyReviewToolVisuals(feature.id);
     }
   };
 
@@ -428,9 +393,9 @@ function ChecklistItem({
           className={`text-xs shrink-0 ${
             !checked
               ? "text-muted-foreground"
-              : summary.includes("通过") && !summary.includes("不") && !summary.includes("违规") && !summary.includes("超高") && !summary.includes("遮挡") && !summary.includes("不合格") && !summary.includes("不达标")
-              ? "text-green-600 dark:text-green-400"
-              : "text-red-600 dark:text-red-400"
+              : isPass
+                ? "text-green-600 dark:text-green-400"
+                : "text-red-600 dark:text-red-400"
           }`}
         >
           {summary}
@@ -496,11 +461,10 @@ export function ApprovalChecklistPanel() {
   const [errors, setErrors] = useState<Partial<Record<FeatureId, string>>>({});
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
-  // 离开审批清单时清除所有检测结果和高亮
+  // 离开审批清单时仅隐藏高亮，保留检测结果以支持会话内切页返回
   useEffect(() => {
     return () => {
-      hideAll();
-      toolRegistry.resetAll();
+      hideAllReviewToolVisuals();
     };
   }, []);
 
@@ -637,10 +601,12 @@ export function ApprovalChecklistPanel() {
         onOpenChange={setExportDialogOpen}
         features={FEATURES.map((f) => {
           const state = getFeatureRawState(f.id);
-          const { summary } = useFeatureStatus(f.id);
+          const { checked, summary, isPass } = useFeatureStatus(f.id);
           return {
             id: f.id,
             name: f.name,
+            checked,
+            isPass,
             summary,
             rawResult: state,
           };

@@ -14,12 +14,14 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
+import { sortReviewItems } from "@/lib/review-result-sort";
 import { checkPedestrianEntrance } from "./api";
 import { usePedestrianEntranceStore } from "./store";
 
 const DEFAULT_LAYERS = {
   entrance: "场地_人行出入口",
   redline: "限制_建筑红线",
+  plot: "场景_地块",
 };
 
 const summaryReasonLabels: Record<string, string> = {
@@ -102,6 +104,7 @@ export function PedestrianEntrancePanel() {
         model_path: resolvedModelPath,
         entrance_layer: DEFAULT_LAYERS.entrance,
         redline_layer: DEFAULT_LAYERS.redline,
+        plot_layer: DEFAULT_LAYERS.plot,
         on_curve_tolerance: onCurveTolerance,
       });
 
@@ -131,7 +134,15 @@ export function PedestrianEntrancePanel() {
   const requiredMin = result?.summary?.required_min ?? REQUIRED_MIN_COUNT;
   const overallStatus = result?.summary?.status ?? "fail";
   const summaryReasons = result?.summary?.reasons ?? [];
-  const redlines = useMemo(() => result?.redlines ?? [], [result]);
+  const redlines = useMemo(
+    () =>
+      sortReviewItems(result?.redlines ?? [], {
+        getStatus: (item) => (item.status === "pass" ? "pass" : "fail"),
+        getIndexHint: (item) => item.index,
+        getName: (item) => item.plot_name ?? item.redline_name ?? "",
+      }),
+    [result]
+  );
 
   return (
     <div className="space-y-3">
@@ -305,7 +316,7 @@ export function PedestrianEntrancePanel() {
                     />
                     <span className="text-xs font-medium">{isFail ? "不通过" : "通过"}</span>
                     <span className="text-xs text-muted-foreground">
-                      红线 {item.index + 1}
+                      {item.plot_name || `红线 ${item.index + 1}`}
                     </span>
                   </div>
                   <div className="text-xs text-muted-foreground">

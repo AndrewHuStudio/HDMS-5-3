@@ -185,17 +185,21 @@ export function GreenSetbackSceneLayer() {
   }, [greenAreaMeshes, areaStatusMap]);
 
   useEffect(() => {
-    originalMaterials.current.forEach((material, meshId) => {
-      const meshInfo = meshList.find((mesh) => mesh.id === meshId);
-      if (meshInfo?.mesh) {
-        meshInfo.mesh.material = material;
-        delete (meshInfo.mesh.userData as { persistentHighlight?: boolean }).persistentHighlight;
-      }
-    });
-    originalMaterials.current.clear();
+    const restoreHighlights = () => {
+      originalMaterials.current.forEach((material, meshId) => {
+        const meshInfo = meshList.find((mesh) => mesh.id === meshId);
+        if (meshInfo?.mesh) {
+          meshInfo.mesh.material = material;
+          delete (meshInfo.mesh.userData as { persistentHighlight?: boolean }).persistentHighlight;
+        }
+      });
+      originalMaterials.current.clear();
+    };
+
+    restoreHighlights();
 
     if (!showHighlights || (violationIndex.ids.size === 0 && violationIndex.names.size === 0)) {
-      return;
+      return restoreHighlights;
     }
 
     meshList.forEach((meshInfo) => {
@@ -218,6 +222,8 @@ export function GreenSetbackSceneLayer() {
       (meshInfo.mesh.userData as { persistentHighlight?: boolean }).persistentHighlight = true;
       meshInfo.mesh.material = highlightMaterial;
     });
+
+    return restoreHighlights;
   }, [meshList, violationIndex, showHighlights, highlightMaterial]);
 
   const greenAreaContent = (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Eye, Loader2, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
+import { sortReviewItems } from "@/lib/review-result-sort";
 import { checkSetback } from "./api";
 import { useSetbackCheckStore } from "./store";
 
@@ -111,6 +112,15 @@ export function SetbackPanel() {
   };
 
   const buildingResults = result?.buildings ?? [];
+  const sortedBuildingResults = useMemo(
+    () =>
+      sortReviewItems(buildingResults, {
+        getStatus: (building) => (building.is_exceeded ? "fail" : "pass"),
+        getIndexHint: (building) => building.building_index,
+        getName: (building) => building.building_name ?? building.plot_name,
+      }),
+    [buildingResults]
+  );
   const exceededCount = buildingResults.filter((b) => b.is_exceeded).length;
   const compliantCount = buildingResults.length - exceededCount;
   const hasResults = buildingResults.length > 0;
@@ -213,7 +223,7 @@ export function SetbackPanel() {
             </div>
           </CardHeader>
           <CardContent className="space-y-2.5 max-h-[420px] overflow-y-auto pt-2">
-            {buildingResults.map((building) => (
+            {sortedBuildingResults.map((building) => (
               <div
                 key={building.building_index}
                 className={`border rounded-lg p-3 transition-all hover:shadow-sm ${
@@ -240,8 +250,8 @@ export function SetbackPanel() {
                 </div>
                 <div className="space-y-1 text-xs">
                   <div className="flex justify-between items-center py-0.5">
-                    <span className="text-muted-foreground">所属退线:</span>
-                    <span className="font-medium">{building.plot_name ?? "未匹配退线"}</span>
+                    <span className="text-muted-foreground">所属地块:</span>
+                    <span className="font-medium">{building.plot_name ?? "未匹配地块"}</span>
                   </div>
                   {building.is_exceeded && building.reason === "missing_setback" && (
                     <div className="flex justify-between items-center py-0.5">

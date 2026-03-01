@@ -16,8 +16,24 @@ import type { CityElement } from "@/lib/city-data";
 import { mainNavigation } from "@/lib/navigation-config";
 import type { ActiveView } from "@/lib/navigation-types";
 import { toolRegistry, useToolSceneProps } from "@/lib/registries/tool-registry";
+import { deriveToolRunStatus, resolveAutoRevealToolId } from "@/lib/tool-view-state";
+import {
+  hideAllReviewToolVisuals,
+  REVIEW_TOOL_IDS,
+  showOnlyReviewToolVisuals,
+} from "@/lib/review-visual-controls";
 import { useModelStore } from "@/lib/stores/model-store";
 import { useQAViewStore } from "@/lib/stores/qa-store";
+import { useHeightCheckStore } from "@/features/height-check/store";
+import { useSetbackCheckStore } from "@/features/setback-check/store";
+import { useSightCorridorStore } from "@/features/sight-corridor/store";
+import { useFireLadderStore } from "@/features/fire-ladder/store";
+import { useSkyBridgeStore } from "@/features/sky-bridge/store";
+import { useVehicleEntranceStore } from "@/features/vehicle-entrance-check/store";
+import { usePedestrianEntranceStore } from "@/features/pedestrian-entrance-check/store";
+import { useGreenSetbackStore } from "@/features/green-setback-check/store";
+import { usePlazaSetbackStore } from "@/features/plaza-setback-check/store";
+import { useSetbackRateCheckStore } from "@/features/setback-rate-check/store";
 import { cn } from "@/lib/utils";
 import {
   Building2,
@@ -68,11 +84,83 @@ export default function CityControlSystem() {
   const togglePinQAConversation = useQAViewStore((state) => state.togglePinConversation);
 
   const tools = toolRegistry.getAll();
-  const toolSceneProps = useToolSceneProps();
+  const toolSceneProps = useToolSceneProps(activeView);
+  const heightCheckResults = useHeightCheckStore((state) => state.results);
+  const setbackResult = useSetbackCheckStore((state) => state.result);
+  const corridorResult = useSightCorridorStore((state) => state.collisionResult);
+  const fireLadderResults = useFireLadderStore((state) => state.results);
+  const skyBridgeResults = useSkyBridgeStore((state) => state.results);
+  const vehicleResult = useVehicleEntranceStore((state) => state.result);
+  const pedestrianResult = usePedestrianEntranceStore((state) => state.result);
+  const greenResult = useGreenSetbackStore((state) => state.result);
+  const plazaResult = usePlazaSetbackStore((state) => state.result);
+  const setbackRateResult = useSetbackRateCheckStore((state) => state.result);
+  const toolStatusMap = useMemo<Record<string, "idle" | "pass" | "fail">>(() => ({
+    "height-check": deriveToolRunStatus(
+      heightCheckResults.length > 0,
+      heightCheckResults.some((result) => result.is_exceeded)
+    ),
+    "setback-check": deriveToolRunStatus(
+      Boolean(setbackResult),
+      (setbackResult?.summary.exceeded_count ?? 0) > 0
+    ),
+    "view-corridor-check": deriveToolRunStatus(
+      Boolean(corridorResult),
+      corridorResult ? corridorResult.status !== "clear" : false
+    ),
+    "fire-ladder-check": deriveToolRunStatus(
+      fireLadderResults.length > 0,
+      fireLadderResults.some((result) => result.status === "fail")
+    ),
+    "sky-bridge-check": deriveToolRunStatus(
+      skyBridgeResults.length > 0,
+      skyBridgeResults.some((result) => result.status === "fail")
+    ),
+    "vehicle-entrance-check": deriveToolRunStatus(
+      Boolean(vehicleResult),
+      (vehicleResult?.summary.failed ?? 0) > 0
+    ),
+    "pedestrian-entrance-check": deriveToolRunStatus(
+      Boolean(pedestrianResult),
+      (pedestrianResult?.summary.failed ?? 0) > 0
+    ),
+    "green-setback-check": deriveToolRunStatus(
+      Boolean(greenResult),
+      (greenResult?.summary.violations ?? 0) > 0
+    ),
+    "plaza-setback-check": deriveToolRunStatus(
+      Boolean(plazaResult),
+      (plazaResult?.summary.violations ?? 0) > 0
+    ),
+    "setback-rate-check": deriveToolRunStatus(
+      Boolean(setbackRateResult),
+      setbackRateResult ? setbackRateResult.plots.some((plot) => plot.is_compliant === false) : false
+    ),
+  }), [
+    heightCheckResults,
+    setbackResult,
+    corridorResult,
+    fireLadderResults,
+    skyBridgeResults,
+    vehicleResult,
+    pedestrianResult,
+    greenResult,
+    plazaResult,
+    setbackRateResult,
+  ]);
+  const reviewToolIds = useMemo<string[]>(() => [...REVIEW_TOOL_IDS], []);
   const currentModelRef = useRef<{ url: string | null; type: ModelFileType | null }>({
     url: null,
     type: null,
   });
+
+  useEffect(() => {
+    const autoRevealToolId = resolveAutoRevealToolId(activeView, reviewToolIds, toolStatusMap);
+    hideAllReviewToolVisuals();
+    if (autoRevealToolId) {
+      showOnlyReviewToolVisuals(autoRevealToolId);
+    }
+  }, [activeView, reviewToolIds, toolStatusMap]);
 
   const handleModelLoad = (
     url: string,
@@ -129,28 +217,19 @@ export default function CityControlSystem() {
             label: tool.name,
             icon: tool.icon,
             description: tool.description,
+            toolRunStatus: toolStatusMap[tool.id] ?? "idle",
           })),
         };
       }
       return item;
     });
-  }, [tools]);
+  }, [tools, toolStatusMap]);
 
   const activeTool = toolRegistry.get(activeView);
   const isQAPanel = activeView === "qa-assistant";
   const isQAHistoryDocked = isQAPanel && isQAHistoryOpen;
   const effectiveRightPanelWidth = rightPanelWidth + (isQAHistoryDocked ? QA_HISTORY_PANEL_WIDTH : 0);
   const isDataUploadView = activeView === "data-upload";
-  const previousViewRef = useRef<ActiveView>(activeView);
-  const toolIdSet = useMemo(() => new Set(tools.map((tool) => tool.id)), [tools]);
-
-  useEffect(() => {
-    const prevView = previousViewRef.current;
-    if (prevView !== activeView && toolIdSet.has(prevView)) {
-      toolRegistry.resetAll();
-    }
-    previousViewRef.current = activeView;
-  }, [activeView, toolIdSet]);
 
   useEffect(() => {
     if (!isQAPanel) {
@@ -308,6 +387,7 @@ export default function CityControlSystem() {
             }}
             selectedImportedMesh={selectedImportedMesh}
             viewMode={viewMode}
+            activeViewId={activeView}
             {...toolSceneProps}
             onModelBoundsComputed={(bounds) => {
               console.log('[page.tsx] onModelBoundsComputed:', bounds);

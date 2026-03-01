@@ -5,7 +5,7 @@
  */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Eye, Loader2, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
+import { sortReviewItems } from "@/lib/review-result-sort";
 import { checkPlazaSetback } from "./api";
 import { usePlazaSetbackStore } from "./store";
 import type { PlazaSetbackAreaResult } from "./types";
@@ -22,6 +23,7 @@ import type { PlazaSetbackAreaResult } from "./types";
 const DEFAULT_LAYERS = {
   plaza: "场地_广场退线",
   building: "模型_建筑体块",
+  plot: "场景_地块",
 };
 
 export function PlazaSetbackPanel() {
@@ -96,6 +98,7 @@ export function PlazaSetbackPanel() {
         model_path: resolvedModelPath,
         plaza_setback_layer: DEFAULT_LAYERS.plaza,
         building_layer: DEFAULT_LAYERS.building,
+        plot_layer: DEFAULT_LAYERS.plot,
         ignore_height: ignoreHeight,
       });
 
@@ -125,6 +128,15 @@ export function PlazaSetbackPanel() {
   const hasResults = Boolean(result);
   const violations = result?.summary?.violations ?? 0;
   const compliant = result?.summary?.compliant ?? 0;
+  const sortedAreaResults = useMemo(
+    () =>
+      sortReviewItems(result?.area_results ?? [], {
+        getStatus: (item) => (item.status === "pass" ? "pass" : "fail"),
+        getIndexHint: (item) => item.name,
+        getName: (item) => item.name,
+      }),
+    [result]
+  );
 
   useEffect(() => {
     if (!selectedAreaName) return;
@@ -252,7 +264,7 @@ export function PlazaSetbackPanel() {
             </p>
           </CardHeader>
           <CardContent className="space-y-2">
-            {result?.area_results.map((item: PlazaSetbackAreaResult) => (
+            {sortedAreaResults.map((item: PlazaSetbackAreaResult) => (
               <div
                 key={item.name}
                 role="button"

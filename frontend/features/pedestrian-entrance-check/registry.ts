@@ -1,4 +1,4 @@
-﻿/** 人行出入口检测 - 注册到 toolRegistry */
+/** 人行出入口检测 - 注册到 toolRegistry */
 import { PersonStanding } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
 import { PedestrianEntrancePanel } from "./panel";

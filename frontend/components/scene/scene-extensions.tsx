@@ -1,9 +1,13 @@
-﻿"use client";
+"use client";
 
-import { toolRegistry } from "@/lib/registries/tool-registry";
+import { getToolsForActiveView } from "@/lib/registries/tool-registry";
 
-export function SceneExtensions() {
-  const tools = toolRegistry.getAll();
+interface SceneExtensionsProps {
+  activeViewId: string;
+}
+
+export function SceneExtensions({ activeViewId }: SceneExtensionsProps) {
+  const tools = getToolsForActiveView(activeViewId);
   return (
     <>
       {tools.map((tool) => {
@@ -15,8 +19,8 @@ export function SceneExtensions() {
   );
 }
 
-export function SceneOverlays() {
-  const tools = toolRegistry.getAll();
+export function SceneOverlays({ activeViewId }: SceneExtensionsProps) {
+  const tools = getToolsForActiveView(activeViewId);
   return (
     <>
       {tools.map((tool) => {

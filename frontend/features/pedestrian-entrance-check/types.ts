@@ -7,6 +7,7 @@ export interface PedestrianEntranceResult {
   name: string;
   object_id?: string | null;
   point: [number, number, number];
+  plot_name?: string | null;
   status: "pass" | "fail";
   reasons: PedestrianEntranceReason[];
 }
@@ -24,6 +25,8 @@ export interface PedestrianEntranceCheckResponse {
   redlines: {
     index: number;
     layer: string;
+    redline_name?: string | null;
+    plot_name?: string | null;
     point: [number, number, number];
     entrance_count: number;
     status: "pass" | "fail";
@@ -35,6 +38,7 @@ export interface PedestrianEntranceCheckResponse {
     entrance_layer: string;
     redline_layer: string;
     redline_layers: string[];
+    plot_layer?: string;
     on_curve_tolerance: number;
     min_required_count: number;
   };

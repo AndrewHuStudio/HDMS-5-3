@@ -25,6 +25,7 @@ class PlazaSetbackCheckRequest(BaseModel):
     model_path: str
     plaza_setback_layer: str = "\u573a\u5730_\u5e7f\u573a\u9000\u7ebf"
     building_layer: str = "\u6a21\u578b_\u5efa\u7b51\u4f53\u5757"
+    plot_layer: str = "\u573a\u666f_\u5730\u5757"
     ignore_height: float = 2.0
 
 
@@ -48,13 +49,15 @@ def plaza_setback_check(request: PlazaSetbackCheckRequest) -> Dict[str, Any]:
             model_path=resolved_path,
             plaza_setback_layer=request.plaza_setback_layer,
             building_layer=request.building_layer,
+            plot_layer=request.plot_layer,
             ignore_height=request.ignore_height,
         )
     except ValueError as exc:
         logger.warning(
-            "Plaza setback check failed: %s (plaza_setback_layer=%s, building_layer=%s)",
+            "Plaza setback check failed: %s (plaza_setback_layer=%s, building_layer=%s, plot_layer=%s)",
             exc,
             request.plaza_setback_layer,
             request.building_layer,
+            request.plot_layer,
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc

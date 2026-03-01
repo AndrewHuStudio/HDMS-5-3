@@ -378,6 +378,68 @@ def _resolve_plaza_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
     return fallback
 
 
+def _resolve_plot_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
+    """从对象 UserText 或 Attributes 中读取地块名称，找不到时返回 fallback"""
+    name = (
+        _get_user_text(obj, "地块名称")
+        or _get_user_text(obj, "地块")
+        or _get_user_text(obj, "名称")
+    )
+    if name:
+        return name
+    return _resolve_object_name(obj, fallback)
+
+
+def _candidate_plot_layers(file3dm: rhino3dm.File3dm, preferred_layer: str) -> List[str]:
+    """返回地块图层候选列表：优先传入图层，其次自动发现包含“地块”的图层"""
+    candidates: List[str] = []
+    if preferred_layer and preferred_layer.strip():
+        candidates.append(preferred_layer)
+
+    seen = {_normalize_layer_name(name) for name in candidates}
+    for layer in file3dm.Layers:
+        for name in _layer_name_candidates(layer):
+            if "地块" not in name:
+                continue
+            normalized = _normalize_layer_name(name)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            candidates.append(name)
+            break
+    return candidates
+
+
+def _point_in_bbox_xy(point: rhino3dm.Point3d, bbox: rhino3dm.BoundingBox, tol: float = 0.0) -> bool:
+    """判断点在 XY 平面上是否位于 BoundingBox 内（含容差）"""
+    return (
+        (bbox.Min.X - tol) <= point.X <= (bbox.Max.X + tol)
+        and (bbox.Min.Y - tol) <= point.Y <= (bbox.Max.Y + tol)
+    )
+
+
+def _match_plot_name_by_point(
+    point: rhino3dm.Point3d, plot_entries: List[Dict[str, object]], tol: float = 0.0
+) -> Optional[str]:
+    """根据点坐标匹配所属地块：优先 bbox 包含，失败时回退最近地块中心"""
+    for entry in plot_entries:
+        bbox = entry.get("bbox")
+        if isinstance(bbox, rhino3dm.BoundingBox) and _point_in_bbox_xy(point, bbox, tol):
+            return str(entry["name"])
+
+    best_name: Optional[str] = None
+    best_dist = float("inf")
+    for entry in plot_entries:
+        center = entry.get("center")
+        if not isinstance(center, rhino3dm.Point3d):
+            continue
+        dist = math.hypot(point.X - center.X, point.Y - center.Y)
+        if dist < best_dist:
+            best_dist = dist
+            best_name = str(entry["name"])
+    return best_name
+
+
 def _group_plaza_areas(entries: List[Dict]) -> List[Dict[str, List[Dict]]]:
     """
     将广场退线区域按包含关系分组为外轮廓和内孔。
@@ -408,6 +470,7 @@ def check_plaza_setback_violation(
     model_path: Path,
     plaza_setback_layer: str = "场地_广场退线",
     building_layer: str = "模型_建筑体块",
+    plot_layer: str = "场景_地块",
     ignore_height: float = 2.0,
 ) -> Dict:
     """
@@ -426,6 +489,30 @@ def check_plaza_setback_violation(
     building_objects = _load_objects_from_layer(file3dm, building_layer)
     if not building_objects:
         raise ValueError(f"No buildings found in layer: {building_layer}")
+
+    warnings: List[str] = []
+    plot_entries: List[Dict[str, object]] = []
+    detected_plot_layer = plot_layer
+    plot_objects: List[Tuple[rhino3dm.File3dmObject, rhino3dm.CommonObject]] = []
+    for candidate in _candidate_plot_layers(file3dm, plot_layer):
+        objs = _load_objects_from_layer(file3dm, candidate)
+        if objs:
+            plot_objects = objs
+            detected_plot_layer = candidate
+            break
+    for plot_index, (plot_obj, plot_geometry) in enumerate(plot_objects):
+        bbox = _get_bounding_box(plot_geometry)
+        if bbox is None:
+            continue
+        plot_entries.append(
+            {
+                "name": _resolve_plot_name(plot_obj, f"地块{plot_index + 1}"),
+                "bbox": bbox,
+                "center": bbox.Center,
+            }
+        )
+    if not plot_entries:
+        warnings.append("未找到地块图层或无有效地块边界，建筑无法映射地块名称")
 
     plaza_entries: List[Dict] = []
     invalid_curves = 0
@@ -496,6 +583,7 @@ def check_plaza_setback_violation(
         building_name = _resolve_object_name(obj, f"建筑{idx + 1}")
         attributes = getattr(obj, "Attributes", None)
         object_id = getattr(attributes, "Id", None) if attributes else None
+        plot_name = _match_plot_name_by_point(bbox.Center, plot_entries, 0.0) if plot_entries else None
 
         if height <= ignore_height:
             ignored_buildings += 1
@@ -507,6 +595,7 @@ def check_plaza_setback_violation(
                     "is_violation": False,
                     "reasons": ["below_ignore_height"],
                     "plaza_name": None,
+                    "plot_name": plot_name,
                 }
             )
             continue
@@ -560,10 +649,10 @@ def check_plaza_setback_violation(
                 "is_violation": is_violation,
                 "reasons": ["inside_plaza_setback"] if is_violation else [],
                 "plaza_name": plaza_name,
+                "plot_name": plot_name,
             }
         )
 
-    warnings: List[str] = []
     if invalid_curves > 0:
         warnings.append(f"{invalid_curves} plaza setback curves are not valid")
 
@@ -597,6 +686,7 @@ def check_plaza_setback_violation(
         "parameters": {
             "plaza_setback_layer": plaza_setback_layer,
             "building_layer": building_layer,
+            "plot_layer": detected_plot_layer,
             "ignore_height": ignore_height,
         },
     }

@@ -1,9 +1,12 @@
 "use client";
 
+import { Html } from "@react-three/drei";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useSceneSnapshot } from "@/components/scene/scene-context";
+import { SCENE_HTML_Z_INDEX_RANGE } from "@/components/city-scene";
 import { useSetbackCheckStore } from "./store";
+import { buildSetbackLabels } from "./label-utils";
 
 const BUILDING_LAYER = "模型_建筑体块";
 
@@ -46,6 +49,19 @@ export function SetbackSceneLayer() {
     []
   );
 
+  const buildingMeshes = useMemo(() => {
+    const layerKey = normalize(BUILDING_LAYER);
+    return meshList.filter((meshInfo) => {
+      const layerName = normalize(meshInfo.layerName);
+      return layerName === layerKey || layerName.endsWith(`::${layerKey}`);
+    });
+  }, [meshList]);
+
+  const labels = useMemo(() => {
+    if (!showHighlights) return [];
+    return buildSetbackLabels(result, buildingMeshes, "z");
+  }, [result, buildingMeshes, showHighlights]);
+
   useEffect(() => {
     return () => {
       highlightMaterial.dispose();
@@ -53,25 +69,24 @@ export function SetbackSceneLayer() {
   }, [highlightMaterial]);
 
   useEffect(() => {
-    originalMaterials.current.forEach((material, meshId) => {
-      const meshInfo = meshList.find((mesh) => mesh.id === meshId);
-      if (meshInfo?.mesh) {
-        meshInfo.mesh.material = material;
-        delete (meshInfo.mesh.userData as { persistentHighlight?: boolean }).persistentHighlight;
-      }
-    });
-    originalMaterials.current.clear();
+    const restoreHighlights = () => {
+      originalMaterials.current.forEach((material, meshId) => {
+        const meshInfo = meshList.find((mesh) => mesh.id === meshId);
+        if (meshInfo?.mesh) {
+          meshInfo.mesh.material = material;
+          delete (meshInfo.mesh.userData as { persistentHighlight?: boolean }).persistentHighlight;
+        }
+      });
+      originalMaterials.current.clear();
+    };
+
+    restoreHighlights();
 
     if (!showHighlights || exceededIndex.ids.size === 0 && exceededIndex.names.size === 0) {
-      return;
+      return restoreHighlights;
     }
 
-    meshList.forEach((meshInfo) => {
-      const layerName = normalize(meshInfo.layerName);
-      const isBuildingLayer =
-        layerName === normalize(BUILDING_LAYER) || layerName.endsWith(`::${normalize(BUILDING_LAYER)}`);
-      if (!isBuildingLayer) return;
-
+    buildingMeshes.forEach((meshInfo) => {
       const objectId =
         meshInfo.objectId ?? (meshInfo.mesh.userData?.objectId as string | undefined | null);
       const nameKey =
@@ -87,7 +102,39 @@ export function SetbackSceneLayer() {
       (meshInfo.mesh.userData as { persistentHighlight?: boolean }).persistentHighlight = true;
       meshInfo.mesh.material = highlightMaterial;
     });
-  }, [meshList, exceededIndex, showHighlights, highlightMaterial]);
 
-  return null;
+    return restoreHighlights;
+  }, [buildingMeshes, exceededIndex, showHighlights, highlightMaterial]);
+
+  if (!showHighlights || labels.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      {labels.map((label) => (
+        <Html
+          key={label.key}
+          position={label.position}
+          center
+          sprite
+          zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
+          style={{ pointerEvents: "none" }}
+        >
+          <div
+            className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
+              label.isExceeded
+                ? "border-red-500 bg-red-50/90 text-red-700"
+                : "border-green-500 bg-green-50/90 text-green-700"
+            }`}
+          >
+            <div className="font-medium">{label.name}</div>
+            <div className="text-[9px]">{label.statusText}</div>
+            <div className="text-[9px]">所属地块 {label.plotName}</div>
+            {label.reasonText && <div className="text-[9px]">{label.reasonText}</div>}
+          </div>
+        </Html>
+      ))}
+    </>
+  );
 }

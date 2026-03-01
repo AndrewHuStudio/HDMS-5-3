@@ -7,6 +7,7 @@ export interface PlazaSetbackBuildingResult {
   is_violation: boolean;
   reasons: string[];
   plaza_name?: string | null;
+  plot_name?: string | null;
 }
 
 export interface PlazaSetbackSummary {
@@ -41,6 +42,7 @@ export interface PlazaSetbackCheckResponse {
   parameters: {
     plaza_setback_layer: string;
     building_layer: string;
+    plot_layer: string;
     ignore_height: number;
   };
 }

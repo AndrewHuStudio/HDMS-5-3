@@ -2,6 +2,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import type { ControlCategory } from "./city-data";
+import type { ToolRunStatus } from "./tool-view-state";
 
 export type NavigationItemId = string;
 
@@ -14,6 +15,7 @@ export interface NavigationItem {
   label: string;
   icon: LucideIcon;
   description?: string;
+  toolRunStatus?: ToolRunStatus;
   children?: NavigationItem[];
 }
 

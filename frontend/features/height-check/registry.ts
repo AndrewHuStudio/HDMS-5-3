@@ -1,4 +1,4 @@
-﻿import { Layers } from "lucide-react";
+import { Layers } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
 import { HeightCheckPanel } from "./panel";
 import { useHeightCheckStore } from "./store";

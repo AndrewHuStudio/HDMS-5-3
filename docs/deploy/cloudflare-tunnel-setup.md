@@ -63,9 +63,9 @@ python -m uvicorn app:app --reload --host 0.0.0.0 --port 8022 --env-file ..\..\.
 cd e:\MyPrograms\HDMS\backend\review_system
 python -m uvicorn app:app --reload --host 0.0.0.0 --port 8023 --env-file ..\..\.env.external
 
-# approval_checklist (可选)
-cd e:\MyPrograms\HDMS\backend\approval_checklist
-python -m uvicorn app:app --reload --host 0.0.0.0 --port 8024 --env-file ..\..\.env.external
+# approval_checklist（推荐用 Docker 固定模板）
+cd e:\MyPrograms\HDMS
+docker compose -f docker-compose.external.yml -p hdms_external --profile approval up -d approval_checklist
 
 # data_process
 cd e:\MyPrograms\HDMS\data_process
@@ -81,6 +81,7 @@ cloudflared tunnel run hdms-external
 在手机 4G/5G（非同一局域网）验证：
 - `https://hdmsurban.com`
 - `https://hdmsurban.com/qa/health`
+- `https://hdmsurban.com/approval/health`
 - 上传文件后确认输出写入 `data/ocr_output_external`
 
 ## 10) 常见问题

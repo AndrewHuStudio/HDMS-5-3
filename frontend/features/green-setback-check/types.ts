@@ -7,6 +7,7 @@ export interface GreenSetbackBuildingResult {
   is_violation: boolean;
   reasons: string[];
   green_name?: string | null;
+  plot_name?: string | null;
 }
 
 export interface GreenSetbackSummary {
@@ -41,6 +42,7 @@ export interface GreenSetbackCheckResponse {
   parameters: {
     green_setback_layer: string;
     building_layer: string;
+    plot_layer: string;
     ignore_height: number;
   };
 }

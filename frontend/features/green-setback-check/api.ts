@@ -6,6 +6,7 @@ export interface GreenSetbackCheckParams {
   model_path: string;
   green_setback_layer?: string;
   building_layer?: string;
+  plot_layer?: string;
   ignore_height?: number;
 }
 

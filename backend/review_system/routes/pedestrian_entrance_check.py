@@ -26,6 +26,7 @@ class PedestrianEntranceCheckRequest(BaseModel):
     entrance_layer: str = "场地_人行出入口"
     redline_layer: str = "限制_建筑红线"
     redline_layers: list[str] | None = None
+    plot_layer: str = "场景_地块"
     on_curve_tolerance: float = 1.0
     min_required_count: int = 2
 
@@ -51,6 +52,7 @@ def pedestrian_entrance_check(request: PedestrianEntranceCheckRequest) -> Dict[s
             entrance_layer=request.entrance_layer,
             redline_layer=request.redline_layer,
             redline_layers=request.redline_layers,
+            plot_layer=request.plot_layer,
             on_curve_tolerance=request.on_curve_tolerance,
             min_required_count=request.min_required_count,
         )

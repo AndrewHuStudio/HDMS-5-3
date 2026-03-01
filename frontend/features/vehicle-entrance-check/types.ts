@@ -10,6 +10,7 @@ export interface VehicleEntranceResult {
   name: string;
   object_id?: string | null;
   point: [number, number, number];
+  plot_name?: string | null;
   status: "pass" | "fail";
   reasons: VehicleEntranceReason[];
   distances: {
@@ -33,6 +34,7 @@ export interface VehicleEntranceCheckResponse {
     main_intersection_layer: string;
     secondary_intersection_layer: string;
     branch_intersection_layer: string;
+    plot_layer?: string;
     min_main_distance: number;
     min_secondary_distance: number;
     min_branch_distance: number;

@@ -265,6 +265,18 @@ def _resolve_object_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
     return fallback
 
 
+def _resolve_plot_name(obj: rhino3dm.File3dmObject, fallback: str) -> str:
+    """从对象 UserText 或 Attributes 中读取地块名称，找不到时返回 fallback"""
+    name = (
+        _get_user_text(obj, "地块名称")
+        or _get_user_text(obj, "地块")
+        or _get_user_text(obj, "名称")
+    )
+    if name:
+        return name
+    return _resolve_object_name(obj, fallback)
+
+
 def _extract_boundary_curves(geometry: rhino3dm.CommonObject) -> List[rhino3dm.Curve]:
     """从几何体中提取边界曲线，支持 Curve / Brep / Extrusion 等类型"""
     if isinstance(geometry, rhino3dm.Curve):
@@ -309,6 +321,26 @@ def _select_building_redline_layer(
     return None
 
 
+def _candidate_plot_layers(file3dm: rhino3dm.File3dm, preferred_layer: str) -> List[str]:
+    """返回地块图层候选列表：优先传入图层，其次自动发现包含“地块”的图层"""
+    candidates: List[str] = []
+    if preferred_layer and preferred_layer.strip():
+        candidates.append(preferred_layer)
+
+    seen = {_normalize_layer_name(name) for name in candidates}
+    for layer in file3dm.Layers:
+        for name in _layer_name_candidates(layer):
+            if "地块" not in name:
+                continue
+            normalized = _normalize_layer_name(name)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            candidates.append(name)
+            break
+    return candidates
+
+
 def _curve_center(curve: rhino3dm.Curve) -> Optional[Point3D]:
     """计算曲线采样点的几何中心"""
     points = _curve_to_points(curve)
@@ -335,12 +367,43 @@ def _curve_anchor_point(curve: rhino3dm.Curve) -> Optional[Point3D]:
     return None
 
 
+def _point_in_bbox_xy(point: Point3D, bbox: rhino3dm.BoundingBox, tol: float = 0.0) -> bool:
+    """判断点在 XY 平面上是否位于 BoundingBox 内（含容差）"""
+    return (
+        (bbox.Min.X - tol) <= point.X <= (bbox.Max.X + tol)
+        and (bbox.Min.Y - tol) <= point.Y <= (bbox.Max.Y + tol)
+    )
+
+
+def _match_plot_name_by_point(
+    point: Point3D, plot_entries: List[Dict[str, object]], tol: float
+) -> Optional[str]:
+    """根据点坐标匹配所属地块：优先 bbox 包含，失败时回退最近地块中心"""
+    for entry in plot_entries:
+        bbox = entry.get("bbox")
+        if isinstance(bbox, rhino3dm.BoundingBox) and _point_in_bbox_xy(point, bbox, tol):
+            return str(entry["name"])
+
+    best_name: Optional[str] = None
+    best_dist = float("inf")
+    for entry in plot_entries:
+        center = entry.get("center")
+        if not isinstance(center, rhino3dm.Point3d):
+            continue
+        dist = math.hypot(point.X - center.X, point.Y - center.Y)
+        if dist < best_dist:
+            best_dist = dist
+            best_name = str(entry["name"])
+    return best_name
+
+
 def check_pedestrian_entrance_count(
     *,
     model_path: Path,
     entrance_layer: str = "场地_人行出入口",
     redline_layer: Optional[str] = "限制_建筑红线",
     redline_layers: Optional[Sequence[str]] = None,
+    plot_layer: str = "场景_地块",
     on_curve_tolerance: float = 1.0,
     min_required_count: int = 2,
 ) -> Dict:
@@ -374,7 +437,31 @@ def check_pedestrian_entrance_count(
     redline_entries: List[Dict[str, object]] = []
     open_curves = 0
     invalid_curves = 0
-    for _, geometry, layer_name in redline_objects:
+
+    plot_entries: List[Dict[str, object]] = []
+    detected_plot_layer = plot_layer
+    plot_objects: List[Tuple[rhino3dm.File3dmObject, rhino3dm.CommonObject]] = []
+    for candidate in _candidate_plot_layers(file3dm, plot_layer):
+        objs = _load_objects_from_layer(file3dm, candidate)
+        if objs:
+            plot_objects = objs
+            detected_plot_layer = candidate
+            break
+
+    for plot_index, (plot_obj, plot_geometry) in enumerate(plot_objects):
+        bbox = _get_bounding_box(plot_geometry)
+        if bbox is None:
+            continue
+        plot_name = _resolve_plot_name(plot_obj, f"地块{plot_index + 1}")
+        plot_entries.append(
+            {
+                "name": plot_name,
+                "bbox": bbox,
+                "center": bbox.Center,
+            }
+        )
+
+    for redline_obj, geometry, layer_name in redline_objects:
         curves = _extract_boundary_curves(geometry)
         if not curves:
             invalid_curves += 1
@@ -390,11 +477,14 @@ def check_pedestrian_entrance_count(
             if anchor is None:
                 invalid_curves += 1
                 continue
+            plot_name = _match_plot_name_by_point(anchor, plot_entries, on_curve_tolerance)
             redline_entries.append(
                 {
                     "layer": layer_name,
                     "curve": curve,
                     "point": [float(anchor.X), float(anchor.Y), float(anchor.Z)],
+                    "redline_name": _resolve_object_name(redline_obj, f"红线{len(redline_entries) + 1}"),
+                    "plot_name": plot_name,
                 }
             )
 
@@ -417,10 +507,13 @@ def check_pedestrian_entrance_count(
         name = _resolve_object_name(obj, f"出入口{idx + 1}")
 
         inside = False
+        matched_plot_name: Optional[str] = None
         for entry_index, entry in enumerate(redline_entries):
             if _point_inside_or_on_curve(point, entry["curve"], on_curve_tolerance):
                 inside = True
                 redline_counts[entry_index] += 1
+                if matched_plot_name is None:
+                    matched_plot_name = entry.get("plot_name")
 
         status = "pass" if inside else "fail"
         if inside:
@@ -434,6 +527,7 @@ def check_pedestrian_entrance_count(
                 "name": name,
                 "object_id": str(object_id) if object_id else None,
                 "point": [float(point.X), float(point.Y), float(point.Z)],
+                "plot_name": matched_plot_name or _match_plot_name_by_point(point, plot_entries, on_curve_tolerance),
                 "status": status,
                 "reasons": [] if inside else ["outside_redline"],
             }
@@ -446,6 +540,8 @@ def check_pedestrian_entrance_count(
         warnings.append(f"{invalid_curves} redline objects are not valid curves")
     if skipped_points > 0:
         warnings.append(f"{skipped_points} entrance objects could not be resolved to points")
+    if not plot_entries:
+        warnings.append("未找到地块图层或无有效地块边界，红线无法映射地块名称")
 
     required_min = MIN_REQUIRED_PEDESTRIAN_ENTRANCES
     redline_results = []
@@ -462,7 +558,9 @@ def check_pedestrian_entrance_count(
             {
                 "index": idx,
                 "layer": entry["layer"],
+                "redline_name": entry.get("redline_name"),
                 "point": entry["point"],
+                "plot_name": entry.get("plot_name"),
                 "entrance_count": entrance_count,
                 "status": status,
                 "reasons": [] if status == "pass" else ["insufficient_entrances"],
@@ -491,6 +589,7 @@ def check_pedestrian_entrance_count(
             "entrance_layer": entrance_layer,
             "redline_layer": building_redline_layer,
             "redline_layers": redline_layer_list,
+            "plot_layer": detected_plot_layer,
             "on_curve_tolerance": on_curve_tolerance,
             "min_required_count": required_min,
         },

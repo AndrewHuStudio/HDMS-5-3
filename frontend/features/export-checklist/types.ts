@@ -24,12 +24,17 @@ export interface DetailedStatistics {
 export interface FeatureChecklistItem {
   id: string;
   name: string;
-  screenshot: string | null;
+  isPass: boolean;
+  screenshots: {
+    northeast: string | null;
+    northwest: string | null;
+  };
   summary: string;
   detailedStats: DetailedStatistics | null;  // 新增
   rawResult: unknown;
   aiSuggestion: string;
-  isGeneratingAI: boolean;  // 新增：单个生成状态
+  isGeneratingAI: boolean;
+  aiGenerationStatus: "idle" | "queued" | "generating" | "failed" | "done";
   showAiSuggestion: boolean;
   govSuggestion: string;
 }
@@ -55,4 +60,10 @@ export interface AISuggestionResponse {
     id: string;
     suggestion: string;
   }>;
+}
+
+export interface ExportPdfRequest {
+  project_name?: string;
+  file_name?: string;
+  image_data_url: string;
 }

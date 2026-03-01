@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
+import { sortReviewItems } from "@/lib/review-result-sort";
 import { checkSkyBridge, prepareSkyBridge } from "./api";
 import { SkyBridgePlanOverlay } from "./plan-overlay";
 import { useSkyBridgeStore } from "./store";
@@ -229,6 +230,15 @@ export function SkyBridgePanel() {
   };
 
   const hasResults = results.length > 0 || warnings.length > 0;
+  const sortedResults = useMemo(
+    () =>
+      sortReviewItems(results, {
+        getStatus: (item) => (item.status === "pass" ? "pass" : "fail"),
+        getIndexHint: (item) => item.connection_id,
+        getName: (item) => `${item.plot_a}↔${item.plot_b}`,
+      }),
+    [results]
+  );
   const passedCount = results.filter((item) => item.status === "pass").length;
   const failedCount = results.filter((item) => item.status === "fail").length;
 
@@ -434,7 +444,7 @@ export function SkyBridgePanel() {
             </p>
           </CardHeader>
           <CardContent className="space-y-2">
-            {results.map((item: SkyBridgeResult) => {
+            {sortedResults.map((item: SkyBridgeResult) => {
               const derivedReasons = deriveConnectionReasons(item);
               return (
                 <div

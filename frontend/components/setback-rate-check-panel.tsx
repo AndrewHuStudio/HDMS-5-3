@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Eye, Loader2, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { API_BASE, normalizeApiBase } from "@/lib/api-base";
+import { sortReviewItems } from "@/lib/review-result-sort";
 import type { SetbackCheckResult } from "@/lib/setback-check-types";
 
 interface SetbackRateCheckPanelProps {
@@ -176,6 +177,16 @@ export function SetbackRateCheckPanel({
   };
 
   const plots = result?.plots ?? [];
+  const sortedPlots = useMemo(
+    () =>
+      sortReviewItems(plots, {
+        getStatus: (plot) =>
+          plot.is_compliant === true ? "pass" : plot.is_compliant === false ? "fail" : "unknown",
+        getIndexHint: (plot) => plot.plot_name,
+        getName: (plot) => plot.plot_name,
+      }),
+    [plots]
+  );
   const overallRate = result?.summary?.overall_rate ?? 0;
   const overallRateText = `${(overallRate * 100).toFixed(1)}%`;
   const compliantCount = plots.filter((plot) => plot.is_compliant === true).length;
@@ -361,7 +372,7 @@ export function SetbackRateCheckPanel({
             </div>
 
             <div className="space-y-2">
-              {plots.map((plot) => {
+              {sortedPlots.map((plot) => {
                 const ratePercent = plot.frontage_rate * 100;
                 const required = plot.required_rate ?? null;
                 const requiredPercent = required !== null ? required * 100 : null;

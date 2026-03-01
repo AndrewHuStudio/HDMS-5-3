@@ -1,4 +1,4 @@
-﻿/** 空中连廊检测 - 注册到 toolRegistry */
+/** 空中连廊检测 - 注册到 toolRegistry */
 import { Link2 } from "lucide-react";
 import { toolRegistry } from "@/lib/registries/tool-registry";
 import { SkyBridgePanel } from "./panel";

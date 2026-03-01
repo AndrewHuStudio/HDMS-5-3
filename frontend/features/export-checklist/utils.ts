@@ -59,7 +59,7 @@ export function convertHeightCheckToStats(rawResult: any): DetailedStatistics {
         plotName: f.plot_name || "未知地块",
         buildingName: f.building_name || `建筑${f.building_index || ""}`,
         issue: "超高",
-        details: `实际高度 ${f.actual_height}m，限高 ${f.height_limit}m，超高 ${f.exceed_amount}m`,
+        details: `实际高度 ${Number(f.actual_height).toFixed(2)}m，限高 ${Number(f.height_limit).toFixed(2)}m，超高 ${Number(f.exceed_amount).toFixed(2)}m`,
       })),
       totalPlots: failedByPlot.length,
       totalBuildings: failed.length,
@@ -111,7 +111,7 @@ export function convertSetbackCheckToStats(result: any): DetailedStatistics {
  * 将视线通廊检测结果转换为详细统计
  */
 export function convertSightCorridorToStats(result: any): DetailedStatistics {
-  if (!result || !result.results) {
+  if (!result) {
     return {
       passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
       failed: { items: [], totalPlots: 0, totalBuildings: 0 },
@@ -119,30 +119,39 @@ export function convertSightCorridorToStats(result: any): DetailedStatistics {
     };
   }
 
-  const results = result.results || [];
-  const passed = results.filter((r: any) => r.status === "通过");
-  const failed = results.filter((r: any) => r.status !== "通过");
+  // 视线通廊结果结构: { status, blocked_buildings }
+  const blockedBuildings = result.blocked_buildings || [];
+  const status = result.status || "unknown";
+
+  if (status === "clear") {
+    return {
+      passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
+      failed: { items: [], totalPlots: 0, totalBuildings: 0 },
+      summary: "视线通廊畅通，无遮挡建筑",
+    };
+  }
+
+  if (status === "missing_corridor" || status === "missing_buildings") {
+    return {
+      passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
+      failed: { items: [], totalPlots: 0, totalBuildings: 0 },
+      summary: status === "missing_corridor" ? "未找到视线通廊" : "未找到建筑",
+    };
+  }
 
   return {
-    passed: {
-      plots: groupByPlot(passed).map((p) => ({
-        name: p.plotName,
-        buildings: p.buildings.map((b: any) => b.building_name || b.name),
-      })),
-      totalPlots: new Set(passed.map((r: any) => r.plot_name)).size,
-      totalBuildings: passed.length,
-    },
+    passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
     failed: {
-      items: failed.map((f: any) => ({
-        plotName: f.plot_name || "未知地块",
-        buildingName: f.building_name || f.name || "未知建筑",
+      items: blockedBuildings.map((b: any) => ({
+        plotName: b.plot_name || "未知地块",
+        buildingName: b.building_name || "未知建筑",
         issue: "视线通廊遮挡",
-        details: f.message || "遮挡视线通廊",
+        details: `遮挡面积: ${b.blocking_area?.toFixed(2) || "未知"}m²`,
       })),
-      totalPlots: new Set(failed.map((r: any) => r.plot_name)).size,
-      totalBuildings: failed.length,
+      totalPlots: new Set(blockedBuildings.map((b: any) => b.plot_name)).size,
+      totalBuildings: blockedBuildings.length,
     },
-    summary: `总计：${results.length} 栋建筑，${passed.length} 栋通过，${failed.length} 栋遮挡`,
+    summary: `总计：${blockedBuildings.length} 栋建筑遮挡视线通廊`,
   };
 }
 
@@ -159,30 +168,69 @@ export function convertFireLadderToStats(result: any): DetailedStatistics {
   }
 
   const results = result.results || [];
-  const passed = results.filter((r: any) => r.has_valid_ladder_surface);
-  const failed = results.filter((r: any) => !r.has_valid_ladder_surface);
+  const passed = results.filter((r: any) => isFireLadderPassed(r));
+  const failed = results.filter((r: any) => !isFireLadderPassed(r));
 
   return {
     passed: {
       plots: groupByPlot(passed).map((p) => ({
         name: p.plotName,
-        buildings: p.buildings.map((b: any) => b.building_name),
+        buildings: p.buildings.map(
+          (b: any) => b.building_name || b.building?.name || "未知建筑"
+        ),
       })),
-      totalPlots: new Set(passed.map((r: any) => r.plot_name)).size,
+      totalPlots: new Set(passed.map((r: any) => getFireLadderPlotName(r))).size,
       totalBuildings: passed.length,
     },
     failed: {
       items: failed.map((f: any) => ({
-        plotName: f.plot_name || "未知地块",
-        buildingName: f.building_name,
+        plotName: getFireLadderPlotName(f),
+        buildingName: f.building_name || f.building?.name || "未知建筑",
         issue: "消防登高面不符合要求",
-        details: f.reason || "未满足消防登高面要求",
+        details: getFireLadderDetails(f),
       })),
-      totalPlots: new Set(failed.map((r: any) => r.plot_name)).size,
+      totalPlots: new Set(failed.map((r: any) => getFireLadderPlotName(r))).size,
       totalBuildings: failed.length,
     },
     summary: `总计：${results.length} 栋建筑，${passed.length} 栋通过，${failed.length} 栋不符合`,
   };
+}
+
+const fireLadderReasonLabels: Record<string, string> = {
+  no_buildings: "无建筑无需检测",
+  missing_ladder: "缺少消防登高面",
+  outside_redline: "登高面超出红线",
+  width_too_small: "登高面宽度不足",
+  length_sum_too_short: "登高面长度总和不足",
+  distance_out_of_range: "登高面距建筑不在5-10m",
+};
+
+function isFireLadderPassed(item: any): boolean {
+  if (typeof item?.status === "string") {
+    return item.status === "pass";
+  }
+  if (typeof item?.has_valid_ladder_surface === "boolean") {
+    return item.has_valid_ladder_surface;
+  }
+  return false;
+}
+
+function getFireLadderPlotName(item: any): string {
+  return item?.plot_name || item?.redline_name || "未知地块";
+}
+
+function getFireLadderDetails(item: any): string {
+  if (typeof item?.reason === "string" && item.reason.trim()) {
+    return item.reason;
+  }
+
+  if (Array.isArray(item?.reasons) && item.reasons.length > 0) {
+    return item.reasons
+      .map((reason: string) => fireLadderReasonLabels[reason] || reason)
+      .join("、");
+  }
+
+  return "未满足消防登高面要求";
 }
 
 /**
@@ -198,27 +246,109 @@ export function convertSkyBridgeToStats(result: any): DetailedStatistics {
   }
 
   const results = result.results || [];
-  const passed = results.filter((r: any) => r.is_compliant);
-  const failed = results.filter((r: any) => !r.is_compliant);
+  const passed = results.filter((r: any) => isSkyBridgePassed(r));
+  const failed = results.filter((r: any) => !isSkyBridgePassed(r));
 
   return {
     passed: {
-      plots: [],
-      totalPlots: 0,
-      totalBuildings: passed.length,
+      plots: passed.map((item: any) => ({
+        name: getSkyBridgeConnectionName(item),
+        buildings: getSkyBridgeBuildingNames(item),
+      })),
+      totalPlots: new Set(passed.map((item: any) => getSkyBridgeConnectionName(item))).size,
+      totalBuildings: passed.reduce(
+        (sum: number, item: any) => sum + getSkyBridgeObjectCount(item),
+        0
+      ),
     },
     failed: {
-      items: failed.map((f: any) => ({
-        plotName: "空中连廊",
-        buildingName: f.bridge_name || `连廊${f.bridge_index || ""}`,
+      items: failed.map((item: any) => ({
+        plotName: getSkyBridgeConnectionName(item),
+        buildingName: getSkyBridgeBuildingNames(item).join("、"),
         issue: "不符合规范",
-        details: f.reason || "违反空中连廊规范",
+        details: getSkyBridgeDetails(item),
       })),
-      totalPlots: 0,
-      totalBuildings: failed.length,
+      totalPlots: new Set(failed.map((item: any) => getSkyBridgeConnectionName(item))).size,
+      totalBuildings: failed.reduce(
+        (sum: number, item: any) => sum + getSkyBridgeObjectCount(item),
+        0
+      ),
     },
-    summary: `总计：${results.length} 个连廊，${passed.length} 个通过，${failed.length} 个不符合`,
+    summary: `总计：${results.length} 条连接，${passed.length} 条通过，${failed.length} 条不符合`,
   };
+}
+
+const skyBridgeReasonLabels: Record<string, string> = {
+  plot_missing: "地块缺失",
+  missing_corridor: "缺少空中连廊",
+  not_connecting: "未跨越两地块",
+  not_closed: "连廊未闭合",
+  clearance_too_low: "标高不足",
+  width_too_small: "净宽不足",
+  height_too_small: "净高不足",
+};
+
+function isSkyBridgePassed(item: any): boolean {
+  if (typeof item?.status === "string") {
+    return item.status === "pass";
+  }
+  if (typeof item?.is_compliant === "boolean") {
+    return item.is_compliant;
+  }
+  return false;
+}
+
+function getSkyBridgeConnectionName(item: any): string {
+  const plotA = item?.plot_a;
+  const plotB = item?.plot_b;
+  if (plotA && plotB) {
+    return `${plotA} ↔ ${plotB}`;
+  }
+  return "空中连廊";
+}
+
+function getSkyBridgeBuildingNames(item: any): string[] {
+  if (Array.isArray(item?.corridors) && item.corridors.length > 0) {
+    return item.corridors.map((corridor: any) => `连廊#${(corridor?.index ?? 0) + 1}`);
+  }
+  if (item?.bridge_name) {
+    return [String(item.bridge_name)];
+  }
+  if (item?.bridge_index !== undefined) {
+    return [`连廊${item.bridge_index}`];
+  }
+  return ["连廊"];
+}
+
+function getSkyBridgeObjectCount(item: any): number {
+  if (Array.isArray(item?.corridors) && item.corridors.length > 0) {
+    return item.corridors.length;
+  }
+  return 1;
+}
+
+function getSkyBridgeDetails(item: any): string {
+  if (typeof item?.reason === "string" && item.reason.trim()) {
+    return item.reason;
+  }
+
+  const reasons = Array.isArray(item?.reasons) ? item.reasons : [];
+  if (reasons.length > 0) {
+    return reasons
+      .map((reason: string) => skyBridgeReasonLabels[reason] || reason)
+      .join("、");
+  }
+
+  if (Array.isArray(item?.corridors) && item.corridors.length > 0) {
+    const corridorReasons = item.corridors.flatMap((corridor: any) => corridor?.reasons || []);
+    if (corridorReasons.length > 0) {
+      return corridorReasons
+        .map((reason: string) => skyBridgeReasonLabels[reason] || reason)
+        .join("、");
+    }
+  }
+
+  return "违反空中连廊规范";
 }
 
 /**
@@ -234,27 +364,102 @@ export function convertVehicleEntranceToStats(result: any): DetailedStatistics {
   }
 
   const results = result.results || [];
-  const passed = results.filter((r: any) => r.is_compliant);
-  const failed = results.filter((r: any) => !r.is_compliant);
+  const passed = results.filter((r: any) => isVehicleEntrancePassed(r));
+  const failed = results.filter((r: any) => !isVehicleEntrancePassed(r));
+  const passedByPlot = groupByName(passed, (item) => getVehicleEntrancePlotName(item));
 
   return {
     passed: {
-      plots: [],
-      totalPlots: 0,
+      plots: passedByPlot.map((plot) => ({
+        name: plot.plotName,
+        buildings: plot.buildings.map((item: any) => getVehicleEntranceName(item)),
+      })),
+      totalPlots: new Set(passed.map((item: any) => getVehicleEntrancePlotName(item))).size,
       totalBuildings: passed.length,
     },
     failed: {
-      items: failed.map((f: any) => ({
-        plotName: f.plot_name || "未知地块",
-        buildingName: f.entrance_name || `出入口${f.entrance_index || ""}`,
+      items: failed.map((item: any) => ({
+        plotName: getVehicleEntrancePlotName(item),
+        buildingName: getVehicleEntranceName(item),
         issue: "不符合规范",
-        details: f.reason || "违反车行出入口规范",
+        details: getVehicleEntranceDetails(item, result?.parameters),
       })),
-      totalPlots: 0,
+      totalPlots: new Set(failed.map((item: any) => getVehicleEntrancePlotName(item))).size,
       totalBuildings: failed.length,
     },
-    summary: `总计：${results.length} 个出入口，${passed.length} 个通过，${failed.length} 个不符合`,
+    summary: `总计：${results.length} 个车行出入口，${passed.length} 个通过，${failed.length} 个不符合`,
   };
+}
+
+const vehicleEntranceReasonLabels: Record<string, string> = {
+  too_close_main_intersection: "主干路交叉口距离不足",
+  too_close_secondary_intersection: "次干路交叉口距离不足",
+  too_close_branch_intersection: "支路交叉口距离不足",
+};
+
+function isVehicleEntrancePassed(item: any): boolean {
+  if (typeof item?.status === "string") {
+    return item.status === "pass";
+  }
+  if (typeof item?.is_compliant === "boolean") {
+    return item.is_compliant;
+  }
+  return false;
+}
+
+function getVehicleEntrancePlotName(item: any): string {
+  return item?.plot_name || "车行出入口";
+}
+
+function getVehicleEntranceName(item: any): string {
+  return item?.name || item?.entrance_name || `出入口${item?.index ?? item?.entrance_index ?? ""}`;
+}
+
+function formatDistanceWithThreshold(distance: unknown, threshold: unknown): string | null {
+  if (typeof distance !== "number" || !Number.isFinite(distance)) {
+    return null;
+  }
+  if (typeof threshold === "number" && Number.isFinite(threshold)) {
+    return `${distance.toFixed(2)}m < ${threshold.toFixed(2)}m`;
+  }
+  return `${distance.toFixed(2)}m`;
+}
+
+function getVehicleEntranceDetails(item: any, parameters?: any): string {
+  if (typeof item?.reason === "string" && item.reason.trim()) {
+    return item.reason;
+  }
+  if (!Array.isArray(item?.reasons) || item.reasons.length === 0) {
+    return "违反车行出入口规范";
+  }
+
+  return item.reasons
+    .map((reason: string) => {
+      const label = vehicleEntranceReasonLabels[reason] || reason;
+      if (reason === "too_close_main_intersection") {
+        const text = formatDistanceWithThreshold(
+          item?.distances?.main,
+          parameters?.min_main_distance
+        );
+        return text ? `${label}（${text}）` : label;
+      }
+      if (reason === "too_close_secondary_intersection") {
+        const text = formatDistanceWithThreshold(
+          item?.distances?.secondary,
+          parameters?.min_secondary_distance
+        );
+        return text ? `${label}（${text}）` : label;
+      }
+      if (reason === "too_close_branch_intersection") {
+        const text = formatDistanceWithThreshold(
+          item?.distances?.branch,
+          parameters?.min_branch_distance
+        );
+        return text ? `${label}（${text}）` : label;
+      }
+      return label;
+    })
+    .join("、");
 }
 
 /**
@@ -263,7 +468,7 @@ export function convertVehicleEntranceToStats(result: any): DetailedStatistics {
 export function convertPedestrianEntranceToStats(
   result: any
 ): DetailedStatistics {
-  if (!result || !result.results) {
+  if (!result) {
     return {
       passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
       failed: { items: [], totalPlots: 0, totalBuildings: 0 },
@@ -271,112 +476,133 @@ export function convertPedestrianEntranceToStats(
     };
   }
 
-  const results = result.results || [];
-  const passed = results.filter((r: any) => r.is_compliant);
-  const failed = results.filter((r: any) => !r.is_compliant);
+  const redlines = Array.isArray(result?.redlines) ? result.redlines : [];
+  const requiredMin =
+    Number(result?.summary?.required_min ?? result?.parameters?.min_required_count ?? 2) || 2;
+
+  if (redlines.length > 0) {
+    const passed = redlines.filter((item: any) => isPedestrianRedlinePassed(item));
+    const failed = redlines.filter((item: any) => !isPedestrianRedlinePassed(item));
+
+    return {
+      passed: {
+        plots: passed.map((item: any) => ({
+          name: getPedestrianRedlineName(item),
+          buildings: [`出入口${Number(item?.entrance_count ?? 0)}个`],
+        })),
+        totalPlots: passed.length,
+        totalBuildings: passed.length,
+      },
+      failed: {
+        items: failed.map((item: any) => ({
+          plotName: getPedestrianRedlineName(item),
+          buildingName: `出入口${Number(item?.entrance_count ?? 0)}个`,
+          issue: "人行出入口数量不足",
+          details: getPedestrianRedlineDetails(item, requiredMin),
+        })),
+        totalPlots: failed.length,
+        totalBuildings: failed.length,
+      },
+      summary: `总计：${redlines.length} 条红线，${passed.length} 条通过，${failed.length} 条不符合`,
+    };
+  }
+
+  if (!result?.results) {
+    return {
+      passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
+      failed: { items: [], totalPlots: 0, totalBuildings: 0 },
+      summary: "无检测数据",
+    };
+  }
+
+  const entries = result.results || [];
+  const passed = entries.filter((item: any) => isPedestrianRedlinePassed(item));
+  const failed = entries.filter((item: any) => !isPedestrianRedlinePassed(item));
+  const passedByPlot = groupByName(passed, () => "人行出入口");
 
   return {
     passed: {
-      plots: [],
-      totalPlots: 0,
+      plots: passedByPlot.map((plot) => ({
+        name: plot.plotName,
+        buildings: plot.buildings.map((item: any) => getPedestrianEntranceName(item)),
+      })),
+      totalPlots: passedByPlot.length,
       totalBuildings: passed.length,
     },
     failed: {
-      items: failed.map((f: any) => ({
-        plotName: f.plot_name || "未知地块",
-        buildingName: f.entrance_name || `出入口${f.entrance_index || ""}`,
+      items: failed.map((item: any) => ({
+        plotName: "人行出入口",
+        buildingName: getPedestrianEntranceName(item),
         issue: "不符合规范",
-        details: f.reason || "违反人行出入口规范",
+        details: getPedestrianEntranceDetails(item),
       })),
-      totalPlots: 0,
+      totalPlots: failed.length > 0 ? 1 : 0,
       totalBuildings: failed.length,
     },
-    summary: `总计：${results.length} 个出入口，${passed.length} 个通过，${failed.length} 个不符合`,
+    summary: `总计：${entries.length} 个人行出入口，${passed.length} 个通过，${failed.length} 个不符合`,
   };
+}
+
+const pedestrianEntranceReasonLabels: Record<string, string> = {
+  outside_redline: "不在建筑红线内/线上",
+  insufficient_entrances: "建筑红线内/线上出入口数量不足",
+};
+
+function isPedestrianRedlinePassed(item: any): boolean {
+  if (typeof item?.status === "string") {
+    return item.status === "pass";
+  }
+  if (typeof item?.is_compliant === "boolean") {
+    return item.is_compliant;
+  }
+  return false;
+}
+
+function getPedestrianRedlineName(item: any): string {
+  if (typeof item?.plot_name === "string" && item.plot_name.trim()) {
+    return item.plot_name;
+  }
+  if (typeof item?.redline_name === "string" && item.redline_name.trim()) {
+    return item.redline_name;
+  }
+  if (typeof item?.index === "number") {
+    return `红线${item.index + 1}`;
+  }
+  return "建筑红线";
+}
+
+function getPedestrianRedlineDetails(item: any, requiredMin: number): string {
+  const count = Number(item?.entrance_count ?? 0);
+  const base = `建筑红线内/线上出入口数量：${count}/${requiredMin}`;
+  if (!Array.isArray(item?.reasons) || item.reasons.length === 0) {
+    return base;
+  }
+  const reasonText = item.reasons
+    .map((reason: string) => pedestrianEntranceReasonLabels[reason] || reason)
+    .join("、");
+  return `${base}，${reasonText}`;
+}
+
+function getPedestrianEntranceName(item: any): string {
+  return item?.name || item?.entrance_name || `出入口${item?.index ?? item?.entrance_index ?? ""}`;
+}
+
+function getPedestrianEntranceDetails(item: any): string {
+  if (typeof item?.reason === "string" && item.reason.trim()) {
+    return item.reason;
+  }
+  if (Array.isArray(item?.reasons) && item.reasons.length > 0) {
+    return item.reasons
+      .map((reason: string) => pedestrianEntranceReasonLabels[reason] || reason)
+      .join("、");
+  }
+  return "违反人行出入口规范";
 }
 
 /**
  * 将绿地退线检测结果转换为详细统计
  */
 export function convertGreenSetbackToStats(result: any): DetailedStatistics {
-  if (!result || !result.buildings) {
-    return {
-      passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
-      failed: { items: [], totalPlots: 0, totalBuildings: 0 },
-      summary: "无检测数据",
-    };
-  }
-
-  const buildings = result.buildings || [];
-  const passed = buildings.filter((b: any) => !b.is_exceeded);
-  const failed = buildings.filter((b: any) => b.is_exceeded);
-
-  return {
-    passed: {
-      plots: groupByPlot(passed).map((p) => ({
-        name: p.plotName,
-        buildings: p.buildings.map((b: any) => b.building_name),
-      })),
-      totalPlots: new Set(passed.map((b: any) => b.plot_name)).size,
-      totalBuildings: passed.length,
-    },
-    failed: {
-      items: failed.map((f: any) => ({
-        plotName: f.plot_name || "未知地块",
-        buildingName: f.building_name,
-        issue: "绿地退线违规",
-        details: f.reason?.message || "违反绿地退线要求",
-      })),
-      totalPlots: new Set(failed.map((b: any) => b.plot_name)).size,
-      totalBuildings: failed.length,
-    },
-    summary: `总计：${buildings.length} 栋建筑，${passed.length} 栋通过，${failed.length} 栋违规`,
-  };
-}
-
-/**
- * 将广场退线检测结果转换为详细统计
- */
-export function convertPlazaSetbackToStats(result: any): DetailedStatistics {
-  if (!result || !result.buildings) {
-    return {
-      passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
-      failed: { items: [], totalPlots: 0, totalBuildings: 0 },
-      summary: "无检测数据",
-    };
-  }
-
-  const buildings = result.buildings || [];
-  const passed = buildings.filter((b: any) => !b.is_exceeded);
-  const failed = buildings.filter((b: any) => b.is_exceeded);
-
-  return {
-    passed: {
-      plots: groupByPlot(passed).map((p) => ({
-        name: p.plotName,
-        buildings: p.buildings.map((b: any) => b.building_name),
-      })),
-      totalPlots: new Set(passed.map((b: any) => b.plot_name)).size,
-      totalBuildings: passed.length,
-    },
-    failed: {
-      items: failed.map((f: any) => ({
-        plotName: f.plot_name || "未知地块",
-        buildingName: f.building_name,
-        issue: "广场退线违规",
-        details: f.reason?.message || "违反广场退线要求",
-      })),
-      totalPlots: new Set(failed.map((b: any) => b.plot_name)).size,
-      totalBuildings: failed.length,
-    },
-    summary: `总计：${buildings.length} 栋建筑，${passed.length} 栋通过，${failed.length} 栋违规`,
-  };
-}
-
-/**
- * 将贴线率检测结果转换为详细统计
- */
-export function convertBuildingLineRateToStats(result: any): DetailedStatistics {
   if (!result || !result.results) {
     return {
       passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
@@ -385,31 +611,226 @@ export function convertBuildingLineRateToStats(result: any): DetailedStatistics 
     };
   }
 
-  const results = result.results || [];
-  const passed = results.filter((r: any) => r.is_compliant);
-  const failed = results.filter((r: any) => !r.is_compliant);
+  const buildings = result.results || [];
+  const passed = buildings.filter((b: any) => !isGreenSetbackViolation(b));
+  const failed = buildings.filter((b: any) => isGreenSetbackViolation(b));
+  const passedByPlot = groupByName(passed, (item) => getGreenSetbackPlotName(item));
 
   return {
     passed: {
-      plots: groupByPlot(passed).map((p) => ({
+      plots: passedByPlot.map((p) => ({
         name: p.plotName,
         buildings: p.buildings.map((b: any) => b.building_name),
       })),
-      totalPlots: new Set(passed.map((r: any) => r.plot_name)).size,
+      totalPlots: new Set(passed.map((b: any) => getGreenSetbackPlotName(b))).size,
       totalBuildings: passed.length,
     },
     failed: {
       items: failed.map((f: any) => ({
-        plotName: f.plot_name || "未知地块",
+        plotName: getGreenSetbackPlotName(f),
         buildingName: f.building_name,
-        issue: "贴线率不符合要求",
-        details: f.reason || `实际贴线率 ${f.actual_rate}%，要求 ${f.required_rate}%`,
+        issue: "绿地退线违规",
+        details: getGreenSetbackDetails(f),
       })),
-      totalPlots: new Set(failed.map((r: any) => r.plot_name)).size,
+      totalPlots: new Set(failed.map((b: any) => getGreenSetbackPlotName(b))).size,
       totalBuildings: failed.length,
     },
-    summary: `总计：${results.length} 栋建筑，${passed.length} 栋通过，${failed.length} 栋不符合`,
+    summary: `总计：${buildings.length} 栋建筑，${passed.length} 栋通过，${failed.length} 栋违规`,
   };
+}
+
+const greenSetbackReasonLabels: Record<string, string> = {
+  inside_green_setback: "侵入绿地退线范围",
+  below_ignore_height: "建筑高度低于忽略阈值",
+};
+
+function isGreenSetbackViolation(item: any): boolean {
+  if (typeof item?.is_violation === "boolean") {
+    return item.is_violation;
+  }
+  if (typeof item?.status === "string") {
+    return item.status === "fail";
+  }
+  if (typeof item?.is_compliant === "boolean") {
+    return !item.is_compliant;
+  }
+  return false;
+}
+
+function getGreenSetbackPlotName(item: any): string {
+  return item?.plot_name || item?.green_name || "未知地块";
+}
+
+function getGreenSetbackDetails(item: any): string {
+  if (typeof item?.reason === "string" && item.reason.trim()) {
+    return item.reason;
+  }
+  if (Array.isArray(item?.reasons) && item.reasons.length > 0) {
+    return item.reasons
+      .map((reason: string) => greenSetbackReasonLabels[reason] || reason)
+      .join("、");
+  }
+  return item?.message || "违反绿地退线要求";
+}
+
+/**
+ * 将广场退线检测结果转换为详细统计
+ */
+export function convertPlazaSetbackToStats(result: any): DetailedStatistics {
+  if (!result || !result.results) {
+    return {
+      passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
+      failed: { items: [], totalPlots: 0, totalBuildings: 0 },
+      summary: "无检测数据",
+    };
+  }
+
+  const buildings = result.results || [];
+  const passed = buildings.filter((b: any) => !isPlazaSetbackViolation(b));
+  const failed = buildings.filter((b: any) => isPlazaSetbackViolation(b));
+  const passedByPlot = groupByName(passed, (item) => getPlazaSetbackPlotName(item));
+
+  return {
+    passed: {
+      plots: passedByPlot.map((p) => ({
+        name: p.plotName,
+        buildings: p.buildings.map((b: any) => b.building_name),
+      })),
+      totalPlots: new Set(passed.map((b: any) => getPlazaSetbackPlotName(b))).size,
+      totalBuildings: passed.length,
+    },
+    failed: {
+      items: failed.map((f: any) => ({
+        plotName: getPlazaSetbackPlotName(f),
+        buildingName: f.building_name,
+        issue: "广场退线违规",
+        details: getPlazaSetbackDetails(f),
+      })),
+      totalPlots: new Set(failed.map((b: any) => getPlazaSetbackPlotName(b))).size,
+      totalBuildings: failed.length,
+    },
+    summary: `总计：${buildings.length} 栋建筑，${passed.length} 栋通过，${failed.length} 栋违规`,
+  };
+}
+
+const plazaSetbackReasonLabels: Record<string, string> = {
+  inside_plaza_setback: "侵入广场退线范围",
+  below_ignore_height: "建筑高度低于忽略阈值",
+};
+
+function isPlazaSetbackViolation(item: any): boolean {
+  if (typeof item?.is_violation === "boolean") {
+    return item.is_violation;
+  }
+  if (typeof item?.status === "string") {
+    return item.status === "fail";
+  }
+  if (typeof item?.is_compliant === "boolean") {
+    return !item.is_compliant;
+  }
+  return false;
+}
+
+function getPlazaSetbackPlotName(item: any): string {
+  return item?.plot_name || item?.plaza_name || "未知地块";
+}
+
+function getPlazaSetbackDetails(item: any): string {
+  if (typeof item?.reason === "string" && item.reason.trim()) {
+    return item.reason;
+  }
+  if (Array.isArray(item?.reasons) && item.reasons.length > 0) {
+    return item.reasons
+      .map((reason: string) => plazaSetbackReasonLabels[reason] || reason)
+      .join("、");
+  }
+  return item?.message || "违反广场退线要求";
+}
+
+/**
+ * 将贴线率检测结果转换为详细统计
+ */
+export function convertBuildingLineRateToStats(result: any): DetailedStatistics {
+  if (!result || !result.plots) {
+    return {
+      passed: { plots: [], totalPlots: 0, totalBuildings: 0 },
+      failed: { items: [], totalPlots: 0, totalBuildings: 0 },
+      summary: "无检测数据",
+    };
+  }
+
+  const plots = result.plots || [];
+  const passed = plots.filter((p: any) => p.is_compliant);
+  const failed = plots.filter((p: any) => !p.is_compliant);
+
+  return {
+    passed: {
+      plots: passed.map((p: any) => ({
+        name: p.plot_name,
+        buildings: [formatSetbackRateBuildingName(getSetbackRateBuildingCount(p))],
+      })),
+      totalPlots: passed.length,
+      totalBuildings: passed.reduce(
+        (sum: number, p: any) => sum + getSetbackRateBuildingCount(p),
+        0
+      ),
+    },
+    failed: {
+      items: failed.map((p: any) => ({
+        plotName: p.plot_name || "未知地块",
+        buildingName: formatSetbackRateBuildingName(getSetbackRateBuildingCount(p)),
+        issue: "贴线率不符合要求",
+        details: getSetbackRateDetails(p),
+      })),
+      totalPlots: failed.length,
+      totalBuildings: failed.reduce(
+        (sum: number, p: any) => sum + getSetbackRateBuildingCount(p),
+        0
+      ),
+    },
+    summary: `总计：${plots.length} 个地块，${passed.length} 个通过，${failed.length} 个不符合`,
+  };
+}
+
+function getSetbackRateBuildingCount(item: any): number {
+  if (typeof item?.building_count === "number" && Number.isFinite(item.building_count)) {
+    return item.building_count;
+  }
+  if (Array.isArray(item?.buildings)) {
+    return item.buildings.length;
+  }
+  return 0;
+}
+
+function formatSetbackRateBuildingName(buildingCount: number): string {
+  if (buildingCount <= 0) {
+    return "无参与建筑";
+  }
+  return `${buildingCount}栋建筑`;
+}
+
+function getSetbackRateDetails(item: any): string {
+  const actualRate = Number(item?.frontage_rate ?? item?.setback_rate ?? item?.actual_rate ?? 0);
+  const requiredRate = item?.required_rate;
+  if (typeof requiredRate === "number" && Number.isFinite(requiredRate)) {
+    return `实际贴线率 ${(actualRate * 100).toFixed(2)}%，要求 ${(requiredRate * 100).toFixed(2)}%`;
+  }
+  return `实际贴线率 ${(actualRate * 100).toFixed(2)}%，未设置要求贴线率`;
+}
+
+function groupByName(items: any[], getName: (item: any) => string) {
+  const groups = new Map<string, any[]>();
+  items.forEach((item) => {
+    const name = getName(item);
+    if (!groups.has(name)) {
+      groups.set(name, []);
+    }
+    groups.get(name)!.push(item);
+  });
+  return Array.from(groups.entries()).map(([plotName, buildings]) => ({
+    plotName,
+    buildings,
+  }));
 }
 
 /**
@@ -418,7 +839,13 @@ export function convertBuildingLineRateToStats(result: any): DetailedStatistics 
 function groupByPlot(buildings: any[]) {
   const groups = new Map<string, any[]>();
   buildings.forEach((b) => {
-    const plotName = b.plot_name || "未知地块";
+    const plotName =
+      b.plot_name ||
+      b.redline_name ||
+      b.green_name ||
+      b.plaza_name ||
+      (b.plot_a && b.plot_b ? `${b.plot_a} ↔ ${b.plot_b}` : null) ||
+      "未知地块";
     if (!groups.has(plotName)) {
       groups.set(plotName, []);
     }
@@ -450,15 +877,15 @@ export function convertResultToStats(
       return convertFireLadderToStats(rawResult);
     case "sky-bridge":
       return convertSkyBridgeToStats(rawResult);
-    case "vehicle-entrance":
+    case "vehicle-entrance-check":
       return convertVehicleEntranceToStats(rawResult);
-    case "pedestrian-entrance":
+    case "pedestrian-entrance-check":
       return convertPedestrianEntranceToStats(rawResult);
-    case "green-setback":
+    case "green-setback-check":
       return convertGreenSetbackToStats(rawResult);
-    case "plaza-setback":
+    case "plaza-setback-check":
       return convertPlazaSetbackToStats(rawResult);
-    case "building-line-rate":
+    case "setback-rate-check":
       return convertBuildingLineRateToStats(rawResult);
     default:
       return null;
