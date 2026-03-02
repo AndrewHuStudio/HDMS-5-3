@@ -19,14 +19,18 @@ export interface PlazaSetbackSummary {
 }
 
 export interface PlazaSetbackArea {
+  id?: string;
   name?: string;
+  plot_name?: string | null;
   outer: [number, number, number][];
   holes: [number, number, number][][];
   base_z?: number;
 }
 
 export interface PlazaSetbackAreaResult {
+  id: string;
   name: string;
+  plot_name?: string | null;
   status: "pass" | "fail";
   checked_buildings: number;
   violations: number;

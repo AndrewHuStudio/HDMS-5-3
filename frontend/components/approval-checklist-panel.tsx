@@ -67,15 +67,15 @@ interface FeatureMeta {
 
 const FEATURES: FeatureMeta[] = [
   { id: "height-check", name: "限高检测", Panel: HeightCheckPanel },
-  { id: "setback-check", name: "退线检测", Panel: SetbackPanel },
+  { id: "setback-rate-check", name: "贴线率检测", Panel: SetbackRatePanel },
   { id: "sight-corridor", name: "视线通廊检测", Panel: SightCorridorPanelAdapter },
-  { id: "fire-ladder", name: "消防登高面检测", Panel: FireLadderPanel },
   { id: "sky-bridge", name: "空中连廊检测", Panel: SkyBridgePanel },
+  { id: "fire-ladder", name: "消防登高面检测", Panel: FireLadderPanel },
   { id: "vehicle-entrance-check", name: "车行出入口检测", Panel: VehicleEntrancePanel },
   { id: "pedestrian-entrance-check", name: "人行出入口检测", Panel: PedestrianEntrancePanel },
+  { id: "setback-check", name: "退线检测", Panel: SetbackPanel },
   { id: "green-setback-check", name: "绿地退线控制检测", Panel: GreenSetbackPanel },
   { id: "plaza-setback-check", name: "广场退线控制检测", Panel: PlazaSetbackPanel },
-  { id: "setback-rate-check", name: "贴线率检测", Panel: SetbackRatePanel },
 ];
 
 function useFeatureVisible(id: FeatureId): boolean {
@@ -546,33 +546,29 @@ export function ApprovalChecklistPanel() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border shrink-0">
-        <span className="text-sm font-semibold">管控审批清单</span>
-        <div className="flex items-center gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            disabled={isCheckingAll || !!checkingId}
-            onClick={handleRunAll}
-          >
-            {isCheckingAll ? (
-              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-            ) : (
-              <PlayCircle className="h-3 w-3 mr-1" />
-            )}
-            {isCheckingAll ? "检测中..." : "一键检测"}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={() => openExportDialog(setExportDialogOpen)}
-          >
-            <Download className="h-3 w-3 mr-1" />
-            导出
-          </Button>
-        </div>
+      <div className="flex items-center justify-end gap-2 px-3 py-2.5 border-b border-border shrink-0">
+        <Button
+          size="default"
+          variant="outline"
+          className="flex-1"
+          disabled={isCheckingAll || !!checkingId}
+          onClick={handleRunAll}
+        >
+          {isCheckingAll ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <PlayCircle className="h-4 w-4 mr-2" />
+          )}
+          {isCheckingAll ? "检测中..." : "一键导出"}
+        </Button>
+        <Button
+          size="default"
+          className="flex-1"
+          onClick={() => openExportDialog(setExportDialogOpen)}
+        >
+          <Download className="h-4 w-4 mr-2" />
+          结果导出
+        </Button>
       </div>
 
       {/* Checklist */}

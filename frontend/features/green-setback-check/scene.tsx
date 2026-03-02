@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useSceneSnapshot } from "@/components/scene/scene-context";
 import { useModelStore } from "@/lib/stores/model-store";
+import { buildSetbackAreaSelectionId } from "@/features/setback-area/result-view";
 import { useGreenSetbackStore } from "./store";
 
 const BUILDING_LAYER = "模型_建筑体块";
@@ -16,8 +17,8 @@ export function GreenSetbackSceneLayer() {
   const modelTransform = useModelStore((state) => state.modelTransform);
   const result = useGreenSetbackStore((state) => state.result);
   const showHighlights = useGreenSetbackStore((state) => state.showHighlights);
-  const selectedAreaName = useGreenSetbackStore((state) => state.selectedAreaName);
-  const setSelectedAreaName = useGreenSetbackStore((state) => state.setSelectedAreaName);
+  const selectedAreaId = useGreenSetbackStore((state) => state.selectedAreaId);
+  const setSelectedAreaId = useGreenSetbackStore((state) => state.setSelectedAreaId);
   const meshList = sceneSnapshot?.meshList ?? [];
   const originalMaterials = useRef<Map<string, THREE.Material | THREE.Material[]>>(new Map());
   const greenAreas = result?.green_areas ?? [];
@@ -26,7 +27,12 @@ export function GreenSetbackSceneLayer() {
 
   const areaStatusMap = useMemo(() => {
     const map = new Map<string, "pass" | "fail">();
-    areaResults.forEach((item) => map.set(item.name, item.status));
+    areaResults.forEach((item, index) => {
+      map.set(
+        buildSetbackAreaSelectionId("green", index, item.id, item.name),
+        item.status
+      );
+    });
     return map;
   }, [areaResults]);
 
@@ -127,9 +133,10 @@ export function GreenSetbackSceneLayer() {
         });
 
         const baseZ = area.base_z ?? outer[0][2] ?? 0;
+        const id = buildSetbackAreaSelectionId("green", index, area.id, area.name);
         return {
           key: `green-area-${index}`,
-          name: area.name ?? `绿地${index + 1}`,
+          id,
           shape,
           baseZ,
           height: extrudeHeight,
@@ -140,7 +147,7 @@ export function GreenSetbackSceneLayer() {
           item
         ): item is {
           key: string;
-          name: string;
+          id: string;
           shape: THREE.Shape;
           baseZ: number;
           height: number;
@@ -165,10 +172,10 @@ export function GreenSetbackSceneLayer() {
       );
       centroid.x /= points.length;
       centroid.y /= points.length;
-      const status = areaStatusMap.get(mesh.name) ?? "pass";
+      const status = areaStatusMap.get(mesh.id) ?? "pass";
       return {
         key: `${mesh.key}-label`,
-        name: mesh.name,
+        id: mesh.id,
         status,
         position: [centroid.x, centroid.y, mesh.baseZ + mesh.height + 0.8] as [
           number,
@@ -178,7 +185,7 @@ export function GreenSetbackSceneLayer() {
       };
     }).filter(Boolean) as Array<{
       key: string;
-      name: string;
+      id: string;
       status: "pass" | "fail";
       position: [number, number, number];
     }>;
@@ -241,7 +248,7 @@ export function GreenSetbackSceneLayer() {
             ]}
           />
           <primitive
-            object={selectedAreaName === mesh.name ? selectedGreenAreaMaterial : greenAreaMaterial}
+            object={selectedAreaId === mesh.id ? selectedGreenAreaMaterial : greenAreaMaterial}
             attach="material"
           />
         </mesh>
@@ -257,13 +264,13 @@ export function GreenSetbackSceneLayer() {
           <button
             type="button"
             onClick={() =>
-              setSelectedAreaName(selectedAreaName === label.name ? null : label.name)
+              setSelectedAreaId(selectedAreaId === label.id ? null : label.id)
             }
             className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
               label.status === "pass"
                 ? "border-green-500 bg-green-50/90 text-green-700"
-                : "border-red-500 bg-red-50/90 text-red-700"
-            } ${selectedAreaName === label.name ? "ring-2 ring-emerald-400" : ""}`}
+                : "border-orange-500 bg-orange-50/90 text-orange-700"
+            } ${selectedAreaId === label.id ? "ring-2 ring-emerald-400" : ""}`}
           >
             {label.status === "pass" ? "通过" : "不通过"}
           </button>

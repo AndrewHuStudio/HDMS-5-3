@@ -65,6 +65,7 @@ export function SkyBridgePanel() {
   const results = useSkyBridgeStore((state) => state.results);
   const warnings = useSkyBridgeStore((state) => state.warnings);
   const showLabels = useSkyBridgeStore((state) => state.showLabels);
+  const selectedConnectionId = useSkyBridgeStore((state) => state.selectedConnectionId);
   const setPlots = useSkyBridgeStore((state) => state.setPlots);
   const setAutoConnections = useSkyBridgeStore((state) => state.setAutoConnections);
   const setConnections = useSkyBridgeStore((state) => state.setConnections);
@@ -76,6 +77,7 @@ export function SkyBridgePanel() {
   const setResults = useSkyBridgeStore((state) => state.setResults);
   const setWarnings = useSkyBridgeStore((state) => state.setWarnings);
   const setShowLabels = useSkyBridgeStore((state) => state.setShowLabels);
+  const setSelectedConnectionId = useSkyBridgeStore((state) => state.setSelectedConnectionId);
 
   const [isPreparing, setIsPreparing] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
@@ -226,6 +228,7 @@ export function SkyBridgePanel() {
     setResults([]);
     setWarnings([]);
     setShowLabels(false);
+    setSelectedConnectionId(null);
     setError(null);
   };
 
@@ -241,6 +244,16 @@ export function SkyBridgePanel() {
   );
   const passedCount = results.filter((item) => item.status === "pass").length;
   const failedCount = results.filter((item) => item.status === "fail").length;
+
+  useEffect(() => {
+    if (!selectedConnectionId) return;
+    const element = document.querySelector(
+      `[data-connection-id="${selectedConnectionId}"]`
+    ) as HTMLElement | null;
+    if (element) {
+      element.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [selectedConnectionId]);
 
   return (
     <div className="space-y-3">
@@ -446,14 +459,18 @@ export function SkyBridgePanel() {
           <CardContent className="space-y-2">
             {sortedResults.map((item: SkyBridgeResult) => {
               const derivedReasons = deriveConnectionReasons(item);
+              const isSelected = selectedConnectionId === String(item.connection_id);
               return (
                 <div
                   key={`${item.plot_a}-${item.plot_b}`}
-                  className={`rounded border p-3 text-sm ${
+                  data-connection-id={item.connection_id}
+                  role="button"
+                  onClick={() => setSelectedConnectionId(isSelected ? null : String(item.connection_id))}
+                  className={`rounded border p-3 text-sm cursor-pointer transition-all ${
                     item.status === "pass"
                       ? "border-green-200 bg-green-50/80"
                       : "border-red-200 bg-red-50/80"
-                  }`}
+                  } ${isSelected ? "ring-2 ring-blue-400" : ""}`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="font-medium">

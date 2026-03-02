@@ -5,24 +5,24 @@ import type { GreenSetbackCheckResponse } from "./types";
 interface GreenSetbackState {
   result: GreenSetbackCheckResponse | null;
   showHighlights: boolean;
-  selectedAreaName: string | null;
+  selectedAreaId: string | null;
   setResult: (result: GreenSetbackCheckResponse | null) => void;
   setShowHighlights: (show: boolean) => void;
-  setSelectedAreaName: (name: string | null) => void;
+  setSelectedAreaId: (id: string | null) => void;
   reset: () => void;
 }
 
 const initialState = {
   result: null as GreenSetbackCheckResponse | null,
   showHighlights: true,
-  selectedAreaName: null as string | null,
+  selectedAreaId: null as string | null,
 };
 
 export const useGreenSetbackStore = create<GreenSetbackState>((set) => ({
   ...initialState,
-  setResult: (result) => set({ result, selectedAreaName: null }),
+  setResult: (result) => set({ result, selectedAreaId: null }),
   setShowHighlights: (show) => set({ showHighlights: show }),
-  setSelectedAreaName: (name) => set({ selectedAreaName: name }),
+  setSelectedAreaId: (id) => set({ selectedAreaId: id }),
   reset: () =>
     set({
       ...initialState,

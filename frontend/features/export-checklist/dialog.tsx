@@ -716,8 +716,40 @@ export function ExportChecklistDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[90vw] sm:max-w-[90vw] h-[90vh] p-0 flex flex-col z-[2147483647]">
-        <DialogHeader className="px-6 py-4 border-b">
+        <DialogHeader className="px-6 py-3 border-b flex flex-row items-center justify-between">
           <DialogTitle>管控审核清单导出</DialogTitle>
+          <div className="flex items-center gap-2 mr-8">
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              onClick={() => setPreviewZoom((current) => decreasePreviewZoom(current))}
+              disabled={previewZoom <= PREVIEW_ZOOM_MIN}
+              aria-label="缩小预览"
+            >
+              <Minus className="h-4 w-4" />
+            </Button>
+            <span className="w-16 text-center text-sm text-gray-700">{previewZoom}%</span>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 px-3"
+              onClick={() => setPreviewZoom(resetPreviewZoom())}
+              disabled={previewZoom === PREVIEW_ZOOM_DEFAULT}
+            >
+              重置
+            </Button>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              onClick={() => setPreviewZoom((current) => increasePreviewZoom(current))}
+              disabled={previewZoom >= PREVIEW_ZOOM_MAX}
+              aria-label="放大预览"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
         </DialogHeader>
 
         <div className="flex flex-1 overflow-hidden min-h-0">
@@ -731,9 +763,6 @@ export function ExportChecklistDialog({
             scrollContainerRef={previewScrollRef}
             onRegisterItemPageRef={registerItemPageRef}
             previewZoom={previewZoom}
-            onIncreasePreviewZoom={() => setPreviewZoom((current) => increasePreviewZoom(current))}
-            onDecreasePreviewZoom={() => setPreviewZoom((current) => decreasePreviewZoom(current))}
-            onResetPreviewZoom={() => setPreviewZoom(resetPreviewZoom())}
           />
 
           {/* 右侧栏 - 功能按钮 */}
@@ -777,9 +806,6 @@ function MiddlePreview({
   scrollContainerRef,
   onRegisterItemPageRef,
   previewZoom,
-  onIncreasePreviewZoom,
-  onDecreasePreviewZoom,
-  onResetPreviewZoom,
 }: {
   projectName: string;
   items: FeatureChecklistItem[];
@@ -789,50 +815,12 @@ function MiddlePreview({
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
   onRegisterItemPageRef: (itemId: string, node: HTMLDivElement | null) => void;
   previewZoom: number;
-  onIncreasePreviewZoom: () => void;
-  onDecreasePreviewZoom: () => void;
-  onResetPreviewZoom: () => void;
 }) {
   const date = new Date().toLocaleDateString("zh-CN");
   const previewScale = previewZoom / 100;
 
   return (
     <div className="flex-1 min-h-0 bg-gray-100 flex flex-col">
-      <div className="px-6 py-3 border-b bg-white/80 backdrop-blur-sm">
-        <div className="flex items-center justify-end gap-2">
-          <Button
-            type="button"
-            size="icon"
-            variant="outline"
-            onClick={onDecreasePreviewZoom}
-            disabled={previewZoom <= PREVIEW_ZOOM_MIN}
-            aria-label="缩小预览"
-          >
-            <Minus className="h-4 w-4" />
-          </Button>
-          <span className="w-16 text-center text-sm text-gray-700">{previewZoom}%</span>
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9 px-3"
-            onClick={onResetPreviewZoom}
-            disabled={previewZoom === PREVIEW_ZOOM_DEFAULT}
-          >
-            重置
-          </Button>
-          <Button
-            type="button"
-            size="icon"
-            variant="outline"
-            onClick={onIncreasePreviewZoom}
-            disabled={previewZoom >= PREVIEW_ZOOM_MAX}
-            aria-label="放大预览"
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto" style={{ width: `${794 * previewScale}px` }}>
           <div style={{ zoom: previewScale }}>

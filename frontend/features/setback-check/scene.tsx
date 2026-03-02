@@ -16,6 +16,7 @@ export function SetbackSceneLayer() {
   const sceneSnapshot = useSceneSnapshot();
   const result = useSetbackCheckStore((state) => state.result);
   const showHighlights = useSetbackCheckStore((state) => state.showHighlights);
+  const setSelectedBuildingIndex = useSetbackCheckStore((state) => state.setSelectedBuildingIndex);
   const meshList = sceneSnapshot?.meshList ?? [];
   const originalMaterials = useRef<Map<string, THREE.Material | THREE.Material[]>>(new Map());
 
@@ -119,12 +120,12 @@ export function SetbackSceneLayer() {
           center
           sprite
           zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
-          style={{ pointerEvents: "none" }}
+          style={{ pointerEvents: "auto" }}
         >
           <div
             className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
               label.isExceeded
-                ? "border-red-500 bg-red-50/90 text-red-700"
+                ? "border-orange-500 bg-orange-50/90 text-orange-700"
                 : "border-green-500 bg-green-50/90 text-green-700"
             }`}
           >

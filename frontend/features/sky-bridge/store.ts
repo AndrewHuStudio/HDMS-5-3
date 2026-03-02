@@ -13,6 +13,7 @@ interface SkyBridgeState {
   results: SkyBridgeResult[];
   warnings: string[];
   showLabels: boolean;
+  selectedConnectionId: string | null;
   setPlots: (plots: PlotInfo[]) => void;
   setAutoConnections: (connections: SkyBridgeConnection[]) => void;
   setConnections: (connections: SkyBridgeConnection[]) => void;
@@ -24,6 +25,7 @@ interface SkyBridgeState {
   setResults: (results: SkyBridgeResult[]) => void;
   setWarnings: (warnings: string[]) => void;
   setShowLabels: (show: boolean) => void;
+  setSelectedConnectionId: (id: string | null) => void;
   reset: () => void;
 }
 
@@ -54,6 +56,7 @@ const initialState = {
   results: [] as SkyBridgeResult[],
   warnings: [] as string[],
   showLabels: true,
+  selectedConnectionId: null as string | null,
 };
 
 export const useSkyBridgeStore = create<SkyBridgeState>((set, get) => ({
@@ -77,8 +80,9 @@ export const useSkyBridgeStore = create<SkyBridgeState>((set, get) => ({
   setElevation: (value) => set({ elevation: value }),
   setMinWidth: (value) => set({ minWidth: value }),
   setMinHeight: (value) => set({ minHeight: value }),
-  setResults: (results) => set({ results }),
+  setResults: (results) => set({ results, selectedConnectionId: null }),
   setWarnings: (warnings) => set({ warnings }),
   setShowLabels: (show) => set({ showLabels: show }),
+  setSelectedConnectionId: (id) => set({ selectedConnectionId: id }),
   reset: () => set({ ...initialState, showLabels: false }),
 }));

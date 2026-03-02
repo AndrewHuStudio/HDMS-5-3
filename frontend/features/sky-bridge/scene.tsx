@@ -25,6 +25,7 @@ export function SkyBridgeSceneLayer() {
   const modelTransform = useModelStore((state) => state.modelTransform);
   const results = useSkyBridgeStore((state) => state.results);
   const showLabels = useSkyBridgeStore((state) => state.showLabels);
+  const setSelectedConnectionId = useSkyBridgeStore((state) => state.setSelectedConnectionId);
   const shouldRenderVisuals = shouldRenderFeatureVisuals(showLabels, results.length);
 
   const meshList = sceneSnapshot?.meshList ?? [];
@@ -132,6 +133,7 @@ export function SkyBridgeSceneLayer() {
         name: `${result.plot_a} ↔ ${result.plot_b}`,
         status: result.status,
         reasons,
+        connectionId: result.connection_id,
         position: [position.x, position.y, position.z] as [number, number, number],
       };
     });
@@ -218,12 +220,14 @@ export function SkyBridgeSceneLayer() {
           </group>
         ))}
       {labels.map((label) => (
-        <Html key={label.key} position={label.position} center sprite style={{ pointerEvents: "none" }}>
-          <div
-            className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
+        <Html key={label.key} position={label.position} center sprite style={{ pointerEvents: "auto" }}>
+          <button
+            type="button"
+            onClick={() => setSelectedConnectionId(String(label.connectionId))}
+            className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap cursor-pointer ${
               label.status === "pass"
                 ? "border-green-500 bg-green-50/90 text-green-700"
-                : "border-red-500 bg-red-50/90 text-red-700"
+                : "border-orange-500 bg-orange-50/90 text-orange-700"
             }`}
           >
             <div className="font-medium">{label.name}</div>
@@ -232,7 +236,7 @@ export function SkyBridgeSceneLayer() {
                 {reason}
               </div>
             ))}
-          </div>
+          </button>
         </Html>
       ))}
     </>

@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
 import { sortReviewItems } from "@/lib/review-result-sort";
+import { buildSetbackAreaViewItems } from "@/features/setback-area/result-view";
 import { checkPlazaSetback } from "./api";
 import { usePlazaSetbackStore } from "./store";
 import type { PlazaSetbackAreaResult } from "./types";
@@ -33,10 +34,10 @@ export function PlazaSetbackPanel() {
 
   const result = usePlazaSetbackStore((state) => state.result);
   const showHighlights = usePlazaSetbackStore((state) => state.showHighlights);
-  const selectedAreaName = usePlazaSetbackStore((state) => state.selectedAreaName);
+  const selectedAreaId = usePlazaSetbackStore((state) => state.selectedAreaId);
   const setResult = usePlazaSetbackStore((state) => state.setResult);
   const setShowHighlights = usePlazaSetbackStore((state) => state.setShowHighlights);
-  const setSelectedAreaName = usePlazaSetbackStore((state) => state.setSelectedAreaName);
+  const setSelectedAreaId = usePlazaSetbackStore((state) => state.setSelectedAreaId);
 
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +123,7 @@ export function PlazaSetbackPanel() {
     setResult(null);
     setError(null);
     setShowHighlights(false);
-    setSelectedAreaName(null);
+    setSelectedAreaId(null);
   };
 
   const hasResults = Boolean(result);
@@ -130,23 +131,24 @@ export function PlazaSetbackPanel() {
   const compliant = result?.summary?.compliant ?? 0;
   const sortedAreaResults = useMemo(
     () =>
-      sortReviewItems(result?.area_results ?? [], {
+      sortReviewItems(buildSetbackAreaViewItems(result?.area_results ?? [], "plaza"), {
         getStatus: (item) => (item.status === "pass" ? "pass" : "fail"),
-        getIndexHint: (item) => item.name,
-        getName: (item) => item.name,
+        getIndexHint: (item) => item.displayName,
+        getName: (item) => item.displayName,
       }),
     [result]
   );
 
+
   useEffect(() => {
-    if (!selectedAreaName) return;
+    if (!selectedAreaId) return;
     const element = document.querySelector(
-      `[data-plaza-area="${selectedAreaName}"]`
+      `[data-plaza-area-id="${selectedAreaId}"]`
     ) as HTMLElement | null;
     if (element) {
       element.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-  }, [selectedAreaName]);
+  }, [selectedAreaId]);
 
   return (
     <div className="space-y-3">
@@ -264,22 +266,22 @@ export function PlazaSetbackPanel() {
             </p>
           </CardHeader>
           <CardContent className="space-y-2">
-            {sortedAreaResults.map((item: PlazaSetbackAreaResult) => (
+            {sortedAreaResults.map((item: PlazaSetbackAreaResult & { selectionId: string; displayName: string }) => (
               <div
-                key={item.name}
+                key={item.selectionId}
                 role="button"
                 onClick={() =>
-                  setSelectedAreaName(selectedAreaName === item.name ? null : item.name)
+                  setSelectedAreaId(selectedAreaId === item.selectionId ? null : item.selectionId)
                 }
-                data-plaza-area={item.name}
+                data-plaza-area-id={item.selectionId}
                 className={`rounded border p-3 text-sm cursor-pointer transition ${
                   item.status === "fail"
                     ? "border-red-200 bg-red-50/80"
                     : "border-green-200 bg-green-50/80"
-                } ${selectedAreaName === item.name ? "ring-2 ring-emerald-400" : ""}`}
+                } ${selectedAreaId === item.selectionId ? "ring-2 ring-emerald-400" : ""}`}
               >
                 <div className="flex items-center justify-between">
-                  <div className="font-medium">{item.name}</div>
+                  <div className="font-medium">{item.displayName}</div>
                   <div className="text-xs">
                     {item.status === "fail" ? "不合规" : "合规"}
                   </div>

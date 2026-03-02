@@ -26,8 +26,10 @@ export function SetbackPanel() {
 
   const result = useSetbackCheckStore((state) => state.result);
   const showHighlights = useSetbackCheckStore((state) => state.showHighlights);
+  const selectedBuildingIndex = useSetbackCheckStore((state) => state.selectedBuildingIndex);
   const setResult = useSetbackCheckStore((state) => state.setResult);
   const setShowHighlights = useSetbackCheckStore((state) => state.setShowHighlights);
+  const setSelectedBuildingIndex = useSetbackCheckStore((state) => state.setSelectedBuildingIndex);
 
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +111,7 @@ export function SetbackPanel() {
     setResult(null);
     setError(null);
     setShowHighlights(false);
+    setSelectedBuildingIndex(null);
   };
 
   const buildingResults = result?.buildings ?? [];
@@ -124,6 +127,16 @@ export function SetbackPanel() {
   const exceededCount = buildingResults.filter((b) => b.is_exceeded).length;
   const compliantCount = buildingResults.length - exceededCount;
   const hasResults = buildingResults.length > 0;
+
+  useEffect(() => {
+    if (selectedBuildingIndex === null) return;
+    const element = document.querySelector(
+      `[data-building-index="${selectedBuildingIndex}"]`
+    ) as HTMLElement | null;
+    if (element) {
+      element.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [selectedBuildingIndex]);
 
   return (
     <div className="space-y-3">
@@ -222,16 +235,21 @@ export function SetbackPanel() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-2.5 max-h-[420px] overflow-y-auto pt-2">
-            {sortedBuildingResults.map((building) => (
-              <div
-                key={building.building_index}
-                className={`border rounded-lg p-3 transition-all hover:shadow-sm ${
-                  building.is_exceeded
-                    ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
-                    : "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
-                }`}
-              >
+          <CardContent className="space-y-2.5 pt-2">
+            {sortedBuildingResults.map((building) => {
+              const isSelected = selectedBuildingIndex === building.building_index;
+              return (
+                <div
+                  key={building.building_index}
+                  data-building-index={building.building_index}
+                  role="button"
+                  onClick={() => setSelectedBuildingIndex(isSelected ? null : building.building_index)}
+                  className={`border rounded-lg p-3 transition-all hover:shadow-sm cursor-pointer ${
+                    building.is_exceeded
+                      ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
+                      : "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
+                  } ${isSelected ? "ring-2 ring-blue-400" : ""}`}
+                >
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-medium text-sm">
                     {building.building_name || `建筑 ${building.building_index + 1}`}
@@ -261,7 +279,8 @@ export function SetbackPanel() {
                   )}
                 </div>
               </div>
-            ))}
+            );
+            })}
           </CardContent>
         </Card>
       )}
