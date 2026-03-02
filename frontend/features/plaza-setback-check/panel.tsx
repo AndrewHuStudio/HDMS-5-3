@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
 import { sortReviewItems } from "@/lib/review-result-sort";
+import { useTransientHighlight } from "@/lib/use-transient-highlight";
 import { buildSetbackAreaViewItems } from "@/features/setback-area/result-view";
 import { checkPlazaSetback } from "./api";
 import { usePlazaSetbackStore } from "./store";
@@ -127,6 +128,7 @@ export function PlazaSetbackPanel() {
   };
 
   const hasResults = Boolean(result);
+  const highlightedAreaId = useTransientHighlight(selectedAreaId);
   const violations = result?.summary?.violations ?? 0;
   const compliant = result?.summary?.compliant ?? 0;
   const sortedAreaResults = useMemo(
@@ -278,7 +280,9 @@ export function PlazaSetbackPanel() {
                   item.status === "fail"
                     ? "border-red-200 bg-red-50/80"
                     : "border-green-200 bg-green-50/80"
-                } ${selectedAreaId === item.selectionId ? "ring-2 ring-emerald-400" : ""}`}
+                } ${selectedAreaId === item.selectionId ? "ring-2 ring-emerald-400" : ""} ${
+                  highlightedAreaId === item.selectionId ? "ring-2 ring-amber-400" : ""
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="font-medium">{item.displayName}</div>

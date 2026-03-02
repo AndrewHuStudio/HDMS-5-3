@@ -8,11 +8,15 @@ const useSceneState = () => {
   const volumes = useHeightCheckStore((state) => state.volumes);
   const showSetbackVolumes = useHeightCheckStore((state) => state.showSetbackVolumes);
   const showHeightCheckLabels = useHeightCheckStore((state) => state.showHeightCheckLabels);
+  const setSelectedBuildingIndex = useHeightCheckStore((state) => state.setSelectedBuildingIndex);
   return {
     heightCheckResults: results,
     setbackVolumes: volumes,
     showSetbackVolumes,
     showHeightCheckLabels,
+    onHeightCheckBuildingSelect: (buildingIndex: number) => {
+      setSelectedBuildingIndex(buildingIndex);
+    },
   };
 };
 

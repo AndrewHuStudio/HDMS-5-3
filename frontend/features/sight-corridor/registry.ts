@@ -8,12 +8,18 @@ const useSceneState = () => {
   const collisionResult = useSightCorridorStore((state) => state.collisionResult);
   const showCorridorLayer = useSightCorridorStore((state) => state.showCorridorLayer);
   const showBlockingLabels = useSightCorridorStore((state) => state.showBlockingLabels);
+  const setSelectedBlockedBuildingName = useSightCorridorStore(
+    (state) => state.setSelectedBlockedBuildingName
+  );
 
   return {
     corridorCollisionResult: collisionResult,
     showSightCorridorLayer: showCorridorLayer,
     showBlockingLabels,
     sightCorridorDisplayElevation: SIGHT_CORRIDOR_DISPLAY_ELEVATION,
+    onCorridorBlockedBuildingSelect: (buildingName: string) => {
+      setSelectedBlockedBuildingName(buildingName);
+    },
   };
 };
 

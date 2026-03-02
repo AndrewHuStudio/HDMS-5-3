@@ -761,7 +761,9 @@ interface ExternalModelProps {
   setbackHighlightResult?: SetbackCheckResult | null;
   setbackHighlightTarget?: { type: "overall" | "plot" | null; plotName?: string | null };
   onSetbackPlotSelect?: (plotName: string) => void;
+  onHeightCheckBuildingSelect?: (buildingIndex: number) => void;
   sceneUpAxis?: UpAxis;
+  onCorridorBlockedBuildingSelect?: (buildingName: string) => void;
   resetVisibilityOnLoad?: boolean;
 }
 
@@ -789,7 +791,9 @@ function ExternalModel({
   setbackHighlightResult = null,
   setbackHighlightTarget = { type: null },
   onSetbackPlotSelect,
+  onHeightCheckBuildingSelect,
   sceneUpAxis = SCENE_UP_AXIS,
+  onCorridorBlockedBuildingSelect,
   resetVisibilityOnLoad = true,
 }: ExternalModelProps) {
   const [model, setModel] = useState<THREE.Group | null>(null);
@@ -1499,6 +1503,7 @@ function ExternalModel({
 
         return {
           key: `height-label-${result.building_index}`,
+          buildingIndex: result.building_index,
           name: labelName,
           position: getHoverLabelPosition(targetMesh.boundingBox),
           heightLimit: result.height_limit,
@@ -1509,6 +1514,7 @@ function ExternalModel({
       })
       .filter(Boolean) as Array<{
       key: string;
+      buildingIndex: number;
       name: string;
       position: [number, number, number];
       heightLimit: number;
@@ -1643,9 +1649,11 @@ function ExternalModel({
                   center
                   sprite
                   zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
-                  style={{ pointerEvents: "none" }}
+                  style={{ pointerEvents: "auto" }}
                 >
-                  <div
+                  <button
+                    type="button"
+                    onClick={() => onSetbackPlotSelect?.(plot.plotName)}
                     className={`rounded px-2 py-1 text-[11px] shadow-sm border min-w-[70px] text-center ${
                       plot.isCompliant === true
                         ? "border-green-500 bg-green-50/90 text-green-700"
@@ -1658,7 +1666,7 @@ function ExternalModel({
                     <div className={plot.isCompliant === true ? "text-green-800" : plot.isCompliant === false ? "text-orange-800" : "text-slate-500"}>
                       {(plot.frontageRate * 100).toFixed(1)}%
                     </div>
-                  </div>
+                  </button>
                 </Html>
               )}
             </group>
@@ -1673,9 +1681,11 @@ function ExternalModel({
           center
           sprite
           zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
-          style={{ pointerEvents: "none" }}
+          style={{ pointerEvents: "auto" }}
         >
-          <div
+          <button
+            type="button"
+            onClick={() => onHeightCheckBuildingSelect?.(label.buildingIndex)}
             className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
               label.isExceeded
                 ? "border-red-500 bg-red-50/90 text-red-700"
@@ -1689,7 +1699,7 @@ function ExternalModel({
             {label.isExceeded && (
               <div className="text-[9px]">超出 +{label.exceedAmount.toFixed(2)} m</div>
             )}
-          </div>
+          </button>
         </Html>
       ))}
 
@@ -1700,11 +1710,15 @@ function ExternalModel({
           center
           sprite
           zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
-          style={{ pointerEvents: "none" }}
+          style={{ pointerEvents: "auto" }}
         >
-          <div className="rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap border-red-300 bg-red-50/80 text-red-700">
+          <button
+            type="button"
+            onClick={() => onCorridorBlockedBuildingSelect?.(label.name)}
+            className="rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap border-red-300 bg-red-50/80 text-red-700"
+          >
             <div className="font-medium">{label.name}</div>
-          </div>
+          </button>
         </Html>
       ))}
 
@@ -2251,12 +2265,14 @@ export interface CitySceneProps {
   setbackHighlightResult?: SetbackCheckResult | null;
   setbackHighlightTarget?: { type: "overall" | "plot" | null; plotName?: string | null };
   onSetbackPlotSelect?: (plotName: string) => void;
+  onHeightCheckBuildingSelect?: (buildingIndex: number) => void;
   sightCorridorPosition?: SightCorridorPosition | null;
   sightCorridorScale?: number;
   sightCorridorRadius?: number;
   corridorCollisionResult?: CorridorCollisionResult | null;
   showSightCorridorLayer?: boolean;
   showBlockingLabels?: boolean;
+  onCorridorBlockedBuildingSelect?: (buildingName: string) => void;
   sightCorridorDisplayElevation?: number;
   onModelBoundsComputed?: (bounds: THREE.Box3 | null) => void;
   onModelScaleComputed?: (scale: number) => void;
@@ -2285,9 +2301,11 @@ export function CityScene({
   setbackHighlightResult = null,
   setbackHighlightTarget = { type: null },
   onSetbackPlotSelect,
+  onHeightCheckBuildingSelect,
   corridorCollisionResult = null,
   showSightCorridorLayer = false,
   showBlockingLabels = false,
+  onCorridorBlockedBuildingSelect,
   sightCorridorDisplayElevation = 0,
   onModelBoundsComputed,
   onModelScaleComputed,
@@ -2502,6 +2520,8 @@ export function CityScene({
               setbackHighlightResult={setbackHighlightResult}
               setbackHighlightTarget={setbackHighlightTarget}
               onSetbackPlotSelect={onSetbackPlotSelect}
+              onHeightCheckBuildingSelect={onHeightCheckBuildingSelect}
+              onCorridorBlockedBuildingSelect={onCorridorBlockedBuildingSelect}
               sceneUpAxis={sceneUpAxis}
             />
           )}

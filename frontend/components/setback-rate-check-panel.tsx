@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { API_BASE, normalizeApiBase } from "@/lib/api-base";
 import { sortReviewItems } from "@/lib/review-result-sort";
+import { useTransientHighlight } from "@/lib/use-transient-highlight";
 import type { SetbackCheckResult } from "@/lib/setback-check-types";
 
 interface SetbackRateCheckPanelProps {
@@ -53,6 +54,7 @@ export function SetbackRateCheckPanel({
   const effectiveModelPath =
     modelFilePath || (modelFile?.name === uploadedFileName ? uploadedModelPath : null);
   const showLabels = showSetbackLabels ?? localShowLabels;
+  const highlightedPlotName = useTransientHighlight(selectedPlotName ?? null);
 
   useEffect(() => {
     setUploadedModelPath(null);
@@ -392,7 +394,9 @@ export function SetbackRateCheckPanel({
                         : plot.is_compliant === false
                           ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
                           : "border-border bg-muted/30"
-                    } ${isSelected ? "ring-1 ring-blue-400" : ""}`}
+                    } ${isSelected ? "ring-1 ring-blue-400" : ""} ${
+                      highlightedPlotName === plot.plot_name ? "ring-2 ring-amber-400" : ""
+                    }`}
                     ref={(node) => {
                       if (!node) return;
                       plotRefs.current.set(plot.plot_name, node);

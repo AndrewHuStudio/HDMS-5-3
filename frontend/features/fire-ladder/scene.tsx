@@ -23,6 +23,8 @@ export function FireLadderSceneLayer() {
   const modelTransform = useModelStore((state) => state.modelTransform);
   const results = useFireLadderStore((state) => state.results);
   const showLabels = useFireLadderStore((state) => state.showLabels);
+  const selectedRedlineIndex = useFireLadderStore((state) => state.selectedRedlineIndex);
+  const setSelectedRedlineIndex = useFireLadderStore((state) => state.setSelectedRedlineIndex);
   const shouldRenderVisuals = shouldRenderFeatureVisuals(showLabels, results.length);
 
   const meshList = sceneSnapshot?.meshList ?? [];
@@ -134,6 +136,7 @@ export function FireLadderSceneLayer() {
           : ["通过"];
       return {
         key: `fire-ladder-${result.redline_index}`,
+        redlineIndex: result.redline_index,
         name: result.redline_name,
         status: result.status,
         reasons,
@@ -211,8 +214,14 @@ export function FireLadderSceneLayer() {
           </group>
         ))}
       {labels.map((label) => (
-        <Html key={label.key} position={label.position} center sprite style={{ pointerEvents: "none" }}>
-          <div
+        <Html key={label.key} position={label.position} center sprite style={{ pointerEvents: "auto" }}>
+          <button
+            type="button"
+            onClick={() =>
+              setSelectedRedlineIndex(
+                selectedRedlineIndex === label.redlineIndex ? null : label.redlineIndex
+              )
+            }
             className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
               label.status === "pass"
                 ? "border-green-500 bg-green-50/90 text-green-700"
@@ -225,7 +234,7 @@ export function FireLadderSceneLayer() {
                 {reason}
               </div>
             ))}
-          </div>
+          </button>
         </Html>
       ))}
     </>

@@ -10,6 +10,7 @@ import { AlertCircle, CheckCircle2, Loader2, Eye, X } from "lucide-react";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
 import { sortReviewItems } from "@/lib/review-result-sort";
+import { useTransientHighlight } from "@/lib/use-transient-highlight";
 import { checkHeight } from "./api";
 import { useHeightCheckStore } from "./store";
 
@@ -29,11 +30,13 @@ export function HeightCheckPanel() {
   const volumes = useHeightCheckStore((state) => state.volumes);
   const showSetbackVolumes = useHeightCheckStore((state) => state.showSetbackVolumes);
   const showHeightCheckLabels = useHeightCheckStore((state) => state.showHeightCheckLabels);
+  const selectedBuildingIndex = useHeightCheckStore((state) => state.selectedBuildingIndex);
   const setResults = useHeightCheckStore((state) => state.setResults);
   const setWarnings = useHeightCheckStore((state) => state.setWarnings);
   const setVolumes = useHeightCheckStore((state) => state.setVolumes);
   const setShowSetbackVolumes = useHeightCheckStore((state) => state.setShowSetbackVolumes);
   const setShowHeightCheckLabels = useHeightCheckStore((state) => state.setShowHeightCheckLabels);
+  const setSelectedBuildingIndex = useHeightCheckStore((state) => state.setSelectedBuildingIndex);
 
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +45,7 @@ export function HeightCheckPanel() {
 
   const effectiveModelPath =
     modelFilePath || (modelFile?.name === uploadedFileName ? uploadedModelPath : null);
+  const highlightedBuildingIndex = useTransientHighlight(selectedBuildingIndex);
 
   useEffect(() => {
     setUploadedModelPath(null);
@@ -121,6 +125,7 @@ export function HeightCheckPanel() {
     setResults([]);
     setWarnings([]);
     setVolumes([]);
+    setSelectedBuildingIndex(null);
     setShowSetbackVolumes(false);
     setShowHeightCheckLabels(false);
     setError(null);
@@ -138,6 +143,15 @@ export function HeightCheckPanel() {
     [results]
   );
   const hasResults = results.length > 0 || warnings.length > 0 || volumes.length > 0;
+
+  useEffect(() => {
+    if (selectedBuildingIndex === null) return;
+    const element = document.querySelector(
+      `[data-height-building-index="${selectedBuildingIndex}"]`
+    ) as HTMLElement | null;
+    if (!element) return;
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [selectedBuildingIndex]);
 
   return (
     <div className="space-y-3">
@@ -261,10 +275,21 @@ export function HeightCheckPanel() {
             {sortedResults.map((building) => (
               <div
                 key={building.building_index}
-                className={`border rounded-lg p-3 transition-all hover:shadow-sm ${
+                data-height-building-index={building.building_index}
+                role="button"
+                onClick={() =>
+                  setSelectedBuildingIndex(
+                    selectedBuildingIndex === building.building_index
+                      ? null
+                      : building.building_index
+                  )
+                }
+                className={`border rounded-lg p-3 transition-all hover:shadow-sm cursor-pointer ${
                   building.is_exceeded
                     ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
                     : "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
+                } ${selectedBuildingIndex === building.building_index ? "ring-1 ring-blue-400" : ""} ${
+                  highlightedBuildingIndex === building.building_index ? "ring-2 ring-amber-400" : ""
                 }`}
               >
                 <div className="flex items-center justify-between mb-2">

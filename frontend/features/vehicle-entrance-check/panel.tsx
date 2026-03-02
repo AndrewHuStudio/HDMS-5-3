@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
 import { sortReviewItems } from "@/lib/review-result-sort";
+import { useTransientHighlight } from "@/lib/use-transient-highlight";
 import { checkVehicleEntrance } from "./api";
 import { useVehicleEntranceStore } from "./store";
 import type { VehicleEntranceResult } from "./types";
@@ -150,6 +151,7 @@ export function VehicleEntrancePanel() {
       }),
     [result]
   );
+  const highlightedEntranceId = useTransientHighlight(selectedEntranceId);
 
   useEffect(() => {
     if (!selectedEntranceId) return;
@@ -319,11 +321,13 @@ export function VehicleEntrancePanel() {
                   role="button"
                   onClick={() => setSelectedEntranceId(isSelected ? null : id)}
                   data-entrance-id={id}
-                  className={`border rounded-lg p-3 transition-all cursor-pointer ${
-                    item.status === "pass"
-                      ? "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
-                      : "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
-                  } ${isSelected ? "ring-2 ring-emerald-400" : ""}`}
+                   className={`border rounded-lg p-3 transition-all cursor-pointer ${
+                     item.status === "pass"
+                       ? "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
+                       : "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
+                    } ${isSelected ? "ring-2 ring-emerald-400" : ""} ${
+                      highlightedEntranceId === id ? "ring-2 ring-amber-400" : ""
+                    }`}
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">

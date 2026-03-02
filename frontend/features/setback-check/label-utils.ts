@@ -15,6 +15,7 @@ export interface SetbackLabelMeshInfo {
 
 export interface SetbackLabelEntry {
   key: string;
+  buildingIndex: number;
   name: string;
   plotName: string;
   isExceeded: boolean;
@@ -149,6 +150,7 @@ export function buildSetbackLabels(
 
       return {
         key: `setback-label-${building.building_index}-${targetMesh.id}`,
+        buildingIndex: building.building_index,
         name: labelName,
         plotName: building.plot_name ?? "未匹配地块",
         isExceeded: building.is_exceeded,

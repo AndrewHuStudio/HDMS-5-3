@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { sortReviewItems } from "@/lib/review-result-sort";
+import { useTransientHighlight } from "@/lib/use-transient-highlight";
 import type { CorridorCollisionResult } from "@/lib/sight-corridor-types";
 
 interface SightCorridorPanelProps {
@@ -18,6 +19,8 @@ interface SightCorridorPanelProps {
   onCorridorCheckClear?: () => void;
   showBlockingLabels?: boolean;
   onShowBlockingLabelsChange?: (show: boolean) => void;
+  selectedBlockedBuildingName?: string | null;
+  onSelectedBlockedBuildingNameChange?: (name: string | null) => void;
   planViewportComponent?: React.ReactNode;
 }
 
@@ -30,10 +33,14 @@ export function SightCorridorPanel({
   onCorridorCheckClear,
   showBlockingLabels,
   onShowBlockingLabelsChange,
+  selectedBlockedBuildingName,
+  onSelectedBlockedBuildingNameChange,
   planViewportComponent,
 }: SightCorridorPanelProps) {
   const [corridorError, setCorridorError] = useState<string | null>(null);
   const [localShowBlockingLabels, setLocalShowBlockingLabels] = useState(true);
+  const buildingRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const highlightedBuildingName = useTransientHighlight(selectedBlockedBuildingName ?? null);
 
   const corridorBlockedBuildings = corridorCollisionResult?.blocked_buildings ?? [];
   const corridorStatus = corridorCollisionResult?.status ?? null;
@@ -49,6 +56,13 @@ export function SightCorridorPanel({
   );
   const showBlocking = showBlockingLabels ?? localShowBlockingLabels;
   const hasCorridorResult = corridorStatus === "clear" || corridorStatus === "blocked";
+
+  useEffect(() => {
+    if (!selectedBlockedBuildingName) return;
+    const target = buildingRefs.current.get(selectedBlockedBuildingName);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [selectedBlockedBuildingName]);
 
   const resolvedPlanViewport = useMemo(() => {
     if (!planViewportComponent) return null;
@@ -169,7 +183,21 @@ export function SightCorridorPanel({
             sortedBlockedBuildings.map((building, index) => (
               <div
                 key={`${building.mesh_id ?? building.building_name}-${index}`}
-                className="border rounded-lg p-3 transition-all hover:shadow-sm border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
+                ref={(node) => {
+                  if (!node) return;
+                  buildingRefs.current.set(building.building_name, node);
+                }}
+                role="button"
+                onClick={() =>
+                  onSelectedBlockedBuildingNameChange?.(
+                    selectedBlockedBuildingName === building.building_name
+                      ? null
+                      : building.building_name
+                  )
+                }
+                className={`border rounded-lg p-3 transition-all hover:shadow-sm cursor-pointer border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30 ${
+                  selectedBlockedBuildingName === building.building_name ? "ring-1 ring-blue-400" : ""
+                } ${highlightedBuildingName === building.building_name ? "ring-2 ring-amber-400" : ""}`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-medium text-sm">{building.building_name}</span>

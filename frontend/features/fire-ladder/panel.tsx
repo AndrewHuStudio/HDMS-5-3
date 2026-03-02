@@ -10,6 +10,7 @@ import { AlertCircle, CheckCircle2, Loader2, X, Eye } from "lucide-react";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
 import { sortReviewItems } from "@/lib/review-result-sort";
+import { useTransientHighlight } from "@/lib/use-transient-highlight";
 import { checkFireLadder } from "./api";
 import { useFireLadderStore } from "./store";
 
@@ -37,9 +38,11 @@ export function FireLadderPanel() {
   const results = useFireLadderStore((state) => state.results);
   const warnings = useFireLadderStore((state) => state.warnings);
   const showLabels = useFireLadderStore((state) => state.showLabels);
+  const selectedRedlineIndex = useFireLadderStore((state) => state.selectedRedlineIndex);
   const setResults = useFireLadderStore((state) => state.setResults);
   const setWarnings = useFireLadderStore((state) => state.setWarnings);
   const setShowLabels = useFireLadderStore((state) => state.setShowLabels);
+  const setSelectedRedlineIndex = useFireLadderStore((state) => state.setSelectedRedlineIndex);
 
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +52,7 @@ export function FireLadderPanel() {
 
   const effectiveModelPath =
     modelFilePath || (modelFile?.name === uploadedFileName ? uploadedModelPath : null);
+  const highlightedRedlineIndex = useTransientHighlight(selectedRedlineIndex);
 
   useEffect(() => {
     setUploadedModelPath(null);
@@ -131,6 +135,7 @@ export function FireLadderPanel() {
     setResults([]);
     setWarnings([]);
     setShowLabels(false);
+    setSelectedRedlineIndex(null);
     setError(null);
   };
 
@@ -146,6 +151,15 @@ export function FireLadderPanel() {
   );
   const passedCount = results.filter((item) => item.status === "pass").length;
   const failedCount = results.filter((item) => item.status === "fail").length;
+
+  useEffect(() => {
+    if (selectedRedlineIndex === null) return;
+    const element = document.querySelector(
+      `[data-fire-redline-index="${selectedRedlineIndex}"]`
+    ) as HTMLElement | null;
+    if (!element) return;
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [selectedRedlineIndex]);
 
   return (
     <div className="space-y-3">
@@ -259,10 +273,19 @@ export function FireLadderPanel() {
             {sortedResults.map((item) => (
               <div
                 key={item.redline_index}
-                className={`border rounded-lg p-3 transition-all hover:shadow-sm ${
+                data-fire-redline-index={item.redline_index}
+                role="button"
+                onClick={() =>
+                  setSelectedRedlineIndex(
+                    selectedRedlineIndex === item.redline_index ? null : item.redline_index
+                  )
+                }
+                className={`border rounded-lg p-3 transition-all hover:shadow-sm cursor-pointer ${
                   item.status === "pass"
                     ? "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
                     : "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
+                } ${selectedRedlineIndex === item.redline_index ? "ring-1 ring-blue-400" : ""} ${
+                  highlightedRedlineIndex === item.redline_index ? "ring-2 ring-amber-400" : ""
                 }`}
               >
                 <div className="flex items-center justify-between mb-2">

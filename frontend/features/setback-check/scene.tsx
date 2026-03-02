@@ -16,6 +16,7 @@ export function SetbackSceneLayer() {
   const sceneSnapshot = useSceneSnapshot();
   const result = useSetbackCheckStore((state) => state.result);
   const showHighlights = useSetbackCheckStore((state) => state.showHighlights);
+  const selectedBuildingIndex = useSetbackCheckStore((state) => state.selectedBuildingIndex);
   const setSelectedBuildingIndex = useSetbackCheckStore((state) => state.setSelectedBuildingIndex);
   const meshList = sceneSnapshot?.meshList ?? [];
   const originalMaterials = useRef<Map<string, THREE.Material | THREE.Material[]>>(new Map());
@@ -122,7 +123,13 @@ export function SetbackSceneLayer() {
           zIndexRange={SCENE_HTML_Z_INDEX_RANGE}
           style={{ pointerEvents: "auto" }}
         >
-          <div
+          <button
+            type="button"
+            onClick={() =>
+              setSelectedBuildingIndex(
+                selectedBuildingIndex === label.buildingIndex ? null : label.buildingIndex
+              )
+            }
             className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
               label.isExceeded
                 ? "border-orange-500 bg-orange-50/90 text-orange-700"
@@ -133,7 +140,7 @@ export function SetbackSceneLayer() {
             <div className="text-[9px]">{label.statusText}</div>
             <div className="text-[9px]">所属地块 {label.plotName}</div>
             {label.reasonText && <div className="text-[9px]">{label.reasonText}</div>}
-          </div>
+          </button>
         </Html>
       ))}
     </>

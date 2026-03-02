@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
 import { sortReviewItems } from "@/lib/review-result-sort";
+import { useTransientHighlight } from "@/lib/use-transient-highlight";
 import { checkSetback } from "./api";
 import { useSetbackCheckStore } from "./store";
 
@@ -127,6 +128,7 @@ export function SetbackPanel() {
   const exceededCount = buildingResults.filter((b) => b.is_exceeded).length;
   const compliantCount = buildingResults.length - exceededCount;
   const hasResults = buildingResults.length > 0;
+  const highlightedBuildingIndex = useTransientHighlight(selectedBuildingIndex);
 
   useEffect(() => {
     if (selectedBuildingIndex === null) return;
@@ -244,11 +246,13 @@ export function SetbackPanel() {
                   data-building-index={building.building_index}
                   role="button"
                   onClick={() => setSelectedBuildingIndex(isSelected ? null : building.building_index)}
-                  className={`border rounded-lg p-3 transition-all hover:shadow-sm cursor-pointer ${
-                    building.is_exceeded
-                      ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
-                      : "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
-                  } ${isSelected ? "ring-2 ring-blue-400" : ""}`}
+                   className={`border rounded-lg p-3 transition-all hover:shadow-sm cursor-pointer ${
+                     building.is_exceeded
+                       ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
+                       : "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
+                    } ${isSelected ? "ring-2 ring-blue-400" : ""} ${
+                      highlightedBuildingIndex === building.building_index ? "ring-2 ring-amber-400" : ""
+                    }`}
                 >
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-medium text-sm">

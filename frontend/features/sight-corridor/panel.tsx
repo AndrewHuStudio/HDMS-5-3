@@ -20,9 +20,15 @@ export function SightCorridorPanelAdapter() {
   const collisionResult = useSightCorridorStore((state) => state.collisionResult);
   const showCorridorLayer = useSightCorridorStore((state) => state.showCorridorLayer);
   const showBlockingLabels = useSightCorridorStore((state) => state.showBlockingLabels);
+  const selectedBlockedBuildingName = useSightCorridorStore(
+    (state) => state.selectedBlockedBuildingName
+  );
   const setCollisionResult = useSightCorridorStore((state) => state.setCollisionResult);
   const setShowCorridorLayer = useSightCorridorStore((state) => state.setShowCorridorLayer);
   const setShowBlockingLabels = useSightCorridorStore((state) => state.setShowBlockingLabels);
+  const setSelectedBlockedBuildingName = useSightCorridorStore(
+    (state) => state.setSelectedBlockedBuildingName
+  );
 
   const handleCorridorCheckRequest = async () => {
     if (!modelFilePath) return;
@@ -95,6 +101,8 @@ export function SightCorridorPanelAdapter() {
       onCorridorCheckClear={handleCorridorCheckClear}
       showBlockingLabels={showBlockingLabels}
       onShowBlockingLabelsChange={setShowBlockingLabels}
+      selectedBlockedBuildingName={selectedBlockedBuildingName}
+      onSelectedBlockedBuildingNameChange={setSelectedBlockedBuildingName}
       planViewportComponent={planViewport}
     />
   );

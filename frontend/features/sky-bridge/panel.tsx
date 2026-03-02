@@ -18,6 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
 import { sortReviewItems } from "@/lib/review-result-sort";
+import { useTransientHighlight } from "@/lib/use-transient-highlight";
 import { checkSkyBridge, prepareSkyBridge } from "./api";
 import { SkyBridgePlanOverlay } from "./plan-overlay";
 import { useSkyBridgeStore } from "./store";
@@ -244,6 +245,7 @@ export function SkyBridgePanel() {
   );
   const passedCount = results.filter((item) => item.status === "pass").length;
   const failedCount = results.filter((item) => item.status === "fail").length;
+  const highlightedConnectionId = useTransientHighlight(selectedConnectionId);
 
   useEffect(() => {
     if (!selectedConnectionId) return;
@@ -466,11 +468,15 @@ export function SkyBridgePanel() {
                   data-connection-id={item.connection_id}
                   role="button"
                   onClick={() => setSelectedConnectionId(isSelected ? null : String(item.connection_id))}
-                  className={`rounded border p-3 text-sm cursor-pointer transition-all ${
-                    item.status === "pass"
-                      ? "border-green-200 bg-green-50/80"
-                      : "border-red-200 bg-red-50/80"
-                  } ${isSelected ? "ring-2 ring-blue-400" : ""}`}
+                   className={`rounded border p-3 text-sm cursor-pointer transition-all ${
+                     item.status === "pass"
+                       ? "border-green-200 bg-green-50/80"
+                       : "border-red-200 bg-red-50/80"
+                    } ${isSelected ? "ring-2 ring-blue-400" : ""} ${
+                      highlightedConnectionId === String(item.connection_id)
+                        ? "ring-2 ring-amber-400"
+                        : ""
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="font-medium">

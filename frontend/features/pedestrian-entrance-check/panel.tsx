@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { useModelStore } from "@/lib/stores/model-store";
 import { resolveApiBase } from "@/lib/api-base";
 import { sortReviewItems } from "@/lib/review-result-sort";
+import { useTransientHighlight } from "@/lib/use-transient-highlight";
 import { checkPedestrianEntrance } from "./api";
 import { usePedestrianEntranceStore } from "./store";
 
@@ -41,8 +42,10 @@ export function PedestrianEntrancePanel() {
 
   const result = usePedestrianEntranceStore((state) => state.result);
   const showHighlights = usePedestrianEntranceStore((state) => state.showHighlights);
+  const selectedRedlineKey = usePedestrianEntranceStore((state) => state.selectedRedlineKey);
   const setResult = usePedestrianEntranceStore((state) => state.setResult);
   const setShowHighlights = usePedestrianEntranceStore((state) => state.setShowHighlights);
+  const setSelectedRedlineKey = usePedestrianEntranceStore((state) => state.setSelectedRedlineKey);
 
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +55,7 @@ export function PedestrianEntrancePanel() {
 
   const effectiveModelPath =
     modelFilePath || (modelFile?.name === uploadedFileName ? uploadedModelPath : null);
+  const highlightedRedlineKey = useTransientHighlight(selectedRedlineKey);
 
   useEffect(() => {
     setUploadedModelPath(null);
@@ -126,6 +130,7 @@ export function PedestrianEntrancePanel() {
     setResult(null);
     setError(null);
     setShowHighlights(false);
+    setSelectedRedlineKey(null);
   };
 
   const hasResults = Boolean(result);
@@ -143,6 +148,15 @@ export function PedestrianEntrancePanel() {
       }),
     [result]
   );
+
+  useEffect(() => {
+    if (!selectedRedlineKey) return;
+    const element = document.querySelector(
+      `[data-pedestrian-redline-key="${selectedRedlineKey}"]`
+    ) as HTMLElement | null;
+    if (!element) return;
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [selectedRedlineKey]);
 
   return (
     <div className="space-y-3">
@@ -299,13 +313,20 @@ export function PedestrianEntrancePanel() {
             )}
             {redlines.map((item) => {
               const isFail = item.status === "fail";
+              const itemKey = `${item.layer}-${item.index}`;
+              const isSelected = selectedRedlineKey === itemKey;
               return (
                 <div
-                  key={`${item.layer}-${item.index}`}
-                  className={`border rounded-lg p-3 transition-all ${
+                  key={itemKey}
+                  data-pedestrian-redline-key={itemKey}
+                  role="button"
+                  onClick={() => setSelectedRedlineKey(isSelected ? null : itemKey)}
+                  className={`border rounded-lg p-3 transition-all cursor-pointer ${
                     isFail
                       ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30"
                       : "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30"
+                  } ${isSelected ? "ring-1 ring-blue-400" : ""} ${
+                    highlightedRedlineKey === itemKey ? "ring-2 ring-amber-400" : ""
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-2">

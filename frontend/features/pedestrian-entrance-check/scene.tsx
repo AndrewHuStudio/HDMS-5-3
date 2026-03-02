@@ -13,6 +13,8 @@ export function PedestrianEntranceSceneLayer() {
   const modelTransform = useModelStore((state) => state.modelTransform);
   const result = usePedestrianEntranceStore((state) => state.result);
   const showHighlights = usePedestrianEntranceStore((state) => state.showHighlights);
+  const selectedRedlineKey = usePedestrianEntranceStore((state) => state.selectedRedlineKey);
+  const setSelectedRedlineKey = usePedestrianEntranceStore((state) => state.setSelectedRedlineKey);
 
   const redlines = result?.redlines ?? [];
 
@@ -51,6 +53,7 @@ export function PedestrianEntranceSceneLayer() {
       return {
         key: `${item.layer}-${item.index ?? idx}`,
         position: item.point,
+        label: item.plot_name || `红线 ${(item.index ?? idx) + 1}`,
         status: item.status,
       };
     });
@@ -80,17 +83,22 @@ export function PedestrianEntranceSceneLayer() {
             position={[marker.position[0], marker.position[1], marker.position[2] + 1.4]}
             center
             sprite
-            style={{ pointerEvents: "none" }}
+            style={{ pointerEvents: "auto" }}
           >
-            <div
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedRedlineKey(selectedRedlineKey === marker.key ? null : marker.key)
+              }
               className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
                 isPass
                   ? "border-green-500 bg-green-50/90 text-green-700"
                   : "border-red-500 bg-red-50/90 text-red-700"
               }`}
             >
-              {labelText}
-            </div>
+              <div className="font-medium">{marker.label}</div>
+              <div className="text-[9px]">{labelText}</div>
+            </button>
           </Html>
         );
       })}
