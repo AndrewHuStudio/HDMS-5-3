@@ -582,7 +582,7 @@ export default function CityControlSystem() {
         <div
           className={cn(
             "relative flex-1 min-h-0",
-            activeTool ? "overflow-auto p-4" : isQAPanel ? "overflow-hidden" : "overflow-auto"
+            activeTool ? "overflow-y-auto p-4 review-result-scrollbar" : isQAPanel ? "overflow-hidden" : "overflow-auto"
           )}
         >
           {isQAPanel ? (
@@ -700,7 +700,7 @@ export default function CityControlSystem() {
               </aside>
             </div>
           ) : (
-            <div className="h-full min-h-0 overflow-auto">
+            <div className="min-h-0">
               {activeView === "approval-checklist" && <ApprovalChecklistPanel />}
               {activeTool && (
                 <ToolPanelWrapper tool={activeTool}>

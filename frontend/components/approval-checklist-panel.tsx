@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { create } from "zustand";
 import { ChevronRight, ChevronDown, Eye, EyeOff, Loader2, Download, PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useModelStore } from "@/lib/stores/model-store";
@@ -448,6 +449,31 @@ function ChecklistItem({
   );
 }
 
+// ---- Persistent store for approval checklist UI state ----
+
+interface ApprovalChecklistUIState {
+  expandedIds: Set<FeatureId>;
+  toggleExpanded: (id: FeatureId) => void;
+  addExpanded: (id: FeatureId) => void;
+}
+
+const useApprovalChecklistUIStore = create<ApprovalChecklistUIState>((set) => ({
+  expandedIds: new Set(),
+  toggleExpanded: (id) =>
+    set((state) => {
+      const next = new Set(state.expandedIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { expandedIds: next };
+    }),
+  addExpanded: (id) =>
+    set((state) => {
+      const next = new Set(state.expandedIds);
+      next.add(id);
+      return { expandedIds: next };
+    }),
+}));
+
 // ---- Main component ----
 
 export function ApprovalChecklistPanel() {
@@ -455,7 +481,10 @@ export function ApprovalChecklistPanel() {
   const modelFile = useModelStore((s) => s.externalModelFile);
   const setModelFilePath = useModelStore((s) => s.setModelFilePath);
 
-  const [expandedIds, setExpandedIds] = useState<Set<FeatureId>>(new Set());
+  const expandedIds = useApprovalChecklistUIStore((s) => s.expandedIds);
+  const toggleExpanded = useApprovalChecklistUIStore((s) => s.toggleExpanded);
+  const addExpanded = useApprovalChecklistUIStore((s) => s.addExpanded);
+
   const [checkingId, setCheckingId] = useState<FeatureId | null>(null);
   const [isCheckingAll, setIsCheckingAll] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<FeatureId, string>>>({});
@@ -467,15 +496,6 @@ export function ApprovalChecklistPanel() {
       hideAllReviewToolVisuals();
     };
   }, []);
-
-  const toggleExpand = (id: FeatureId) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
 
   const resolveModelPath = async (): Promise<string | null> => {
     if (modelFilePath) return modelFilePath;
@@ -504,7 +524,7 @@ export function ApprovalChecklistPanel() {
         return;
       }
       await runCheck(id, path);
-      setExpandedIds((prev) => new Set(prev).add(id));
+      addExpanded(id);
     } catch (err) {
       setErrors((prev) => ({
         ...prev,
@@ -578,7 +598,7 @@ export function ApprovalChecklistPanel() {
             <ChecklistItem
               feature={feature}
               isExpanded={expandedIds.has(feature.id)}
-              onToggleExpand={() => toggleExpand(feature.id)}
+              onToggleExpand={() => toggleExpanded(feature.id)}
               isChecking={checkingId === feature.id}
               onRunCheck={() => handleRunOne(feature.id)}
             />

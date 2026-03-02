@@ -148,8 +148,8 @@ export function SightCorridorPanel({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
+      <Card className="max-h-[800px] flex flex-col">
+        <CardHeader className="pb-2 flex-shrink-0">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm">通廊检测结果</CardTitle>
             <div className="flex items-center gap-2">
@@ -169,7 +169,7 @@ export function SightCorridorPanel({
             </div>
           </div>
         </CardHeader>
-        <CardContent className="space-y-2.5 max-h-[520px] overflow-y-auto pt-2">
+        <CardContent className="space-y-2.5 flex-1 overflow-y-auto pt-2 review-result-scrollbar">
           {corridorStatus === "clear" && (
             <div className="border rounded-lg p-3 transition-all hover:shadow-sm border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30">
               <div className="flex items-center gap-1.5 text-green-700 dark:text-green-400">

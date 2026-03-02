@@ -451,14 +451,14 @@ export function SkyBridgePanel() {
       )}
 
       {hasResults && (
-        <Card>
-          <CardHeader className="pb-1">
+        <Card className="max-h-[800px] flex flex-col">
+          <CardHeader className="pb-1 flex-shrink-0">
             <CardTitle className="text-sm">检测结果</CardTitle>
             <p className="text-xs text-muted-foreground">
               通过 {passedCount}，未通过 {failedCount}
             </p>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="space-y-2 flex-1 overflow-y-auto review-result-scrollbar">
             {sortedResults.map((item: SkyBridgeResult) => {
               const derivedReasons = deriveConnectionReasons(item);
               const isSelected = selectedConnectionId === String(item.connection_id);
@@ -493,22 +493,6 @@ export function SkyBridgePanel() {
                       ))
                     )}
                   </div>
-                  {item.corridors.length > 0 && (
-                    <div className="mt-2 space-y-1 text-xs">
-                      {item.corridors.map((corridor) => (
-                        <div key={corridor.index} className="flex items-center gap-2">
-                          <span
-                            className={`inline-flex h-2 w-2 rounded-full ${
-                              corridor.status === "pass" ? "bg-green-500" : "bg-red-500"
-                            }`}
-                          />
-                          <span>
-                            连廊 #{corridor.index + 1}：{corridor.status === "pass" ? "通过" : "未通过"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               );
             })}

@@ -16,6 +16,7 @@ interface SetbackRateCheckPanelProps {
   modelFilePath: string | null;
   modelFile?: File | null;
   onModelPathResolved?: (modelPath: string) => void;
+  result?: SetbackCheckResult | null;
   onResultChange?: (result: SetbackCheckResult | null) => void;
   onHighlightTargetChange?: (target: { type: "overall" | "plot" | null; plotName?: string | null }) => void;
   selectedPlotName?: string | null;
@@ -28,6 +29,7 @@ export function SetbackRateCheckPanel({
   modelFilePath,
   modelFile,
   onModelPathResolved,
+  result: externalResult,
   onResultChange,
   onHighlightTargetChange,
   selectedPlotName,
@@ -38,7 +40,7 @@ export function SetbackRateCheckPanel({
   const apiBase = normalizeApiBase(API_BASE);
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<SetbackCheckResult | null>(null);
+  const [internalResult, setInternalResult] = useState<SetbackCheckResult | null>(null);
   const [sampleStep, setSampleStep] = useState(1.0);
   const [tolerance, setTolerance] = useState(0.5);
   const [requiredRatePercent, setRequiredRatePercent] = useState(70);
@@ -46,6 +48,9 @@ export function SetbackRateCheckPanel({
   const [uploadedModelPath, setUploadedModelPath] = useState<string | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const plotRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // 使用外部 result（来自 store）如果提供，否则使用内部状态（向后兼容）
+  const result = externalResult !== undefined ? externalResult : internalResult;
 
   const buildingLayer = "模型_建筑体块";
   const setbackLayer = "限制_建筑退线";
@@ -145,7 +150,7 @@ export function SetbackRateCheckPanel({
       }
 
       const data = (await response.json()) as SetbackCheckResult;
-      setResult(data);
+      setInternalResult(data);
       onResultChange?.(data);
       if (onShowSetbackLabelsChange) {
         onShowSetbackLabelsChange(true);
@@ -166,7 +171,7 @@ export function SetbackRateCheckPanel({
   };
 
   const handleClearResults = () => {
-    setResult(null);
+    setInternalResult(null);
     setError(null);
     onResultChange?.(null);
     onSelectedPlotNameChange?.(null);
@@ -195,7 +200,7 @@ export function SetbackRateCheckPanel({
   const nonCompliantCount = plots.filter((plot) => plot.is_compliant === false).length;
 
   return (
-    <div className="space-y-3">
+    <div className="h-full flex flex-col gap-3">
       <Card className="gap-0">
         <CardHeader className="pb-1">
           <div className="flex items-center gap-2">
@@ -331,6 +336,7 @@ export function SetbackRateCheckPanel({
 
       {result && (
         <Card
+          className="max-h-[800px] flex flex-col"
           onMouseEnter={() => onHighlightTargetChange?.({ type: "overall" })}
           onMouseLeave={() =>
             onHighlightTargetChange?.(
@@ -338,7 +344,7 @@ export function SetbackRateCheckPanel({
             )
           }
         >
-          <CardHeader className="pb-2">
+          <CardHeader className="pb-2 flex-shrink-0">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">检测结果</CardTitle>
               <div className="flex items-center gap-2">
@@ -353,7 +359,7 @@ export function SetbackRateCheckPanel({
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-3 pt-2">
+          <CardContent className="space-y-3 pt-2 flex-1 overflow-y-auto review-result-scrollbar">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>总体贴线率</span>
               <span className="font-medium">{overallRateText}</span>

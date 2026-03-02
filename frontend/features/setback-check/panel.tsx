@@ -221,8 +221,8 @@ export function SetbackPanel() {
       </Card>
 
       {hasResults && (
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="max-h-[800px] flex flex-col">
+          <CardHeader className="pb-2 flex-shrink-0">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">检测结果</CardTitle>
               <div className="flex items-center gap-2">
@@ -237,7 +237,7 @@ export function SetbackPanel() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-2.5 pt-2">
+          <CardContent className="space-y-2.5 flex-1 overflow-y-auto pt-2 review-result-scrollbar">
             {sortedBuildingResults.map((building) => {
               const isSelected = selectedBuildingIndex === building.building_index;
               return (

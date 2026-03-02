@@ -162,7 +162,7 @@ export function FireLadderPanel() {
   }, [selectedRedlineIndex]);
 
   return (
-    <div className="space-y-3">
+    <div className="h-full flex flex-col gap-3">
       <Card className="gap-0">
         <CardHeader className="pb-1">
           <div className="flex items-center gap-2">
@@ -253,8 +253,8 @@ export function FireLadderPanel() {
       )}
 
       {hasResults && (
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="max-h-[800px] flex flex-col">
+          <CardHeader className="pb-2 flex-shrink-0">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">检测结果</CardTitle>
               <div className="flex items-center gap-2">
@@ -269,7 +269,7 @@ export function FireLadderPanel() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-2.5 max-h-[320px] overflow-y-auto pt-2">
+          <CardContent className="space-y-2.5 flex-1 overflow-y-auto pt-2 review-result-scrollbar">
             {sortedResults.map((item) => (
               <div
                 key={item.redline_index}

@@ -258,14 +258,14 @@ export function GreenSetbackPanel() {
       )}
 
       {hasResults && (
-        <Card>
-          <CardHeader className="pb-1">
+        <Card className="max-h-[800px] flex flex-col">
+          <CardHeader className="pb-1 flex-shrink-0">
             <CardTitle className="text-sm">检测结果</CardTitle>
             <p className="text-xs text-muted-foreground">
               通过 {compliant}，不合规 {violations}
             </p>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="space-y-2 flex-1 overflow-y-auto review-result-scrollbar">
             {sortedAreaResults.map((item: GreenSetbackAreaResult & { selectionId: string; displayName: string }) => (
               <div
                 key={item.selectionId}

@@ -154,7 +154,7 @@ export function HeightCheckPanel() {
   }, [selectedBuildingIndex]);
 
   return (
-    <div className="space-y-3">
+    <div className="h-full flex flex-col gap-3">
       <Card className="gap-0">
         <CardHeader className="pb-1">
           <div className="flex items-center gap-1">
@@ -255,8 +255,8 @@ export function HeightCheckPanel() {
       </Card>
 
       {results.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="max-h-[800px] flex flex-col">
+          <CardHeader className="pb-2 flex-shrink-0">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">检测结果</CardTitle>
               <div className="flex items-center gap-2">
@@ -271,7 +271,7 @@ export function HeightCheckPanel() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-2.5 max-h-[400px] overflow-y-auto pt-2">
+          <CardContent className="space-y-2.5 flex-1 overflow-y-auto pt-2 review-result-scrollbar">
             {sortedResults.map((building) => (
               <div
                 key={building.building_index}
@@ -344,19 +344,6 @@ export function HeightCheckPanel() {
         </Card>
       )}
 
-      {warnings.length > 0 && (
-        <Alert className="border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/30">
-          <AlertCircle className="h-4 w-4 text-amber-600" />
-          <AlertDescription>
-            <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">警告:</p>
-            {warnings.map((warning, index) => (
-              <p key={index} className="text-xs text-amber-600 dark:text-amber-400">
-                {warning}
-              </p>
-            ))}
-          </AlertDescription>
-        </Alert>
-      )}
     </div>
   );
 }

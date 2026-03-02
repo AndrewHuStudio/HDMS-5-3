@@ -164,7 +164,7 @@ export function VehicleEntrancePanel() {
   }, [selectedEntranceId]);
 
   return (
-    <div className="space-y-3">
+    <div className="h-full flex flex-col gap-3">
       <Card className="gap-0">
         <CardHeader className="pb-1">
           <div className="flex items-center gap-2">
@@ -283,20 +283,9 @@ export function VehicleEntrancePanel() {
         </Alert>
       )}
 
-      {result?.warnings && result.warnings.length > 0 && (
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            {result.warnings.map((warning) => (
-              <div key={warning}>{warning}</div>
-            ))}
-          </AlertDescription>
-        </Alert>
-      )}
-
       {hasResults && (
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="max-h-[800px] flex flex-col">
+          <CardHeader className="pb-2 flex-shrink-0">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">检测结果</CardTitle>
               <div className="flex items-center gap-2">
@@ -311,7 +300,7 @@ export function VehicleEntrancePanel() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-2.5 max-h-[320px] overflow-y-auto pt-2">
+          <CardContent className="space-y-2.5 flex-1 overflow-y-auto pt-2 review-result-scrollbar">
             {items.map((item: VehicleEntranceResult) => {
               const id = item.object_id ? String(item.object_id) : `idx-${item.index}`;
               const isSelected = selectedEntranceId === id;
@@ -340,6 +329,9 @@ export function VehicleEntrancePanel() {
                         {item.status === "pass" ? "通过" : "不通过"}
                       </span>
                     </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground mb-1">
+                    所属地块：{item.plot_name || "未匹配地块"}
                   </div>
                   {item.status === "fail" && (
                     <div className="space-y-1 text-xs text-muted-foreground">

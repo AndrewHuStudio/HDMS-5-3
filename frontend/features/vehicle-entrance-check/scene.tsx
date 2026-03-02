@@ -85,6 +85,7 @@ export function VehicleEntranceSceneLayer() {
       return {
         key: id,
         position: item.point,
+        label: item.plot_name || item.name || `出入口${item.index + 1}`,
         material: isFail
           ? isSelected
             ? failSelectedMaterial
@@ -135,6 +136,7 @@ export function VehicleEntranceSceneLayer() {
                 : "border-red-500 bg-red-50/90 text-red-700"
             }`}
           >
+            <div className="font-medium">{marker.label}</div>
             {marker.status === "pass" ? "通过" : "不通过"}
           </button>
         </Html>

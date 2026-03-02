@@ -15,6 +15,10 @@ const reasonOrder: SkyBridgeReason[] = [
 ];
 
 export function deriveConnectionReasons(result: SkyBridgeResult): SkyBridgeReason[] {
+  if (result.status === "pass") {
+    return [];
+  }
+
   if (result.reasons && result.reasons.length > 0) {
     if (result.reasons.includes("missing_corridor")) {
       return ["missing_corridor"];

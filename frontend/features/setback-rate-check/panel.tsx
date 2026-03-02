@@ -13,6 +13,7 @@ export function SetbackRatePanel() {
   const modelFile = useModelStore((state) => state.externalModelFile);
   const setModelFilePath = useModelStore((state) => state.setModelFilePath);
 
+  const result = useSetbackRateCheckStore((state) => state.result);
   const showSetbackLabels = useSetbackRateCheckStore((state) => state.showSetbackLabels);
   const selectedPlotName = useSetbackRateCheckStore((state) => state.selectedPlotName);
   const setResult = useSetbackRateCheckStore((state) => state.setResult);
@@ -25,6 +26,7 @@ export function SetbackRatePanel() {
       modelFilePath={modelFilePath}
       modelFile={modelFile}
       onModelPathResolved={setModelFilePath}
+      result={result}
       onResultChange={setResult}
       onHighlightTargetChange={setHighlightTarget}
       selectedPlotName={selectedPlotName}

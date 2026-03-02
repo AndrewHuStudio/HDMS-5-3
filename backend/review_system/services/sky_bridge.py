@@ -366,6 +366,18 @@ def _safe_bbox_points(bbox: rhino3dm.BoundingBox) -> List[Point2D]:
     ]
 
 
+def _bbox_overlap_xy(
+    a: rhino3dm.BoundingBox, b: rhino3dm.BoundingBox, tol: float = 1e-6
+) -> bool:
+    """判断两个 BoundingBox 在 XY 平面是否有重叠（含容差）"""
+    return not (
+        a.Max.X < b.Min.X - tol
+        or a.Min.X > b.Max.X + tol
+        or a.Max.Y < b.Min.Y - tol
+        or a.Min.Y > b.Max.Y + tol
+    )
+
+
 def prepare_sky_bridge_info(
     model_path: Path,
     plot_layer: str = "场景_地块",
@@ -493,6 +505,7 @@ def check_sky_bridge_pure_python(
             "polygon2d": _points_to_2d(points),
             "polygon3d": points,
             "top_z": float(top_z),
+            "bbox": bbox,
         }
 
     connection_pairs: List[Tuple[str, str]] = []
@@ -598,6 +611,10 @@ def check_sky_bridge_pure_python(
             poly = corridor["polygon2d"]
             intersects_a = _polygons_intersect(poly, plot_a["polygon2d"])
             intersects_b = _polygons_intersect(poly, plot_b["polygon2d"])
+            if not intersects_a and plot_a.get("bbox") is not None:
+                intersects_a = _bbox_overlap_xy(corridor["bbox"], plot_a["bbox"])
+            if not intersects_b and plot_b.get("bbox") is not None:
+                intersects_b = _bbox_overlap_xy(corridor["bbox"], plot_b["bbox"])
             if not (intersects_a or intersects_b):
                 continue
 
