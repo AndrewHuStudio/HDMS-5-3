@@ -17,8 +17,21 @@ import type {
 } from "./types";
 import type { SubgraphData } from "@/features/qa/types";
 
-// 从环境变量获取 data_process API 基础 URL
-const DATA_PROCESS_BASE = process.env.NEXT_PUBLIC_DATA_PROCESS_BASE || "http://localhost:8005";
+const normalizeBase = (value: string) => value.replace(/\/$/, "");
+
+const resolveDataProcessBase = () => {
+  const configured = process.env.NEXT_PUBLIC_DATA_PROCESS_BASE || "";
+  if (configured) return normalizeBase(configured);
+
+  // Browser defaults to same-origin routes (/api, /ingestion, /graph) via Nginx.
+  if (typeof window !== "undefined") return "";
+
+  // SSR / local fallback.
+  return "http://localhost:8005";
+};
+
+// 从环境变量获取 data_process API 基础 URL（浏览器默认同源）
+const DATA_PROCESS_BASE = resolveDataProcessBase();
 
 /**
  * 提交 OCR 任务（上传文件）

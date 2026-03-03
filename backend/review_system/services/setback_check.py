@@ -161,6 +161,11 @@ def _point_in_curve_2d(point: rhino3dm.Point3d, curve: rhino3dm.Curve) -> bool:
     return intersections % 2 == 1
 
 
+def _resolve_building_name(obj: rhino3dm.File3dmObject, index: int) -> str:
+    """统一解析建筑名称，优先读取用户文本。"""
+    return _get_user_text(obj, "建筑名称") or getattr(obj, "Name", None) or f"建筑{index + 1}"
+
+
 def _point_in_polygon_2d(point: Point2D, polygon: List[Point2D]) -> bool:
     """射线法判断点是否在多边形内，边上的点视为在内部"""
     if len(polygon) < 3:
@@ -547,6 +552,7 @@ def check_setback_rate_pure_python(
             "label_position": label_position,
             "required_rate": specific_required,
             "building_segments": [],
+            "building_names": [],
             "building_count": 0,
         })
 
@@ -576,6 +582,7 @@ def check_setback_rate_pure_python(
 
         if segments:
             matched_plot["building_segments"].extend(segments)
+        matched_plot["building_names"].append(_resolve_building_name(obj, idx))
         matched_plot["building_count"] += 1
 
     plots = []
@@ -631,6 +638,7 @@ def check_setback_rate_pure_python(
             "frontage_rate": rate,
             "required_rate": required,
             "is_compliant": is_compliant,
+            "building_names": plot["building_names"],
             "building_count": plot["building_count"],
             "highlight_segments": highlight_segments,
             "outline_points": outline_points,
@@ -762,7 +770,7 @@ def check_setback_violation_pure_python(
             layer = file3dm.Layers[layer_index]
             layer_name = getattr(layer, "FullPath", None) or getattr(layer, "Name", None)
 
-        building_name = _get_user_text(obj, "建筑名称") or getattr(obj, "Name", None) or f"建筑{idx + 1}"
+        building_name = _resolve_building_name(obj, idx)
 
         is_exceeded = False
         reason = None

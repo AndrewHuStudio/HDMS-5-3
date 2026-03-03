@@ -1,6 +1,6 @@
 """
 管控审批清单服务 FastAPI 应用入口
-提供 AI 建议生成接口
+提供 AI 建议生成与 Word 导出接口
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from core.config import load_env_file
 
 load_env_file()
 
-from routes import ai_suggestion, pdf_export
+from routes import ai_suggestion, word_export
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,11 +31,11 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(ai_suggestion.router)
-app.include_router(pdf_export.router)
+app.include_router(word_export.router)
 
 # 兼容反向代理前缀：允许通过 /approval/* 访问
 app.include_router(ai_suggestion.router, prefix="/approval")
-app.include_router(pdf_export.router, prefix="/approval")
+app.include_router(word_export.router, prefix="/approval")
 
 
 @app.get("/health")

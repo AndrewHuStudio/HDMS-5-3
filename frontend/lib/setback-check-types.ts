@@ -5,6 +5,7 @@ export interface SetbackCheckPlotResult {
   frontage_rate: number;
   required_rate?: number | null;
   is_compliant?: boolean | null;
+  building_names?: string[];
   building_count: number;
   highlight_segments?: [number, number, number][][];
   outline_points?: [number, number, number][];

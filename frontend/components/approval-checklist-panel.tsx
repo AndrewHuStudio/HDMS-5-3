@@ -570,7 +570,7 @@ export function ApprovalChecklistPanel() {
         <Button
           size="default"
           variant="outline"
-          className="flex-1"
+          className="flex-1 cursor-pointer"
           disabled={isCheckingAll || !!checkingId}
           onClick={handleRunAll}
         >
@@ -579,11 +579,11 @@ export function ApprovalChecklistPanel() {
           ) : (
             <PlayCircle className="h-4 w-4 mr-2" />
           )}
-          {isCheckingAll ? "检测中..." : "一键导出"}
+          {isCheckingAll ? "检测中..." : "一键检测"}
         </Button>
         <Button
           size="default"
-          className="flex-1"
+          className="flex-1 cursor-pointer"
           onClick={() => openExportDialog(setExportDialogOpen)}
         >
           <Download className="h-4 w-4 mr-2" />

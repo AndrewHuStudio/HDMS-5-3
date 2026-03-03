@@ -7,7 +7,6 @@ interface ExportChecklistStore extends ChecklistExportState {
   updateItem: (id: string, updates: Partial<FeatureChecklistItem>) => void;
   updateItemStats: (id: string, stats: DetailedStatistics) => void;
   setIsGeneratingAI: (isGenerating: boolean) => void;
-  setIsCapturingScreenshot: (isCapturing: boolean) => void;
   reset: () => void;
 }
 
@@ -15,7 +14,6 @@ const initialState: ChecklistExportState = {
   projectName: "",
   items: [],
   isGeneratingAI: false,
-  isCapturingScreenshot: false,
 };
 
 export const useExportChecklistStore = create<ExportChecklistStore>((set) => ({
@@ -35,6 +33,5 @@ export const useExportChecklistStore = create<ExportChecklistStore>((set) => ({
       ),
     })),
   setIsGeneratingAI: (isGenerating) => set({ isGeneratingAI: isGenerating }),
-  setIsCapturingScreenshot: (isCapturing) => set({ isCapturingScreenshot: isCapturing }),
   reset: () => set(initialState),
 }));

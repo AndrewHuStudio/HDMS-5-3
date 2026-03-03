@@ -767,29 +767,57 @@ export function convertBuildingLineRateToStats(result: any): DetailedStatistics 
     passed: {
       plots: passed.map((p: any) => ({
         name: p.plot_name,
-        buildings: [formatSetbackRateBuildingName(getSetbackRateBuildingCount(p))],
+        buildings: getSetbackRateBuildingNames(p),
       })),
       totalPlots: passed.length,
       totalBuildings: passed.reduce(
-        (sum: number, p: any) => sum + getSetbackRateBuildingCount(p),
+        (sum: number, p: any) => sum + getSetbackRateBuildingNames(p).length,
         0
       ),
     },
     failed: {
       items: failed.map((p: any) => ({
         plotName: p.plot_name || "未知地块",
-        buildingName: formatSetbackRateBuildingName(getSetbackRateBuildingCount(p)),
+        buildingName: getSetbackRateBuildingNames(p).join("、"),
         issue: "贴线率不符合要求",
         details: getSetbackRateDetails(p),
       })),
       totalPlots: failed.length,
       totalBuildings: failed.reduce(
-        (sum: number, p: any) => sum + getSetbackRateBuildingCount(p),
+        (sum: number, p: any) => sum + getSetbackRateBuildingNames(p).length,
         0
       ),
     },
     summary: `总计：${plots.length} 个地块，${passed.length} 个通过，${failed.length} 个不符合`,
   };
+}
+
+function getSetbackRateBuildingNames(item: any): string[] {
+  if (Array.isArray(item?.building_names)) {
+    const names = item.building_names
+      .map((name: unknown) => (typeof name === "string" ? name.trim() : ""))
+      .filter((name: string) => name.length > 0);
+    if (names.length > 0) {
+      return names;
+    }
+  }
+
+  if (Array.isArray(item?.buildings)) {
+    const names = item.buildings
+      .map((building: any, index: number) =>
+        building?.building_name ||
+        building?.name ||
+        building?.buildingName ||
+        `建筑${index + 1}`
+      )
+      .filter((name: unknown) => typeof name === "string" && name.trim().length > 0)
+      .map((name: string) => name.trim());
+    if (names.length > 0) {
+      return names;
+    }
+  }
+
+  return [formatSetbackRateBuildingName(getSetbackRateBuildingCount(item))];
 }
 
 function getSetbackRateBuildingCount(item: any): number {

@@ -11,6 +11,12 @@ docker compose -f docker-compose.external.yml -p hdms_external up -d
 
 ## 2) Start application services with `.env.external`
 
+Tip: frontend can be started with mode-aware script from repo root:
+
+```powershell
+.\scripts\start-frontend.ps1 -Mode external
+```
+
 ```powershell
 # frontend
 cd frontend
@@ -60,4 +66,6 @@ systemctl reload nginx
 - `https://YOUR_DOMAIN`
 - `https://YOUR_DOMAIN/qa/health`
 - `https://YOUR_DOMAIN/approval/health`
+- `https://YOUR_DOMAIN/api/health`
+- `https://YOUR_DOMAIN/api/summary`
 - Upload a test file and verify output in `data/ocr_output_external`.

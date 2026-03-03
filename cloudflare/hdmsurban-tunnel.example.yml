@@ -1,5 +1,4 @@
-﻿# Copy this file to %USERPROFILE%\\.cloudflared\\config.yml and replace placeholders.
-# Tunnel name used below: hdms-external
+﻿
 
 tunnel: REPLACE_WITH_TUNNEL_UUID
 credentials-file: C:\\Users\\YOUR_WINDOWS_USER\\.cloudflared\\REPLACE_WITH_TUNNEL_UUID.json
@@ -21,7 +20,7 @@ ingress:
     path: ^/ingestion/.*$
     service: http://localhost:8025
 
-  - hostname: hdmsurban.com
+  - hostname: hdmsurban.comw
     path: ^/graph/.*$
     service: http://localhost:8025
 

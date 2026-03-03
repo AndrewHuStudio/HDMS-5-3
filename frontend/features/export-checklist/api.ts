@@ -1,9 +1,12 @@
-import type { AISuggestionRequest, AISuggestionResponse, ExportPdfRequest } from "./types";
+import type { AISuggestionRequest, AISuggestionResponse, ExportWordRequest } from "./types";
 
 const APPROVAL_CHECKLIST_PORTS = [8004, 8024];
 const APPROVAL_CHECKLIST_PATH_PREFIX = "/approval";
 const APPROVAL_CHECKLIST_API_PROXY_PREFIX = "/api/approval";
 const APPROVAL_BASE_CACHE_TTL_MS = 15_000;
+const AI_SUGGESTION_TIMEOUT_BASE_MS = 45_000;
+const AI_SUGGESTION_TIMEOUT_PER_ITEM_MS = 8_000;
+const AI_SUGGESTION_TIMEOUT_MAX_MS = 180_000;
 
 let cachedResolvedBase: { value: string; expiresAt: number } | null = null;
 
@@ -93,12 +96,17 @@ export async function generateAISuggestions(
 
   for (const apiBase of candidates) {
     try {
+      const timeoutMs = Math.min(
+        AI_SUGGESTION_TIMEOUT_BASE_MS + request.features.length * AI_SUGGESTION_TIMEOUT_PER_ITEM_MS,
+        AI_SUGGESTION_TIMEOUT_MAX_MS
+      );
       const response = await fetch(`${apiBase}/ai-suggestion`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json; charset=utf-8",
         },
         body: JSON.stringify(request),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       if (!response.ok) {
@@ -121,7 +129,7 @@ export async function generateAISuggestions(
   throw new Error(`AI 建议服务不可用，请稍后重试。${errors.length ? ` (${errors[0]})` : ""}`);
 }
 
-export async function exportChecklistPdf(request: ExportPdfRequest): Promise<Blob> {
+export async function exportChecklistWord(request: ExportWordRequest): Promise<Blob> {
   const primaryBase = await resolveApprovalChecklistBase();
   const candidates = [primaryBase, ...getCandidateBases()].filter(
     (base, index, list) => list.indexOf(base) === index
@@ -130,7 +138,7 @@ export async function exportChecklistPdf(request: ExportPdfRequest): Promise<Blo
 
   for (const apiBase of candidates) {
     try {
-      const response = await fetch(`${apiBase}/export-pdf`, {
+      const response = await fetch(`${apiBase}/export-word`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json; charset=utf-8",
@@ -154,5 +162,5 @@ export async function exportChecklistPdf(request: ExportPdfRequest): Promise<Blo
     }
   }
 
-  throw new Error(`PDF 导出服务不可用，请稍后重试。${errors.length ? ` (${errors[0]})` : ""}`);
+  throw new Error(`Word 导出服务不可用，请稍后重试。${errors.length ? ` (${errors[0]})` : ""}`);
 }

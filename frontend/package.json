@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
+    "dev:local": "powershell -ExecutionPolicy Bypass -File ../scripts/start-frontend.ps1 -Mode local",
+    "dev:external": "powershell -ExecutionPolicy Bypass -File ../scripts/start-frontend.ps1 -Mode external",
     "build": "next build",
     "start": "next start",
     "lint": "eslint ."

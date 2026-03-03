@@ -20,11 +20,11 @@ CHECK_LIST_MODEL = os.getenv("HDMS_CHECK_LIST_MODEL", os.getenv("HDMS_QA_MODEL",
 
 
 def _read_parallel_limit() -> int:
-    raw_value = os.getenv("HDMS_CHECK_LIST_PARALLEL", "6")
+    raw_value = os.getenv("HDMS_CHECK_LIST_PARALLEL", "8")
     try:
-        return max(1, int(raw_value))
+        return min(12, max(1, int(raw_value)))
     except ValueError:
-        return 6
+        return 8
 
 
 MAX_PARALLEL_REQUESTS = _read_parallel_limit()
@@ -103,12 +103,15 @@ async def _generate_feature_suggestion(
     semaphore: asyncio.Semaphore,
     feature: "FeatureInput",
 ) -> tuple[SuggestionOutput, bool]:
-    prompt = f"""请针对以下管控审查结果提供专业建议：
+    prompt = f"""请针对以下管控审查结果提供专业建议，并严格按指定格式输出：
 
 检测项目：{feature.name}
 检测结果：{feature.summary}
 
-请提供简洁的改进建议（50字以内）。"""
+输出要求：
+1) 先写“重点：”并列出 2-4 条要点，每条一行，格式为“- ...”；
+2) 再写“总结：”并用一段话概括总体建议；
+3) 全文简洁、可执行，不要输出其他无关说明。"""
 
     async with semaphore:
         try:

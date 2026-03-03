@@ -1,14 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Loader2, Sparkles, Camera, CheckSquare, Square, SquareX, Minus, Plus } from "lucide-react";
-import html2canvas from "html2canvas";
+import { Download, Loader2, Sparkles, CheckSquare, Square, SquareX, Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useExportChecklistStore } from "./store";
-import { exportChecklistPdf, generateAISuggestions } from "./api";
+import { exportChecklistWord, generateAISuggestions } from "./api";
 import { convertResultToStats } from "./utils";
 import type { FeatureChecklistItem, DetailedStatistics } from "./types";
 import {
@@ -20,214 +19,7 @@ import {
   resetPreviewZoom,
 } from "./preview-zoom";
 import { getSummaryTextClass } from "./summary-status";
-import {
-  hideAllReviewToolVisuals,
-  showOnlyReviewToolVisuals,
-} from "@/lib/review-visual-controls";
 import { resolveChecklistFeatureStatus, type ToolRunStatus } from "@/lib/tool-view-state";
-
-type CaptureViewKey = "northeast" | "northwest";
-type CaptureScreenshots = Record<CaptureViewKey, string | null>;
-
-const CAPTURE_VIEWS: Array<{ key: CaptureViewKey; label: string; buttonTitle: string }> = [
-  { key: "northeast", label: "东北视角", buttonTitle: "东北视角" },
-  { key: "northwest", label: "西北视角", buttonTitle: "西北视角" },
-];
-
-const PLACEHOLDER_HINT = "点击“一键加载审查项截图”生成可视化结果；未生成截图时，导出 PDF 不显示可视化结果。";
-const UNSUPPORTED_COLOR_FN_PATTERN = /(?:oklch|oklab)\([^)]*\)/gi;
-const AI_PARALLEL_LIMIT = 4;
-const CAPTURE_IMAGE_TYPE = "image/jpeg";
-const CAPTURE_IMAGE_QUALITY = 0.9;
-const CAPTURE_BACKGROUND_COLOR = "#ffffff";
-const CAPTURE_MAX_WIDTH = 960;
-const CAPTURE_MAX_HEIGHT = 540;
-const SCENE_SWITCH_MIN_WAIT_MS = 180;
-const HIGHLIGHT_SWITCH_MIN_WAIT_MS = 60;
-const OVERLAY_STABLE_MIN_WAIT_MS = 70;
-const SCENE_STABLE_MAX_WAIT_MS = 900;
-const OVERLAY_STABLE_MAX_WAIT_MS = 420;
-const SCENE_STABLE_REQUIRED_FRAMES = 2;
-const SCENE_HASH_SAMPLE_SIZE = 16;
-
-let sceneHashCanvas: HTMLCanvasElement | null = null;
-
-function containsUnsupportedColorFunction(value: string) {
-  return /(?:oklch|oklab)\(/i.test(value);
-}
-
-function copyComputedStyles(sourceEl: HTMLElement, targetEl: HTMLElement) {
-  const computedStyle = window.getComputedStyle(sourceEl);
-  for (let index = 0; index < computedStyle.length; index += 1) {
-    const propertyName = computedStyle[index];
-    const propertyValue = computedStyle.getPropertyValue(propertyName);
-    const propertyPriority = computedStyle.getPropertyPriority(propertyName);
-    if (!propertyValue) continue;
-    targetEl.style.setProperty(propertyName, propertyValue, propertyPriority);
-  }
-}
-
-function cloneElementWithInlineStyles(sourceEl: HTMLElement) {
-  const clonedRoot = sourceEl.cloneNode(true) as HTMLElement;
-  const sourceElements = [sourceEl, ...Array.from(sourceEl.querySelectorAll<HTMLElement>("*"))];
-  const clonedElements = [clonedRoot, ...Array.from(clonedRoot.querySelectorAll<HTMLElement>("*"))];
-  sourceElements.forEach((sourceNode, index) => {
-    const clonedNode = clonedElements[index];
-    if (!clonedNode) return;
-    copyComputedStyles(sourceNode, clonedNode);
-  });
-  return clonedRoot;
-}
-
-function getSceneCaptureRoot() {
-  const sceneRoot = document.querySelector("[data-scene-capture-root]");
-  if (!(sceneRoot instanceof HTMLElement)) {
-    throw new Error("未找到 3D 场景容器，请确保模型场景已加载");
-  }
-  return sceneRoot;
-}
-
-function getSceneCanvas(sceneRoot: HTMLElement) {
-  const canvas = sceneRoot.querySelector("canvas");
-  if (!(canvas instanceof HTMLCanvasElement)) {
-    throw new Error("未找到 3D 场景，请确保模型已加载");
-  }
-  return canvas;
-}
-
-function getOverlayRoots(sceneRoot: HTMLElement) {
-  return Array.from(sceneRoot.children).filter(
-    (child): child is HTMLElement => child instanceof HTMLElement && child.tagName !== "CANVAS"
-  );
-}
-
-function getCaptureScale(sceneRoot: HTMLElement) {
-  const sceneWidth = Math.max(1, sceneRoot.clientWidth || 1);
-  const sceneHeight = Math.max(1, sceneRoot.clientHeight || 1);
-  const widthScale = CAPTURE_MAX_WIDTH / sceneWidth;
-  const heightScale = CAPTURE_MAX_HEIGHT / sceneHeight;
-  return Math.max(0.1, Math.min(1, widthScale, heightScale));
-}
-
-function createOverlaySnapshotWrapper(
-  sceneRoot: HTMLElement,
-  width: number,
-  height: number,
-  overlayRoots: HTMLElement[] = getOverlayRoots(sceneRoot)
-) {
-  const wrapper = document.createElement("div");
-  wrapper.style.position = "fixed";
-  wrapper.style.left = "-100000px";
-  wrapper.style.top = "0";
-  wrapper.style.width = `${width}px`;
-  wrapper.style.height = `${height}px`;
-  wrapper.style.overflow = "hidden";
-  wrapper.style.pointerEvents = "none";
-  wrapper.style.background = "transparent";
-
-  overlayRoots.forEach((overlayRoot) => {
-    wrapper.appendChild(cloneElementWithInlineStyles(overlayRoot));
-  });
-
-  return wrapper;
-}
-
-async function captureOverlayLayerCanvas(sceneRoot: HTMLElement, width: number, height: number) {
-  const overlayRoots = getOverlayRoots(sceneRoot);
-  if (overlayRoots.length === 0) {
-    return null;
-  }
-
-  try {
-    return await html2canvas(sceneRoot, {
-      backgroundColor: null,
-      scale: 1,
-      width,
-      height,
-      useCORS: true,
-      logging: false,
-      ignoreElements: (element) => element.tagName === "CANVAS",
-      onclone: (clonedDocument) => {
-        sanitizeUnsupportedColorFunctions(clonedDocument);
-      },
-    });
-  } catch (error) {
-    console.warn("直接截图可视化标签层失败，回退到内联样式模式", error);
-  }
-
-  const wrapper = createOverlaySnapshotWrapper(sceneRoot, width, height, overlayRoots);
-  if (wrapper.childElementCount === 0) {
-    return null;
-  }
-
-  document.body.appendChild(wrapper);
-  try {
-    return await html2canvas(wrapper, {
-      backgroundColor: null,
-      scale: 1,
-      width,
-      height,
-      useCORS: true,
-      logging: false,
-      onclone: (clonedDocument) => {
-        // 清掉全局样式，避免 html2canvas 解析 Tailwind oklch 时崩溃；overlay 已内联样式。
-        clonedDocument.querySelectorAll("style, link[rel='stylesheet']").forEach((node) => {
-          node.remove();
-        });
-      },
-    });
-  } finally {
-    wrapper.remove();
-  }
-}
-
-async function captureSceneRootDataUrl(sceneRoot: HTMLElement, scale: number) {
-  const sceneCanvas = getSceneCanvas(sceneRoot);
-  const width = Math.max(1, Math.round((sceneCanvas.clientWidth || sceneRoot.clientWidth || sceneCanvas.width) * scale));
-  const height = Math.max(1, Math.round((sceneCanvas.clientHeight || sceneRoot.clientHeight || sceneCanvas.height) * scale));
-  const sceneSnapshot = await html2canvas(sceneRoot, {
-    backgroundColor: CAPTURE_BACKGROUND_COLOR,
-    scale,
-    width,
-    height,
-    useCORS: true,
-    logging: false,
-    onclone: (clonedDocument) => {
-      sanitizeUnsupportedColorFunctions(clonedDocument);
-    },
-  });
-  return canvasToDataUrl(sceneSnapshot, CAPTURE_IMAGE_TYPE, CAPTURE_IMAGE_QUALITY);
-}
-
-function sanitizeUnsupportedColorFunctions(clonedDocument: Document) {
-  const replaceUnsupportedColors = (value: string) =>
-    value.replace(UNSUPPORTED_COLOR_FN_PATTERN, "rgb(128, 128, 128)");
-
-  clonedDocument.querySelectorAll("style").forEach((styleEl) => {
-    const cssText = styleEl.textContent;
-    if (!cssText || !containsUnsupportedColorFunction(cssText)) return;
-    styleEl.textContent = replaceUnsupportedColors(cssText);
-  });
-
-  clonedDocument
-    .querySelectorAll<HTMLElement>("[style*='oklch('], [style*='oklab(']")
-    .forEach((el) => {
-      const inlineStyle = el.getAttribute("style");
-      if (!inlineStyle || !containsUnsupportedColorFunction(inlineStyle)) return;
-      el.setAttribute("style", replaceUnsupportedColors(inlineStyle));
-    });
-}
-
-function createEmptyScreenshots(): CaptureScreenshots {
-  return {
-    northeast: null,
-    northwest: null,
-  };
-}
-
-function getCaption(itemName: string, viewLabel: string) {
-  return `${itemName}${viewLabel}检测结果图`;
-}
 
 function isSuggestionInvalid(value: string) {
   const normalized = value.trim();
@@ -236,212 +28,6 @@ function isSuggestionInvalid(value: string) {
     normalized.includes("建议生成失败") ||
     normalized.includes("AI 建议生成失败")
   );
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function waitForNextPaint() {
-  return new Promise<void>((resolve) => {
-    window.requestAnimationFrame(() => resolve());
-  });
-}
-
-function getSceneHash(sceneCanvas: HTMLCanvasElement) {
-  if (!sceneHashCanvas) {
-    sceneHashCanvas = document.createElement("canvas");
-    sceneHashCanvas.width = SCENE_HASH_SAMPLE_SIZE;
-    sceneHashCanvas.height = SCENE_HASH_SAMPLE_SIZE;
-  }
-  const sampleCtx = sceneHashCanvas.getContext("2d", { willReadFrequently: true });
-  if (!sampleCtx) return null;
-  try {
-    sampleCtx.clearRect(0, 0, SCENE_HASH_SAMPLE_SIZE, SCENE_HASH_SAMPLE_SIZE);
-    sampleCtx.drawImage(sceneCanvas, 0, 0, SCENE_HASH_SAMPLE_SIZE, SCENE_HASH_SAMPLE_SIZE);
-    const pixelData = sampleCtx.getImageData(0, 0, SCENE_HASH_SAMPLE_SIZE, SCENE_HASH_SAMPLE_SIZE).data;
-    let hash = 2166136261;
-    for (let index = 0; index < pixelData.length; index += 16) {
-      hash ^= pixelData[index];
-      hash = Math.imul(hash, 16777619);
-      hash ^= pixelData[index + 1];
-      hash = Math.imul(hash, 16777619);
-      hash ^= pixelData[index + 2];
-      hash = Math.imul(hash, 16777619);
-    }
-    return hash >>> 0;
-  } catch {
-    return null;
-  }
-}
-
-async function waitForSceneStable(sceneCanvas: HTMLCanvasElement | null, minWaitMs: number) {
-  await waitForNextPaint();
-  if (!(sceneCanvas instanceof HTMLCanvasElement)) {
-    await wait(minWaitMs);
-    await waitForNextPaint();
-    return;
-  }
-
-  const initialHash = getSceneHash(sceneCanvas);
-  if (initialHash === null) {
-    await wait(minWaitMs);
-    await waitForNextPaint();
-    return;
-  }
-
-  let previousHash = initialHash;
-  let stableFrameCount = 0;
-  const startTime = performance.now();
-
-  while (performance.now() - startTime < SCENE_STABLE_MAX_WAIT_MS) {
-    await waitForNextPaint();
-    const currentHash = getSceneHash(sceneCanvas);
-    if (currentHash === null) {
-      break;
-    }
-
-    if (currentHash === previousHash) {
-      stableFrameCount += 1;
-    } else {
-      stableFrameCount = 0;
-      previousHash = currentHash;
-    }
-
-    if (
-      performance.now() - startTime >= minWaitMs &&
-      stableFrameCount >= SCENE_STABLE_REQUIRED_FRAMES
-    ) {
-      break;
-    }
-  }
-
-  await waitForNextPaint();
-}
-
-function getOverlaySignature(sceneRoot: HTMLElement) {
-  const overlayRoots = getOverlayRoots(sceneRoot);
-  if (overlayRoots.length === 0) return "none";
-  return overlayRoots
-    .map((root) => {
-      const rect = root.getBoundingClientRect();
-      const textLength = root.textContent?.trim().length ?? 0;
-      return `${root.childElementCount}:${Math.round(rect.width)}x${Math.round(rect.height)}:${textLength}`;
-    })
-    .join("|");
-}
-
-async function waitForOverlayStable(sceneRoot: HTMLElement, minWaitMs: number) {
-  let previousSignature = getOverlaySignature(sceneRoot);
-  let stableFrameCount = 0;
-  const startTime = performance.now();
-
-  while (performance.now() - startTime < OVERLAY_STABLE_MAX_WAIT_MS) {
-    await waitForNextPaint();
-    const currentSignature = getOverlaySignature(sceneRoot);
-    if (currentSignature === previousSignature) {
-      stableFrameCount += 1;
-    } else {
-      previousSignature = currentSignature;
-      stableFrameCount = 0;
-    }
-    if (
-      performance.now() - startTime >= minWaitMs &&
-      stableFrameCount >= SCENE_STABLE_REQUIRED_FRAMES
-    ) {
-      break;
-    }
-  }
-}
-
-function switchViewByButtonTitle(buttonTitle: string) {
-  const button = document.querySelector(`button[title='${buttonTitle}']`) as HTMLButtonElement | null;
-  if (!button) {
-    throw new Error(`未找到“${buttonTitle}”按钮，请确认页面处于可截图状态`);
-  }
-  button.click();
-}
-
-function canvasToDataUrl(
-  canvas: HTMLCanvasElement,
-  imageType: string,
-  imageQuality?: number
-) {
-  return new Promise<string>((resolve, reject) => {
-    if (typeof canvas.toBlob !== "function") {
-      try {
-        resolve(canvas.toDataURL(imageType, imageQuality));
-      } catch (error) {
-        reject(error instanceof Error ? error : new Error("截图失败：图像编码失败"));
-      }
-      return;
-    }
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          reject(new Error("截图失败：图像编码失败"));
-          return;
-        }
-        const reader = new FileReader();
-        reader.onload = () => {
-          if (typeof reader.result === "string") {
-            resolve(reader.result);
-            return;
-          }
-          reject(new Error("截图失败：图像读取失败"));
-        };
-        reader.onerror = () => reject(new Error("截图失败：图像读取失败"));
-        reader.readAsDataURL(blob);
-      },
-      imageType,
-      imageQuality
-    );
-  });
-}
-
-async function captureSceneViewportDataUrl(sceneRoot: HTMLElement, sceneCanvas: HTMLCanvasElement) {
-  const captureScale = getCaptureScale(sceneRoot);
-  try {
-    return await captureSceneRootDataUrl(sceneRoot, captureScale);
-  } catch (error) {
-    console.warn("直接截图场景失败，回退到手动合成模式", error);
-  }
-
-  const width = Math.max(
-    1,
-    Math.round((sceneCanvas.clientWidth || sceneRoot.clientWidth || sceneCanvas.width) * captureScale)
-  );
-  const height = Math.max(
-    1,
-    Math.round((sceneCanvas.clientHeight || sceneRoot.clientHeight || sceneCanvas.height) * captureScale)
-  );
-  const composedCanvas = document.createElement("canvas");
-  composedCanvas.width = width;
-  composedCanvas.height = height;
-  const ctx = composedCanvas.getContext("2d");
-  if (!ctx) {
-    throw new Error("截图失败：无法创建 2D 合成上下文");
-  }
-
-  // 底图来自 WebGL，确保渲染体块与高亮层清晰。
-  ctx.fillStyle = CAPTURE_BACKGROUND_COLOR;
-  ctx.fillRect(0, 0, width, height);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(sceneCanvas, 0, 0, width, height);
-
-  try {
-    const overlayCanvas = await captureOverlayLayerCanvas(sceneRoot, width, height);
-    if (overlayCanvas) {
-      ctx.drawImage(overlayCanvas, 0, 0, width, height);
-    }
-  } catch (error) {
-    console.warn("截图标签层合成失败，已保留底图", error);
-  }
-
-  return canvasToDataUrl(composedCanvas, CAPTURE_IMAGE_TYPE, CAPTURE_IMAGE_QUALITY);
 }
 
 interface ExportChecklistDialogProps {
@@ -464,16 +50,15 @@ export function ExportChecklistDialog({
 }: ExportChecklistDialogProps) {
   const [aiProgress, setAiProgress] = useState({ completed: 0, total: 0 });
   const [previewZoom, setPreviewZoom] = useState(PREVIEW_ZOOM_DEFAULT);
+  const [isExportingWord, setIsExportingWord] = useState(false);
   const {
     projectName,
     items,
     isGeneratingAI,
-    isCapturingScreenshot,
     setProjectName,
     setItems,
     updateItem,
     setIsGeneratingAI,
-    setIsCapturingScreenshot,
   } = useExportChecklistStore();
 
   const pageRef = useRef<HTMLDivElement>(null);
@@ -506,13 +91,26 @@ export function ExportChecklistDialog({
     if (open && featuresRef.current.length > 0) {
       setPreviewZoom(PREVIEW_ZOOM_DEFAULT);
       setAiProgress({ completed: 0, total: 0 });
+      setIsExportingWord(false);
+      const cachedItems = useExportChecklistStore.getState().items;
+      const cachedById = new Map(cachedItems.map((item) => [item.id, item]));
       const initialItems: FeatureChecklistItem[] = featuresRef.current.map((f) => {
         const detailedStats = convertResultToStats(f.id, f.rawResult);
+        const cached = cachedById.get(f.id);
+        if (cached) {
+          return {
+            ...cached,
+            name: f.name,
+            isPass: f.isPass,
+            summary: f.summary,
+            detailedStats,
+            rawResult: f.rawResult,
+          };
+        }
         return {
           id: f.id,
           name: f.name,
           isPass: f.isPass,
-          screenshots: createEmptyScreenshots(),
           summary: f.summary,
           detailedStats,
           rawResult: f.rawResult,
@@ -527,61 +125,6 @@ export function ExportChecklistDialog({
     }
   }, [open]);
 
-  // 手动截图函数
-  const handleCaptureScreenshot = async () => {
-    if (items.length === 0) return;
-
-    setIsCapturingScreenshot(true);
-    setItems(items.map((item) => ({ ...item, screenshots: createEmptyScreenshots() })));
-    const failedCaptures: Array<{ itemName: string; viewLabel: string }> = [];
-
-    try {
-      // 让占位符先渲染为加载中，避免用户感知页面“卡住”
-      await waitForNextPaint();
-
-      const sceneRoot = getSceneCaptureRoot();
-      const sceneCanvas = getSceneCanvas(sceneRoot);
-      const capturedMap = new Map(items.map((item) => [item.id, createEmptyScreenshots()]));
-
-      for (const view of CAPTURE_VIEWS) {
-        switchViewByButtonTitle(view.buttonTitle);
-        await waitForSceneStable(sceneCanvas, SCENE_SWITCH_MIN_WAIT_MS);
-        await waitForOverlayStable(sceneRoot, OVERLAY_STABLE_MIN_WAIT_MS);
-
-        for (const item of items) {
-          showOnlyReviewToolVisuals(item.id);
-          await waitForSceneStable(sceneCanvas, HIGHLIGHT_SWITCH_MIN_WAIT_MS);
-          await waitForOverlayStable(sceneRoot, OVERLAY_STABLE_MIN_WAIT_MS);
-          try {
-            const screenshotDataUrl = await captureSceneViewportDataUrl(sceneRoot, sceneCanvas);
-            const captured = capturedMap.get(item.id) ?? createEmptyScreenshots();
-            captured[view.key] = screenshotDataUrl;
-            capturedMap.set(item.id, captured);
-            updateItem(item.id, { screenshots: { ...captured } });
-          } catch (error) {
-            failedCaptures.push({ itemName: item.name, viewLabel: view.label });
-            console.error(`截图失败：${item.name}-${view.label}`, error);
-          }
-          await waitForNextPaint();
-        }
-      }
-    } catch (error) {
-      console.error("截图失败:", error);
-      alert(`截图失败: ${error instanceof Error ? error.message : "未知错误"}`);
-    } finally {
-      if (failedCaptures.length > 0) {
-        const preview = failedCaptures
-          .slice(0, 3)
-          .map((entry) => `${entry.itemName}-${entry.viewLabel}`)
-          .join("、");
-        const tail = failedCaptures.length > 3 ? ` 等 ${failedCaptures.length} 张` : "";
-        alert(`部分截图未生成：${preview}${tail}。其余截图已保留。`);
-      }
-      hideAllReviewToolVisuals();
-      setIsCapturingScreenshot(false);
-    }
-  };
-
   // 批量生成 AI 建议并直接覆盖“审查方建议”
   const handleGenerateAllAI = async () => {
     if (isGeneratingAI) return;
@@ -593,69 +136,49 @@ export function ExportChecklistDialog({
 
     setIsGeneratingAI(true);
     setAiProgress({ completed: 0, total: targetItems.length });
-    targetItems.forEach((item) => {
-      updateItem(item.id, {
-        isGeneratingAI: false,
-        aiGenerationStatus: "queued",
-      });
-    });
+    setItems(
+      targetItems.map((item) => ({
+        ...item,
+        isGeneratingAI: true,
+        aiGenerationStatus: "generating",
+      }))
+    );
 
     try {
+      const response = await generateAISuggestions({
+        features: targetItems.map((item) => ({
+          id: item.id,
+          name: item.name,
+          summary: item.summary,
+          raw_result: item.rawResult,
+        })),
+      });
+
+      const suggestionMap = new Map(
+        response.suggestions.map((suggestion) => [suggestion.id, suggestion.suggestion.trim()])
+      );
       const failedItems: string[] = [];
-      const taskQueue = [...targetItems];
-      const workerCount = Math.min(AI_PARALLEL_LIMIT, taskQueue.length);
 
-      const workers = Array.from({ length: workerCount }, () => (async () => {
-        while (taskQueue.length > 0) {
-          const item = taskQueue.shift();
-          if (!item) break;
-
-          updateItem(item.id, {
-            isGeneratingAI: true,
-            aiGenerationStatus: "generating",
-          });
-
-          try {
-            const response = await generateAISuggestions({
-              features: [{
-                id: item.id,
-                name: item.name,
-                summary: item.summary,
-                raw_result: item.rawResult,
-              }],
-            });
-
-            const matched = response.suggestions.find((suggestion) => suggestion.id === item.id);
-            const fallback = response.suggestions[0];
-            const suggestionText = (matched?.suggestion ?? fallback?.suggestion ?? "").trim();
-
-            if (isSuggestionInvalid(suggestionText)) {
-              failedItems.push(item.name);
-              updateItem(item.id, {
-                isGeneratingAI: false,
-                aiGenerationStatus: "failed",
-              });
-            } else {
-              updateItem(item.id, {
-                govSuggestion: suggestionText,
-                isGeneratingAI: false,
-                aiGenerationStatus: "done",
-              });
-            }
-          } catch (error) {
-            console.error(`生成 ${item.name} 建议失败:`, error);
+      setItems(
+        targetItems.map((item) => {
+          const suggestionText = suggestionMap.get(item.id) ?? "";
+          if (isSuggestionInvalid(suggestionText)) {
             failedItems.push(item.name);
-            updateItem(item.id, {
+            return {
+              ...item,
               isGeneratingAI: false,
-              aiGenerationStatus: "failed",
-            });
-          } finally {
-            setAiProgress((prev) => ({ ...prev, completed: prev.completed + 1 }));
+              aiGenerationStatus: "failed" as const,
+            };
           }
-        }
-      })());
-
-      await Promise.all(workers);
+          return {
+            ...item,
+            govSuggestion: suggestionText,
+            isGeneratingAI: false,
+            aiGenerationStatus: "done" as const,
+          };
+        })
+      );
+      setAiProgress({ completed: targetItems.length, total: targetItems.length });
 
       if (failedItems.length > 0) {
         const preview = failedItems.slice(0, 3).join("、");
@@ -665,51 +188,53 @@ export function ExportChecklistDialog({
     } catch (error) {
       console.error("批量生成失败:", error);
       alert(`生成失败: ${error instanceof Error ? error.message : "未知错误"}`);
-      targetItems.forEach((item) => {
-        updateItem(item.id, {
+      setItems(
+        targetItems.map((item) => ({
+          ...item,
           isGeneratingAI: false,
           aiGenerationStatus: "failed",
-        });
-      });
+        }))
+      );
+      setAiProgress({ completed: targetItems.length, total: targetItems.length });
     } finally {
       setIsGeneratingAI(false);
     }
   };
 
-  // 导出 PDF
-  const handleExportPDF = async () => {
-    if (!pageRef.current) return;
+  // 导出 Word
+  const handleExportWord = async () => {
+    if (isExportingWord) return;
 
     try {
-      // 截取页面内容
-      const canvas = await html2canvas(pageRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        onclone: (clonedDocument) => {
-          sanitizeUnsupportedColorFunctions(clonedDocument);
-        },
-      });
-
-      const imgData = canvas.toDataURL("image/png");
+      setIsExportingWord(true);
       const fileName = `${projectName || "审核清单"}_${new Date().toISOString().slice(0, 10)}`;
-      const pdfBlob = await exportChecklistPdf({
+      const wordBlob = await exportChecklistWord({
         project_name: projectName || "审核清单",
         file_name: fileName,
-        image_data_url: imgData,
+        exported_date: new Date().toLocaleDateString("zh-CN"),
+        items: items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          is_pass: item.isPass,
+          summary: item.summary,
+          detailed_stats: item.detailedStats,
+          gov_suggestion: item.govSuggestion,
+        })),
       });
 
-      const downloadUrl = URL.createObjectURL(pdfBlob);
+      const downloadUrl = URL.createObjectURL(wordBlob);
       const anchor = document.createElement("a");
       anchor.href = downloadUrl;
-      anchor.download = `${fileName}.pdf`;
+      anchor.download = `${fileName}.docx`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(downloadUrl);
     } catch (error) {
-      console.error("PDF 导出失败:", error);
-      alert(`PDF 导出失败: ${error instanceof Error ? error.message : "未知错误"}`);
+      console.error("Word 导出失败:", error);
+      alert(`Word 导出失败: ${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setIsExportingWord(false);
     }
   };
 
@@ -757,7 +282,6 @@ export function ExportChecklistDialog({
           <MiddlePreview
             projectName={projectName}
             items={items}
-            isCapturingScreenshot={isCapturingScreenshot}
             onUpdateGovSuggestion={(id, text) => updateItem(id, { govSuggestion: text })}
             pageRef={pageRef}
             scrollContainerRef={previewScrollRef}
@@ -774,12 +298,11 @@ export function ExportChecklistDialog({
               name: f.name,
               status: resolveChecklistFeatureStatus(f.checked, f.isPass),
             }))}
-            isCapturingScreenshot={isCapturingScreenshot}
             isGeneratingAI={isGeneratingAI}
+            isExportingWord={isExportingWord}
             aiProgress={aiProgress}
-            onCaptureScreenshot={handleCaptureScreenshot}
             onGenerateAllAI={handleGenerateAllAI}
-            onExportPDF={handleExportPDF}
+            onExportWord={handleExportWord}
             onJumpToItemPage={handleJumpToItemPage}
           />
         </div>
@@ -800,7 +323,6 @@ const A4_STYLE: React.CSSProperties = {
 function MiddlePreview({
   projectName,
   items,
-  isCapturingScreenshot,
   onUpdateGovSuggestion,
   pageRef,
   scrollContainerRef,
@@ -809,7 +331,6 @@ function MiddlePreview({
 }: {
   projectName: string;
   items: FeatureChecklistItem[];
-  isCapturingScreenshot: boolean;
   onUpdateGovSuggestion: (id: string, text: string) => void;
   pageRef: React.RefObject<HTMLDivElement | null>;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -887,7 +408,6 @@ function MiddlePreview({
                   <ChecklistItemDetail
                     item={item}
                     index={index}
-                    isCapturingScreenshot={isCapturingScreenshot}
                     onUpdateGovSuggestion={(text) => onUpdateGovSuggestion(item.id, text)}
                   />
                 </div>
@@ -904,18 +424,24 @@ function MiddlePreview({
 function ChecklistItemDetail({
   item,
   index,
-  isCapturingScreenshot,
   onUpdateGovSuggestion,
 }: {
   item: FeatureChecklistItem;
   index: number;
-  isCapturingScreenshot: boolean;
   onUpdateGovSuggestion: (text: string) => void;
 }) {
   const isQueued = item.aiGenerationStatus === "queued";
   const isGenerating = item.aiGenerationStatus === "generating";
   const isFailed = item.aiGenerationStatus === "failed";
   const overlayMessage = isGenerating ? "正在生成建议..." : "待开始，请稍等...";
+  const suggestionRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const element = suggestionRef.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, [item.govSuggestion]);
 
   return (
     <div className="space-y-3">
@@ -923,49 +449,6 @@ function ChecklistItemDetail({
       <h2 className="text-lg font-semibold">
         {index + 1}. {item.name}
       </h2>
-
-      {/* 双视角渲染图 */}
-      <div className="grid grid-cols-2 gap-4">
-        {CAPTURE_VIEWS.map((view) => {
-          const screenshotUrl = item.screenshots[view.key];
-          return (
-            <div key={`${item.id}-${view.key}`} className="space-y-1.5">
-              <div className="w-full h-[180px] border rounded bg-gray-50 overflow-hidden">
-                {screenshotUrl ? (
-                  <img
-                    src={screenshotUrl}
-                    alt={getCaption(item.name, view.label)}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center px-4 text-center">
-                    {isCapturingScreenshot ? (
-                      <>
-                        <Loader2 className="h-5 w-5 text-gray-500 animate-spin mb-2" />
-                        <p className="text-xs text-gray-500">截图生成中，请稍候...</p>
-                      </>
-                    ) : (
-                      <p className="text-xs text-gray-500 leading-5">
-                        {PLACEHOLDER_HINT}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-              <p className="text-[11px] text-gray-500 text-center">
-                {getCaption(item.name, view.label)}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* 无检测数据时保留摘要 */}
-      {!item.detailedStats && (
-        <div className="text-xs text-gray-500">
-          <p>说明：未检测项不会生成可视化结果图。</p>
-        </div>
-      )}
 
       {/* 详细统计 */}
       {item.detailedStats ? (
@@ -981,8 +464,13 @@ function ChecklistItemDetail({
         <label className="text-sm font-medium">审查方建议：</label>
         <div className="relative">
           <Textarea
+            ref={suggestionRef}
             value={item.govSuggestion}
-            onChange={(e) => onUpdateGovSuggestion(e.target.value)}
+            onChange={(e) => {
+              e.target.style.height = "auto";
+              e.target.style.height = `${e.target.scrollHeight}px`;
+              onUpdateGovSuggestion(e.target.value);
+            }}
             disabled={isQueued || isGenerating}
             placeholder={
               isGenerating
@@ -991,7 +479,8 @@ function ChecklistItemDetail({
                 ? "待开始，请稍等..."
                 : "请输入审查方建议..."
             }
-            className="min-h-[80px] text-sm"
+            rows={1}
+            className="min-h-[80px] resize-none overflow-hidden text-sm"
           />
           {(isQueued || isGenerating) && (
             <div className="absolute inset-0 rounded-md bg-white/75 flex items-center justify-center pointer-events-none">
@@ -1101,23 +590,21 @@ function RightActions({
   projectName,
   onProjectNameChange,
   features,
-  isCapturingScreenshot,
   isGeneratingAI,
+  isExportingWord,
   aiProgress,
-  onCaptureScreenshot,
   onGenerateAllAI,
-  onExportPDF,
+  onExportWord,
   onJumpToItemPage,
 }: {
   projectName: string;
   onProjectNameChange: (name: string) => void;
   features: Array<{ id: string; name: string; status: ToolRunStatus }>;
-  isCapturingScreenshot: boolean;
   isGeneratingAI: boolean;
+  isExportingWord: boolean;
   aiProgress: { completed: number; total: number };
-  onCaptureScreenshot: () => void;
   onGenerateAllAI: () => void;
-  onExportPDF: () => void;
+  onExportWord: () => void;
   onJumpToItemPage: (itemId: string) => void;
 }) {
   return (
@@ -1139,7 +626,7 @@ function RightActions({
               key={feature.id}
               type="button"
               onClick={() => onJumpToItemPage(feature.id)}
-              className="w-full flex items-center gap-2 text-sm py-1.5 text-left rounded-sm hover:bg-muted/60 transition-colors"
+              className="w-full flex items-center gap-2 text-sm py-1.5 text-left rounded-sm hover:bg-muted/60 transition-colors cursor-pointer"
             >
               {feature.status === "pass" ? (
                 <CheckSquare className="h-4 w-4 text-green-600" />
@@ -1159,30 +646,10 @@ function RightActions({
       <h3 className="font-semibold mb-4 text-sm">功能选项</h3>
 
       <div className="space-y-3 mb-4">
-        {/* 一键加载审查项截图 */}
-        <Button
-          variant="outline"
-          className="w-full"
-          onClick={onCaptureScreenshot}
-          disabled={isCapturingScreenshot}
-        >
-          {isCapturingScreenshot ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              截图中...
-            </>
-          ) : (
-            <>
-              <Camera className="h-4 w-4 mr-2" />
-              一键加载审查项截图
-            </>
-          )}
-        </Button>
-
         {/* 一键生成 AI 建议 */}
         <Button
           variant="outline"
-          className="w-full"
+          className="w-full cursor-pointer"
           onClick={onGenerateAllAI}
           disabled={isGeneratingAI}
         >
@@ -1199,13 +666,23 @@ function RightActions({
           )}
         </Button>
 
-        {/* 导出 PDF */}
+        {/* 导出 Word */}
         <Button
-          className="w-full"
-          onClick={onExportPDF}
+          className="w-full cursor-pointer"
+          onClick={onExportWord}
+          disabled={isExportingWord}
         >
-          <Download className="h-4 w-4 mr-2" />
-          导出 PDF
+          {isExportingWord ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              导出中...
+            </>
+          ) : (
+            <>
+              <Download className="h-4 w-4 mr-2" />
+              导出 Word
+            </>
+          )}
         </Button>
       </div>
 
@@ -1213,10 +690,9 @@ function RightActions({
       <div className="mt-6 text-xs text-muted-foreground space-y-2">
         <p>使用提示：</p>
         <ul className="list-disc list-inside space-y-1">
-          <li>先一键加载审查项截图</li>
           <li>可一键填充审查方建议</li>
           <li>填写审查方建议</li>
-          <li>最后导出PDF</li>
+          <li>最后导出Word</li>
         </ul>
       </div>
     </div>

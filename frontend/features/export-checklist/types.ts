@@ -25,10 +25,6 @@ export interface FeatureChecklistItem {
   id: string;
   name: string;
   isPass: boolean;
-  screenshots: {
-    northeast: string | null;
-    northwest: string | null;
-  };
   summary: string;
   detailedStats: DetailedStatistics | null;  // 新增
   rawResult: unknown;
@@ -43,7 +39,6 @@ export interface ChecklistExportState {
   projectName: string;
   items: FeatureChecklistItem[];
   isGeneratingAI: boolean;
-  isCapturingScreenshot: boolean;  // 新增
 }
 
 export interface AISuggestionRequest {
@@ -62,8 +57,16 @@ export interface AISuggestionResponse {
   }>;
 }
 
-export interface ExportPdfRequest {
+export interface ExportWordRequest {
   project_name?: string;
   file_name?: string;
-  image_data_url: string;
+  exported_date?: string;
+  items: Array<{
+    id: string;
+    name: string;
+    is_pass: boolean;
+    summary: string;
+    detailed_stats: DetailedStatistics | null;
+    gov_suggestion: string;
+  }>;
 }
