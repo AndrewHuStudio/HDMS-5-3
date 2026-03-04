@@ -10,12 +10,18 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BASE_DIR = PROJECT_ROOT
 APP_ENV = os.getenv("APP_ENV", "development").lower()
-MODEL_STORAGE_PATH = Path(
-    os.getenv("MODEL_STORAGE_PATH", str(PROJECT_ROOT / "data" / "uploads"))
-).resolve()
-CACHE_STORAGE_PATH = Path(
-    os.getenv("CACHE_STORAGE_PATH", str(PROJECT_ROOT / "data" / "cache"))
-).resolve()
+
+
+def _resolve_project_path(env_key: str, default_rel: str) -> Path:
+    raw = os.getenv(env_key, "").strip()
+    path = Path(raw) if raw else (PROJECT_ROOT / default_rel)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
+MODEL_STORAGE_PATH = _resolve_project_path("MODEL_STORAGE_PATH", "data/uploads")
+CACHE_STORAGE_PATH = _resolve_project_path("CACHE_STORAGE_PATH", "data/cache")
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
 
 DEFAULT_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,http://172.20.16.1:3000"
