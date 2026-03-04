@@ -27,6 +27,8 @@ export type ReviewToolId = typeof REVIEW_TOOL_IDS[number];
 const REVIEW_TOOL_ID_SET = new Set<string>(REVIEW_TOOL_IDS);
 const REVIEW_TOOL_ALIASES: Record<string, ReviewToolId> = {
   "sight-corridor": "view-corridor-check",
+  "fire-ladder": "fire-ladder-check",
+  "sky-bridge": "sky-bridge-check",
 };
 
 export function normalizeReviewToolId(toolId: string): ReviewToolId | null {

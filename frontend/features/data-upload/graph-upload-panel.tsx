@@ -54,9 +54,9 @@ function deriveOcrOutputDir(markdownPath: string): string {
   return parts.slice(0, -1).join("/");
 }
 
-function getGraphProgressValue(status: GraphProgressRow["status"]): number {
-  if (status === "success" || status === "failed") return 100;
-  if (status === "pending") return 75;
+function getGraphProgressValue(row: GraphProgressRow): number {
+  if (row.status === "success" || row.status === "failed") return 100;
+  if (row.status === "in_progress") return row.progress;
   return 0;
 }
 
@@ -71,6 +71,7 @@ export function GraphUploadPanel() {
   const [refreshing, setRefreshing] = useState(false);
   const [progressRows, setProgressRows] = useState<GraphProgressRow[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // 图谱展示（全量预览）
   const [graphLimitInput, setGraphLimitInput] = useState<string>("200");
@@ -156,7 +157,7 @@ export function GraphUploadPanel() {
       const effectiveBuildResult = freshBuildResult ?? buildResult;
 
       // 构建 buildMap：先从内存中的 buildResult 取，若为空则从 Neo4j 持久化状态取
-      let buildMap: Map<string, { doc_id: string; file_name?: string; status: string; entities_count: number; relationships_count: number; error?: string }>;
+      let buildMap: Map<string, { doc_id: string; file_name?: string; status: string; progress?: number | null; entities_count: number; relationships_count: number; error?: string }>;
 
       if ((effectiveBuildResult?.documents ?? []).length > 0) {
         buildMap = new Map(
@@ -176,6 +177,7 @@ export function GraphUploadPanel() {
                 doc_id: doc.doc_id,
                 file_name: doc.file_name,
                 status: doc.kg_status,
+                progress: doc.progress,
                 entities_count: doc.entities_count,
                 relationships_count: doc.relationships_count,
                 error: doc.error,
@@ -202,21 +204,40 @@ export function GraphUploadPanel() {
     try {
       setStatus("building");
       setError(null);
+      setBuildResult(null);
       setStartTime(Date.now());
       setElapsed(0);
 
+      await loadProgressRows();
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      pollingRef.current = setInterval(() => {
+        void loadProgressRows();
+      }, 2000);
+
       const result = await submitBatchGraphBuild(true);
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
       setBuildResult(result);
       setStatus("completed");
       await loadStatistics();
       await loadProgressRows(result);
     } catch (err) {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
       setError(err instanceof Error ? err.message : "图谱构建失败");
       setStatus("error");
     }
   };
 
   const handleReset = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
     reset();
     setElapsed(0);
   };
@@ -260,6 +281,12 @@ export function GraphUploadPanel() {
   }, [graphLimitInput]);
 
   // 打开弹窗时自动加载一次
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (showGraphDialog) {
       loadGraphVisualization();
@@ -424,8 +451,9 @@ export function GraphUploadPanel() {
                   {progressRows.map((doc, idx) => {
                     const isSuccess = doc.status === "success";
                     const isFailed = doc.status === "failed";
+                    const isInProgress = doc.status === "in_progress";
                     const isPending = doc.status === "pending";
-                    const progressValue = getGraphProgressValue(doc.status);
+                    const progressValue = getGraphProgressValue(doc);
                     return (
                       <tr
                         key={doc.key}
@@ -442,8 +470,11 @@ export function GraphUploadPanel() {
                             {isFailed && (
                               <CircleX className="h-3.5 w-3.5 shrink-0 text-red-500" />
                             )}
+                            {isInProgress && (
+                              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
+                            )}
                             {isPending && (
-                              <Loader2 className="h-3.5 w-3.5 shrink-0 text-blue-500" />
+                              <Waypoints className="h-3.5 w-3.5 shrink-0 text-blue-500" />
                             )}
                             {doc.status === "waiting_vector" && (
                               <Waypoints className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -476,9 +507,11 @@ export function GraphUploadPanel() {
                               ? "成功"
                               : isFailed
                                 ? "失败"
-                                : doc.status === "vector_failed"
-                                  ? "向量失败"
-                                  : doc.status === "waiting_vector"
+                                : isInProgress
+                                  ? "构建中"
+                                  : doc.status === "vector_failed"
+                                    ? "向量失败"
+                                    : doc.status === "waiting_vector"
                                     ? "待向量化"
                                     : "待构建"}
                           </Badge>

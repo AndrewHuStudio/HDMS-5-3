@@ -2,6 +2,7 @@
 Graph API endpoints for knowledge graph construction and querying.
 """
 
+import asyncio
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any, List
 import logging
@@ -127,7 +128,8 @@ async def build_graph_batch(request: BatchGraphBuildRequest) -> BatchGraphBuildR
     """
     try:
         builder = _create_graph_builder()
-        result = builder.build_from_all_documents(
+        result = await asyncio.to_thread(
+            builder.build_from_all_documents,
             use_llm=request.use_llm,
             max_docs=request.max_docs,
             skip_built=request.skip_built,

@@ -29,6 +29,8 @@ export interface OCRSubmitResponse {
   accepted_count: number;
   rejected_count: number;
   rejected_files: string[];
+  deduplicated_count?: number;
+  deduplicated_files?: string[];
   files: Array<{
     id: string;
     file_name: string;
@@ -51,6 +53,7 @@ export interface OCRSummary {
     markdown_path: string;
     pages: number;
     images: number;
+    source_file_hash?: string;
     updated_at: string;
   }>;
 }
@@ -144,6 +147,10 @@ export interface GraphDocumentStatus {
   kg_status: string;
   entities_count: number;
   relationships_count: number;
+  phase?: string;
+  progress?: number | null;
+  processed_chunks?: number | null;
+  total_chunks?: number | null;
   error?: string;
 }
 

@@ -293,6 +293,10 @@ class Neo4jClient:
             "d.kg_status as kg_status, "
             "d.kg_entities_count as entities_count, "
             "d.kg_relationships_count as relationships_count, "
+            "d.kg_phase as phase, "
+            "d.kg_progress as progress, "
+            "d.kg_processed_chunks as processed_chunks, "
+            "d.kg_total_chunks as total_chunks, "
             "d.kg_error as error "
             "ORDER BY d.kg_updated_at DESC"
         )
@@ -307,6 +311,10 @@ class Neo4jClient:
                 "kg_status": str(row.get("kg_status") or "unknown"),
                 "entities_count": row.get("entities_count") or 0,
                 "relationships_count": row.get("relationships_count") or 0,
+                "phase": str(row.get("phase") or ""),
+                "progress": row.get("progress") if row.get("progress") is not None else None,
+                "processed_chunks": row.get("processed_chunks") if row.get("processed_chunks") is not None else None,
+                "total_chunks": row.get("total_chunks") if row.get("total_chunks") is not None else None,
                 "error": row.get("error"),
             })
         return results

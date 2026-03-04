@@ -145,12 +145,21 @@ export function VectorUploadPanel() {
       try {
         const data = await getIngestionReport(ocrOutputDir);
         setReport(data);
+        setError(null);
+        const allDone =
+          data.total > 0 &&
+          data.in_progress === 0 &&
+          data.not_started === 0 &&
+          data.complete + data.failed === data.total;
+        if (allDone) {
+          setStatus("completed");
+        }
         return data;
       } catch {
         return null;
       }
     },
-    [setReport]
+    [setError, setReport, setStatus]
   );
 
   // 初始加载报告（如果有 OCR 文档）
@@ -222,6 +231,7 @@ export function VectorUploadPanel() {
         const dir = deriveOcrOutputDir(ocrDocs[0].markdown_path);
         await loadReport(dir);
       }
+      setError(null);
     } finally {
       setRefreshing(false);
     }

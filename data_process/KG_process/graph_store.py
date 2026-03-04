@@ -364,12 +364,43 @@ class GraphStoreService:
         # This is intentionally lightweight: we don't delete on retry; the build
         # is designed to be idempotent via find/merge patterns.
         doc_node_id: Optional[str] = None
+        total_chunks = max(len(chunks), 1)
+        processed_chunks = 0
+        progress_update_interval = 5
+
+        def _doc_progress(phase: str, processed: int, status: str = "in_progress") -> None:
+            if not doc_node_id:
+                return
+            clamped_processed = max(0, min(processed, total_chunks))
+            progress = int(round((clamped_processed / total_chunks) * 100))
+            try:
+                self.neo4j.merge_document(
+                    doc_id=doc_id,
+                    file_name=file_name,
+                    file_path=file_path,
+                    kg_status=status,
+                    extra_props={
+                        "kg_phase": phase,
+                        "kg_total_chunks": total_chunks,
+                        "kg_processed_chunks": clamped_processed,
+                        "kg_progress": progress,
+                    },
+                )
+            except Exception as progress_error:
+                logger.warning(f"Failed to update progress for {doc_id}: {progress_error}")
+
         try:
             doc_node_id = self.neo4j.merge_document(
                 doc_id=doc_id,
                 file_name=file_name,
                 file_path=file_path,
                 kg_status="in_progress",
+                extra_props={
+                    "kg_phase": "analyzing",
+                    "kg_total_chunks": total_chunks,
+                    "kg_processed_chunks": 0,
+                    "kg_progress": 0,
+                },
             )
         except Exception as e:
             # Don't block graph building if document tracking fails.
@@ -390,6 +421,7 @@ class GraphStoreService:
                 f"Document {doc_id} analyzed: type={doc_type}, "
                 f"district={district}, project={project}"
             )
+            _doc_progress("extracting", 0)
 
             # --- Step 2: Create anchor entities from document analysis ---
             doc_context_str = ""
@@ -410,8 +442,11 @@ class GraphStoreService:
 
             # --- Step 3: Second pass - chunk-level extraction ---
             for i, chunk in enumerate(chunks):
+                processed_chunks = i + 1
                 text = chunk.get("text", "")
                 if not text or len(text.strip()) < 20:
+                    if processed_chunks == total_chunks or processed_chunks % progress_update_interval == 0:
+                        _doc_progress("extracting", processed_chunks)
                     continue
 
                 is_table = chunk.get("has_table", False)
@@ -460,10 +495,13 @@ class GraphStoreService:
 
                 if (i + 1) % 10 == 0:
                     logger.info(f"Processed {i + 1}/{len(chunks)} chunks for {doc_id}")
+                if processed_chunks == total_chunks or processed_chunks % progress_update_interval == 0:
+                    _doc_progress("extracting", processed_chunks)
 
             # Link Entities -> Document so we can resume/skip and optionally delete a doc subgraph.
             if doc_node_id and all_entities:
                 try:
+                    _doc_progress("linking", total_chunks)
                     rel_rows = [
                         {"from_id": eid, "to_id": doc_node_id, "properties": {}}
                         for eid in set(all_entities.values())
@@ -487,6 +525,10 @@ class GraphStoreService:
                         extra_props={
                             "kg_entities_count": len(all_entities),
                             "kg_relationships_count": len(all_relationships),
+                            "kg_phase": "completed",
+                            "kg_total_chunks": total_chunks,
+                            "kg_processed_chunks": total_chunks,
+                            "kg_progress": 100,
                         },
                     )
                 except Exception as e:
@@ -511,7 +553,15 @@ class GraphStoreService:
                         file_name=file_name,
                         file_path=file_path,
                         kg_status="failed",
-                        extra_props={"kg_error": str(e)},
+                        extra_props={
+                            "kg_error": str(e),
+                            "kg_phase": "failed",
+                            "kg_total_chunks": total_chunks,
+                            "kg_processed_chunks": max(0, min(processed_chunks, total_chunks)),
+                            "kg_progress": int(
+                                round((max(0, min(processed_chunks, total_chunks)) / total_chunks) * 100)
+                            ),
+                        },
                     )
                 except Exception as ee:
                     logger.warning(f"Failed to mark Document as failed for {doc_id}: {ee}")

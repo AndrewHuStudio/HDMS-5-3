@@ -28,7 +28,7 @@ export interface GreenSetbackArea {
 }
 
 export interface GreenSetbackAreaResult {
-  id: string;
+  id?: string;
   name: string;
   plot_name?: string | null;
   status: "pass" | "fail";

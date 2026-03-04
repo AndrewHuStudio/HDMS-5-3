@@ -11,6 +11,10 @@ import { usePlazaSetbackStore } from "./store";
 const BUILDING_LAYER = "模型_建筑体块";
 
 const normalize = (value?: string | null) => (value ?? "").trim().toLowerCase();
+const normalizeText = (value?: string | null) => {
+  const text = (value ?? "").trim();
+  return text || null;
+};
 
 export function PlazaSetbackSceneLayer() {
   const sceneSnapshot = useSceneSnapshot();
@@ -24,17 +28,46 @@ export function PlazaSetbackSceneLayer() {
   const plazaAreas = result?.plaza_areas ?? [];
   const areaResults = result?.area_results ?? [];
   const extrudeHeight = Math.max(result?.parameters?.ignore_height ?? 0, 0);
+  const areaShapePlotNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    plazaAreas.forEach((area) => {
+      const areaName = normalizeText(area.name);
+      const plotName = normalizeText(area.plot_name);
+      if (!areaName || !plotName || map.has(areaName)) return;
+      map.set(areaName, plotName);
+    });
+    return map;
+  }, [plazaAreas]);
+  const areaPlotNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    (result?.results ?? []).forEach((building) => {
+      const areaName = normalizeText(building.plaza_name);
+      const plotName = normalizeText(building.plot_name);
+      if (!areaName || !plotName || map.has(areaName)) return;
+      map.set(areaName, plotName);
+    });
+    return map;
+  }, [result]);
 
-  const areaStatusMap = useMemo(() => {
-    const map = new Map<string, "pass" | "fail">();
+  const areaMetaMap = useMemo(() => {
+    const map = new Map<
+      string,
+      { status: "pass" | "fail"; areaName: string; plotName: string | null }
+    >();
     areaResults.forEach((item, index) => {
+      const areaName = normalizeText(item.name) ?? `广场${index + 1}`;
+      const plotName =
+        normalizeText(item.plot_name) ??
+        areaShapePlotNameMap.get(areaName) ??
+        areaPlotNameMap.get(areaName) ??
+        null;
       map.set(
         buildSetbackAreaSelectionId("plaza", index, item.id, item.name),
-        item.status
+        { status: item.status, areaName, plotName }
       );
     });
     return map;
-  }, [areaResults]);
+  }, [areaResults, areaPlotNameMap, areaShapePlotNameMap]);
 
   const violationIndex = useMemo(() => {
     const ids = new Set<string>();
@@ -137,6 +170,12 @@ export function PlazaSetbackSceneLayer() {
         return {
           key: `plaza-area-${index}`,
           id,
+          areaName: normalizeText(area.name) ?? `广场${index + 1}`,
+          plotName:
+            normalizeText(area.plot_name) ??
+            areaShapePlotNameMap.get(normalizeText(area.name) ?? `广场${index + 1}`) ??
+            areaPlotNameMap.get(normalizeText(area.name) ?? `广场${index + 1}`) ??
+            null,
           shape,
           baseZ,
           height: extrudeHeight,
@@ -148,12 +187,14 @@ export function PlazaSetbackSceneLayer() {
         ): item is {
           key: string;
           id: string;
+          areaName: string;
+          plotName: string | null;
           shape: THREE.Shape;
           baseZ: number;
           height: number;
         } => Boolean(item)
       );
-  }, [plazaAreas, extrudeHeight]);
+  }, [plazaAreas, extrudeHeight, areaPlotNameMap, areaShapePlotNameMap]);
 
   const plazaAreaLabels = useMemo(() => {
     if (!plazaAreaMeshes.length) return [];
@@ -171,11 +212,13 @@ export function PlazaSetbackSceneLayer() {
         );
         centroid.x /= points.length;
         centroid.y /= points.length;
-        const status = areaStatusMap.get(mesh.id) ?? "pass";
+        const meta = areaMetaMap.get(mesh.id);
         return {
           key: `${mesh.key}-label`,
           id: mesh.id,
-          status,
+          status: meta?.status ?? "pass",
+          areaName: meta?.areaName ?? mesh.areaName,
+          plotName: meta?.plotName ?? mesh.plotName,
           position: [centroid.x, centroid.y, mesh.baseZ + mesh.height + 0.8] as [
             number,
             number,
@@ -187,9 +230,11 @@ export function PlazaSetbackSceneLayer() {
       key: string;
       id: string;
       status: "pass" | "fail";
+      areaName: string;
+      plotName: string | null;
       position: [number, number, number];
     }>;
-  }, [plazaAreaMeshes, areaStatusMap]);
+  }, [plazaAreaMeshes, areaMetaMap]);
 
   useEffect(() => {
     const restoreHighlights = () => {
@@ -266,13 +311,15 @@ export function PlazaSetbackSceneLayer() {
             onClick={() =>
               setSelectedAreaId(selectedAreaId === label.id ? null : label.id)
             }
-            className={`rounded px-2 py-1 text-[10px] shadow-sm border whitespace-nowrap ${
+            className={`rounded px-2 py-1 text-[10px] shadow-sm border ${
               label.status === "pass"
                 ? "border-green-500 bg-green-50/90 text-green-700"
                 : "border-orange-500 bg-orange-50/90 text-orange-700"
             } ${selectedAreaId === label.id ? "ring-2 ring-emerald-400" : ""}`}
           >
-            {label.status === "pass" ? "通过" : "不通过"}
+            <div className="font-medium leading-tight">{label.areaName}</div>
+            <div className="text-[9px] leading-tight">{label.status === "pass" ? "通过" : "不通过"}</div>
+            <div className="text-[9px] leading-tight">所属地块 {label.plotName ?? "未匹配地块"}</div>
           </button>
         </Html>
       ))}

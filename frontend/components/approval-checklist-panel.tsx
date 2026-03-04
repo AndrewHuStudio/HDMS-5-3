@@ -362,6 +362,7 @@ function ChecklistItem({
   const { checked, summary, isPass } = useFeatureStatus(feature.id);
 
   const handleEyeClick = (e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
     if (isVisible) {
       hideAllReviewToolVisuals();
@@ -373,46 +374,58 @@ function ChecklistItem({
   return (
     <div className="border-b border-border last:border-b-0">
       {/* Row header */}
-      <div
-        className="flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-muted/50 select-none"
-        onClick={onToggleExpand}
-      >
-        {/* Expand toggle */}
-        <span className="text-muted-foreground shrink-0">
-          {isExpanded ? (
-            <ChevronDown className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
-          )}
-        </span>
-
-        {/* Feature name */}
-        <span className="flex-1 text-sm font-medium truncate">{feature.name}</span>
-
-        {/* Status summary */}
-        <span
-          className={`text-xs shrink-0 ${
-            !checked
-              ? "text-muted-foreground"
-              : isPass
-                ? "text-green-600 dark:text-green-400"
-                : "text-red-600 dark:text-red-400"
-          }`}
+      <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-muted/50 select-none">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 cursor-pointer text-left"
+          onClick={onToggleExpand}
         >
-          {summary}
-        </span>
+          {/* Expand toggle */}
+          <span className="text-muted-foreground shrink-0">
+            {isExpanded ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+          </span>
+
+          {/* Feature name */}
+          <span className="flex-1 text-sm font-medium truncate">{feature.name}</span>
+
+          {/* Status summary */}
+          <span
+            className={`text-xs shrink-0 ${
+              !checked
+                ? "text-muted-foreground"
+                : isPass
+                  ? "text-green-600 dark:text-green-400"
+                  : "text-red-600 dark:text-red-400"
+            }`}
+          >
+            {summary}
+          </span>
+        </button>
 
         {/* Eye icon */}
         <button
-          className={`shrink-0 p-0.5 rounded transition-colors ${
+          type="button"
+          aria-label={isVisible ? `隐藏${feature.name}场景高亮` : `显示${feature.name}场景高亮`}
+          className={`shrink-0 inline-flex h-6 w-6 items-center justify-center rounded transition-colors ${
             isVisible
-              ? "text-green-500 hover:text-green-600"
-              : "text-muted-foreground/40 hover:text-muted-foreground"
+              ? "text-green-500 hover:bg-muted/70 hover:text-green-600"
+              : "text-muted-foreground/50 hover:bg-muted/70 hover:text-muted-foreground"
           }`}
           onClick={handleEyeClick}
+          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
           title={isVisible ? "隐藏场景高亮" : "显示场景高亮"}
+          style={{ cursor: "pointer" }}
         >
-          {isVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+          {isVisible ? (
+            <Eye className="h-4 w-4 pointer-events-none" />
+          ) : (
+            <EyeOff className="h-4 w-4 pointer-events-none" />
+          )}
         </button>
       </div>
 

@@ -28,7 +28,7 @@ export interface PlazaSetbackArea {
 }
 
 export interface PlazaSetbackAreaResult {
-  id: string;
+  id?: string;
   name: string;
   plot_name?: string | null;
   status: "pass" | "fail";

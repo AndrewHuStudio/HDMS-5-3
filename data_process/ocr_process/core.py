@@ -2,6 +2,7 @@
 
 import bisect
 import http.client
+import hashlib
 import json
 import logging
 import os
@@ -405,6 +406,37 @@ def _list_source_files(source_dir: Path, recursive: bool) -> list[Path]:
     return sorted({p.resolve() for p in files if p.is_file()}, key=lambda p: p.name.lower())
 
 
+def _hash_file_sha256(file_path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+    """Return hex sha256 for a local file."""
+    digest = hashlib.sha256()
+    with file_path.open("rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _collect_existing_source_hashes(output_root: Path, category: str) -> set[str]:
+    """Collect historical source file hashes from OCR metadata."""
+    hashes: set[str] = set()
+    scope_root = output_root
+    if not scope_root.exists() or not scope_root.is_dir():
+        return hashes
+
+    for meta_path in scope_root.rglob("*.meta.json"):
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        value = str(payload.get("source_file_hash") or payload.get("file_hash") or "").strip().lower()
+        if value:
+            hashes.add(value)
+
+    return hashes
+
+
 # ----------------------------
 # Job store (in-memory)
 # ----------------------------
@@ -512,6 +544,7 @@ def _process_one_file(
     tmp_file: Path,
     original_name: str,
     category: str,
+    source_file_hash: str,
 ) -> None:
     # Limit concurrent OCR jobs to avoid API throttling / local resource spikes.
     with _worker_sema:
@@ -708,6 +741,8 @@ def _process_one_file(
                 "batch_id": batch_id,
                 "markdown_file": md_name,
                 "pages": total_pages,
+                "source_file_hash": source_file_hash,
+                "source_file_size": int(tmp_file.stat().st_size) if tmp_file.exists() else 0,
                 "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -828,6 +863,9 @@ def submit_ocr_job(
     created_at = time.strftime("%Y-%m-%d %H:%M:%S")
     file_entries: list[dict[str, Any]] = []
     rejected_files: list[str] = []
+    deduplicated_files: list[str] = []
+    known_hashes = _collect_existing_source_hashes(output_root, category)
+    queued_hashes: set[str] = set()
 
     for src_path, original_name in zip(file_paths, original_names):
         original_name = original_name or "upload"
@@ -839,12 +877,23 @@ def submit_ocr_job(
         if not source.exists() or not source.is_file():
             rejected_files.append(original_name)
             continue
+        try:
+            source_file_hash = _hash_file_sha256(source)
+        except Exception:
+            rejected_files.append(original_name)
+            continue
+        source_hash_lower = source_file_hash.lower()
+        if source_hash_lower in known_hashes or source_hash_lower in queued_hashes:
+            deduplicated_files.append(original_name)
+            continue
+
         tmp_file = tmp_dir / f"{uuid.uuid4().hex}_{Path(original_name).name}"
         try:
             shutil.copyfile(source, tmp_file)
         except Exception:
             rejected_files.append(original_name)
             continue
+        queued_hashes.add(source_hash_lower)
 
         file_id = uuid.uuid4().hex
         file_entries.append(
@@ -854,6 +903,7 @@ def submit_ocr_job(
                 "category": category or "",
                 "status": "queued",
                 "progress": 0,
+                "source_file_hash": source_file_hash,
                 "tmp_file": str(tmp_file),
                 "created_at": created_at,
                 "updated_at": created_at,
@@ -861,7 +911,25 @@ def submit_ocr_job(
         )
 
     if not file_entries:
-        raise OCRError("No supported files found", status_code=400)
+        if not deduplicated_files and rejected_files:
+            raise OCRError("No supported files found", status_code=400)
+        # Keep a no-op job so the UI can poll and complete gracefully.
+        with _jobs_lock:
+            _jobs[job_id] = {
+                "job_id": job_id,
+                "created_at": created_at,
+                "updated_at": created_at,
+                "files": [],
+            }
+        return {
+            "job_id": job_id,
+            "accepted_count": 0,
+            "rejected_count": len(rejected_files),
+            "rejected_files": rejected_files[:50],
+            "deduplicated_count": len(deduplicated_files),
+            "deduplicated_files": deduplicated_files[:50],
+            "files": [],
+        }
 
     with _jobs_lock:
         _jobs[job_id] = {
@@ -883,6 +951,7 @@ def submit_ocr_job(
                 "tmp_file": tmp_file,
                 "original_name": original_name,
                 "category": category or "",
+                "source_file_hash": str(item.get("source_file_hash") or ""),
             },
             daemon=True,
         ).start()
@@ -892,6 +961,8 @@ def submit_ocr_job(
         "accepted_count": len(file_entries),
         "rejected_count": len(rejected_files),
         "rejected_files": rejected_files[:50],
+        "deduplicated_count": len(deduplicated_files),
+        "deduplicated_files": deduplicated_files[:50],
         "files": [{"id": f["id"], "file_name": f["file_name"]} for f in file_entries],
     }
 
@@ -985,6 +1056,7 @@ def get_summary() -> dict:
                     "markdown_path": str(md),
                     "pages": pages,
                     "images": doc_images,
+                    "source_file_hash": str(meta.get("source_file_hash") or ""),
                     "updated_at": meta.get("updated_at")
                     or time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(md.stat().st_mtime)),
                 }

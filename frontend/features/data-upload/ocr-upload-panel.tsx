@@ -56,6 +56,7 @@ export function OCRUploadPanel() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [elapsed, setElapsed] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -116,6 +117,7 @@ export function OCRUploadPanel() {
         return [...prev, ...newFiles];
       });
       setError(null);
+      setNotice(null);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -166,6 +168,7 @@ export function OCRUploadPanel() {
     try {
       setStatus("uploading");
       setError(null);
+      setNotice(null);
       setStartTime(Date.now());
       setElapsed(0);
       const result = await submitOCRJob(selectedFiles, selectedDestination);
@@ -174,6 +177,22 @@ export function OCRUploadPanel() {
           `已接受 ${result.accepted_count} 个文件，拒绝 ${result.rejected_count} 个文件`
         );
       }
+      if ((result.deduplicated_count ?? 0) > 0) {
+        setNotice(`已自动去重 ${result.deduplicated_count} 个重复文件`);
+      }
+
+      if (result.accepted_count === 0) {
+        setStatus("completed");
+        setCurrentJob({
+          job_id: result.job_id,
+          created_at: "",
+          updated_at: "",
+          files: [],
+        });
+        await loadSummary();
+        return;
+      }
+
       setStatus("processing");
       await pollJobStatus(result.job_id);
       pollingIntervalRef.current = setInterval(() => {
@@ -189,6 +208,7 @@ export function OCRUploadPanel() {
     reset();
     setSelectedFiles([]);
     setElapsed(0);
+    setNotice(null);
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
@@ -325,6 +345,11 @@ export function OCRUploadPanel() {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {notice && (
+        <Alert>
+          <AlertDescription>{notice}</AlertDescription>
         </Alert>
       )}
 

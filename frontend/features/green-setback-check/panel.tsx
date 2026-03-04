@@ -129,15 +129,47 @@ export function GreenSetbackPanel() {
   const highlightedAreaId = useTransientHighlight(selectedAreaId);
   const violations = result?.summary?.violations ?? 0;
   const compliant = result?.summary?.compliant ?? 0;
-  const sortedAreaResults = useMemo(
-    () =>
-      sortReviewItems(buildSetbackAreaViewItems(result?.area_results ?? [], "green"), {
-        getStatus: (item) => (item.status === "pass" ? "pass" : "fail"),
-        getIndexHint: (item) => item.displayName,
-        getName: (item) => item.displayName,
-      }),
-    [result]
-  );
+  const sortedAreaResults = useMemo(() => {
+    const normalizeText = (value?: string | null) => {
+      if (typeof value !== "string") return null;
+      const text = value.trim();
+      return text ? text : null;
+    };
+    const areaPlotMap = new Map<string, string>();
+    (result?.results ?? []).forEach((building) => {
+      const areaName = normalizeText(building.green_name);
+      const plotName = normalizeText(building.plot_name);
+      if (!areaName || !plotName || areaPlotMap.has(areaName)) return;
+      areaPlotMap.set(areaName, plotName);
+    });
+    const shapeAreaPlotMap = new Map<string, string>();
+    (result?.green_areas ?? []).forEach((area) => {
+      const areaName = normalizeText(area.name);
+      const plotName = normalizeText(area.plot_name);
+      if (!areaName || !plotName || shapeAreaPlotMap.has(areaName)) return;
+      shapeAreaPlotMap.set(areaName, plotName);
+    });
+
+    const viewItems = buildSetbackAreaViewItems(result?.area_results ?? [], "green").map((item) => {
+      const areaName = normalizeText(item.name) ?? item.displayName;
+      const plotName =
+        normalizeText(item.plot_name) ??
+        shapeAreaPlotMap.get(areaName) ??
+        areaPlotMap.get(areaName) ??
+        null;
+      return {
+        ...item,
+        areaName,
+        plotName,
+      };
+    });
+
+    return sortReviewItems(viewItems, {
+      getStatus: (item) => (item.status === "pass" ? "pass" : "fail"),
+      getIndexHint: (item) => item.displayName,
+      getName: (item) => item.displayName,
+    });
+  }, [result]);
 
 
   useEffect(() => {
@@ -266,7 +298,7 @@ export function GreenSetbackPanel() {
             </p>
           </CardHeader>
           <CardContent className="space-y-2 flex-1 overflow-y-auto review-result-scrollbar">
-            {sortedAreaResults.map((item: GreenSetbackAreaResult & { selectionId: string; displayName: string }) => (
+            {sortedAreaResults.map((item: GreenSetbackAreaResult & { selectionId: string; displayName: string; areaName: string; plotName: string | null }) => (
               <div
                 key={item.selectionId}
                 role="button"
@@ -283,10 +315,13 @@ export function GreenSetbackPanel() {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <div className="font-medium">{item.displayName}</div>
+                  <div className="font-medium">{item.areaName}</div>
                   <div className="text-xs">
                     {item.status === "fail" ? "\u4e0d\u5408\u89c4" : "\u5408\u89c4"}
                   </div>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  所属地块：<span className="font-medium text-foreground">{item.plotName ?? "未匹配地块"}</span>
                 </div>
               </div>
             ))}

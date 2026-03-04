@@ -808,6 +808,12 @@ def check_green_setback_violation(
         area_name = outer.get("name") or f"绿地{index}"
         area["name"] = area_name
         outer_z = outer["min_z"]
+        centroid = outer.get("centroid")
+        plot_name: Optional[str] = None
+        if plot_entries and isinstance(centroid, tuple) and len(centroid) >= 2:
+            area_point = rhino3dm.Point3d(float(centroid[0]), float(centroid[1]), float(outer_z))
+            plot_name = _match_plot_name_by_point(area_point, plot_entries, 0.0)
+        area["plot_name"] = plot_name
         outer_points = [[x, y, outer_z] for x, y in outer["points2d"]]
         holes = []
         for hole in area["holes"]:
@@ -816,6 +822,7 @@ def check_green_setback_violation(
         green_area_shapes.append(
             {
                 "name": area_name,
+                "plot_name": plot_name,
                 "outer": outer_points,
                 "holes": holes,
                 "base_z": outer_z,
@@ -912,11 +919,13 @@ def check_green_setback_violation(
     area_results = []
     for index, area in enumerate(green_areas, start=1):
         name = area.get("name") or f"绿地{index}"
+        plot_name = area.get("plot_name")
         stats = area_stats.get(name, {"checked": 0, "violations": 0})
         status = "fail" if stats["violations"] > 0 else "pass"
         area_results.append(
             {
                 "name": name,
+                "plot_name": str(plot_name) if plot_name else None,
                 "status": status,
                 "checked_buildings": stats["checked"],
                 "violations": stats["violations"],

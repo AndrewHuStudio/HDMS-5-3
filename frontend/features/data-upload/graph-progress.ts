@@ -1,6 +1,7 @@
 export type GraphDocStatus =
   | "success"
   | "failed"
+  | "in_progress"
   | "pending"
   | "waiting_vector"
   | "vector_failed";
@@ -9,6 +10,7 @@ export interface GraphProgressRow {
   key: string;
   fileName: string;
   status: GraphDocStatus;
+  progress: number;
   entitiesCount: number | null;
   relationshipsCount: number | null;
   error?: string;
@@ -25,6 +27,7 @@ type GraphBuiltDoc = {
   doc_id: string;
   file_name?: string;
   status: string;
+  progress?: number | null;
   entities_count: number;
   relationships_count: number;
   error?: string;
@@ -51,6 +54,12 @@ function _isBuiltSuccess(status: string): boolean {
   return status === "success" || status === "skipped";
 }
 
+function _normalizeProgress(value: number | null | undefined): number {
+  if (value == null || Number.isNaN(Number(value))) return 0;
+  const progress = Math.floor(Number(value));
+  return Math.min(100, Math.max(0, progress));
+}
+
 export function buildGraphProgressRows(
   reportDocs: IngestionReportDoc[],
   builtDocs: GraphBuiltDoc[],
@@ -70,11 +79,14 @@ export function buildGraphProgressRows(
       byNormFile.get(_normName(doc.file_name));
 
     if (built) {
-      const builtOk = _isBuiltSuccess(String(built.status || ""));
+      const builtStatus = String(built.status || "");
+      const builtOk = _isBuiltSuccess(builtStatus);
+      const inProgress = builtStatus === "in_progress";
       return {
         key: String(built.doc_id),
         fileName: built.file_name || doc.file_name,
-        status: builtOk ? "success" : "failed",
+        status: builtOk ? "success" : inProgress ? "in_progress" : "failed",
+        progress: builtOk ? 100 : inProgress ? _normalizeProgress(built.progress) : 100,
         entitiesCount: built.entities_count ?? 0,
         relationshipsCount: built.relationships_count ?? 0,
         error: built.error,
@@ -90,6 +102,7 @@ export function buildGraphProgressRows(
           : doc.status === "failed"
             ? "vector_failed"
             : "waiting_vector",
+      progress: 0,
       entitiesCount: null,
       relationshipsCount: null,
     };
@@ -123,4 +136,3 @@ export function computeGraphPanelStats(
     statRels: Number(statistics?.total_relationships ?? totalRelations),
   };
 }
-
