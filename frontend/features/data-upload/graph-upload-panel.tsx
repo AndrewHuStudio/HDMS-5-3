@@ -25,6 +25,7 @@ import {
 import { useGraphStore } from "./graph-store";
 import {
   submitBatchGraphBuild,
+  getBatchGraphBuildState,
   getGraphStatistics,
   getOCRSummary,
   getIngestionReport,
@@ -58,6 +59,10 @@ function getGraphProgressValue(row: GraphProgressRow): number {
   if (row.status === "success" || row.status === "failed") return 100;
   if (row.status === "in_progress") return row.progress;
   return 0;
+}
+
+function hasActiveGraphBuildRows(rows: GraphProgressRow[]): boolean {
+  return rows.some((row) => row.status === "pending" || row.status === "in_progress");
 }
 
 const CHINESE_GRAPH_ENTITY_TYPES = new Set(["片区", "地块", "空间要素", "法规", "标准", "导则"]);
@@ -140,13 +145,13 @@ export function GraphUploadPanel() {
     loadStatistics();
   }, [loadStatistics]);
 
-  const loadProgressRows = useCallback(async (freshBuildResult?: typeof buildResult) => {
+  const loadProgressRows = useCallback(async (freshBuildResult?: typeof buildResult): Promise<GraphProgressRow[]> => {
     try {
       const ocrSummary = await getOCRSummary();
       const ocrDocs = ocrSummary.documents ?? [];
       if (ocrDocs.length === 0) {
         setProgressRows([]);
-        return;
+        return [];
       }
 
       const ocrOutputDir = deriveOcrOutputDir(ocrDocs[0].markdown_path);
@@ -189,15 +194,51 @@ export function GraphUploadPanel() {
         }
       }
 
-      setProgressRows(buildGraphProgressRows(reportDocs, Array.from(buildMap.values())));
+      const rows = buildGraphProgressRows(reportDocs, Array.from(buildMap.values()));
+      setProgressRows(rows);
+      return rows;
     } catch {
       setProgressRows([]);
+      return [];
     }
   }, [buildResult]);
 
   useEffect(() => {
     loadProgressRows();
   }, [loadProgressRows]);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
+
+  const pollBatchBuildState = useCallback(async (freshRows?: GraphProgressRow[]) => {
+    const rows = freshRows ?? (await loadProgressRows());
+
+    try {
+      const state = await getBatchGraphBuildState();
+      if (state.result) {
+        setBuildResult(state.result);
+      }
+
+      if (state.status === "failed") {
+        stopPolling();
+        setError(state.error || "图谱构建失败");
+        setStatus("error");
+        return;
+      }
+
+      if (state.status === "completed" && !hasActiveGraphBuildRows(rows)) {
+        stopPolling();
+        setStatus("completed");
+        await loadStatistics();
+      }
+    } catch {
+      // 状态接口偶发失败时由下一次轮询兜底
+    }
+  }, [loadProgressRows, loadStatistics, setBuildResult, setError, setStatus, stopPolling]);
 
   // 开始构建
   const handleBuild = async () => {
@@ -209,35 +250,24 @@ export function GraphUploadPanel() {
       setElapsed(0);
 
       await loadProgressRows();
-      if (pollingRef.current) clearInterval(pollingRef.current);
+      stopPolling();
       pollingRef.current = setInterval(() => {
-        void loadProgressRows();
+        void pollBatchBuildState();
       }, 2000);
 
       const result = await submitBatchGraphBuild(true);
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
       setBuildResult(result);
-      setStatus("completed");
-      await loadStatistics();
-      await loadProgressRows(result);
+      const rows = await loadProgressRows(result);
+      await pollBatchBuildState(rows);
     } catch (err) {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
+      stopPolling();
       setError(err instanceof Error ? err.message : "图谱构建失败");
       setStatus("error");
     }
   };
 
   const handleReset = () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
+    stopPolling();
     reset();
     setElapsed(0);
   };
@@ -283,9 +313,9 @@ export function GraphUploadPanel() {
   // 打开弹窗时自动加载一次
   useEffect(() => {
     return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
+      stopPolling();
     };
-  }, []);
+  }, [stopPolling]);
 
   useEffect(() => {
     if (showGraphDialog) {

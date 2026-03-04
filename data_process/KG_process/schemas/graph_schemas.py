@@ -54,6 +54,10 @@ class BatchGraphBuildRequest(BaseModel):
     max_docs: Optional[int] = Field(None, description="Maximum documents to process")
     skip_built: bool = Field(False, description="Skip documents already marked as built")
     force_rebuild: bool = Field(False, description="Force rebuild even if already built")
+    async_mode: bool = Field(
+        False,
+        description="Run batch build in background and return immediately",
+    )
 
 
 class BatchGraphBuildResponse(BaseModel):
@@ -63,6 +67,20 @@ class BatchGraphBuildResponse(BaseModel):
     success: int = Field(..., description="Successfully processed")
     failed: int = Field(..., description="Failed to process")
     documents: List[Dict[str, Any]] = Field(..., description="List of build results")
+
+
+class BatchGraphBuildStateResponse(BaseModel):
+    """Current state of async batch graph build."""
+
+    status: str = Field(..., description="idle | running | completed | failed")
+    in_flight: bool = Field(..., description="Whether a background build job is active")
+    started_at: Optional[str] = Field(None, description="UTC timestamp when current/last job started")
+    finished_at: Optional[str] = Field(None, description="UTC timestamp when current/last job finished")
+    error: Optional[str] = Field(None, description="Last async job error")
+    result: Optional[BatchGraphBuildResponse] = Field(
+        None,
+        description="Last completed batch build result",
+    )
 
 
 class GraphQueryRequest(BaseModel):

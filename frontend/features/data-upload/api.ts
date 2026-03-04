@@ -9,6 +9,7 @@ import type {
   IngestionReportResponse,
   IngestionStatus,
   BatchGraphBuildResponse,
+  BatchGraphBuildStateResponse,
   GraphStatistics,
   GraphDocumentStatusResponse,
   HealthDbResponse,
@@ -225,6 +226,7 @@ export async function submitBatchGraphBuild(
     body: JSON.stringify({
       use_llm: useLlm,
       max_docs: maxDocs ?? null,
+      async_mode: true,
     }),
   });
 
@@ -259,6 +261,20 @@ export async function getGraphDocumentStatuses(): Promise<GraphDocumentStatusRes
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "获取文档图谱状态失败" }));
     throw new Error(error.detail || "获取文档图谱状态失败");
+  }
+
+  return response.json();
+}
+
+/**
+ * 获取批量图谱构建后台任务状态（idle/running/completed/failed）
+ */
+export async function getBatchGraphBuildState(): Promise<BatchGraphBuildStateResponse> {
+  const response = await fetch(`${DATA_PROCESS_BASE}/graph/build/batch/state`);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: "获取图谱构建状态失败" }));
+    throw new Error(error.detail || "获取图谱构建状态失败");
   }
 
   return response.json();

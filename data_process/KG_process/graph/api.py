@@ -4,15 +4,17 @@ Graph API endpoints for knowledge graph construction and querying.
 
 import asyncio
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 import threading
+from datetime import datetime, timezone
 
 from ..schemas.graph_schemas import (
     GraphBuildRequest,
     GraphBuildResponse,
     BatchGraphBuildRequest,
     BatchGraphBuildResponse,
+    BatchGraphBuildStateResponse,
     GraphQueryRequest,
     GraphQueryResponse,
     PlotInfoResponse,
@@ -35,6 +37,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/graph", tags=["graph"])
 _db_init_lock = threading.Lock()
 _db_init_inflight = False
+_batch_build_lock = threading.Lock()
+_batch_build_inflight = False
+_batch_build_last_result: Optional[Dict[str, Any]] = None
+_batch_build_last_error: Optional[str] = None
+_batch_build_started_at: Optional[str] = None
+_batch_build_finished_at: Optional[str] = None
 
 
 def _kickoff_db_init() -> None:
@@ -77,6 +85,107 @@ def _create_graph_builder() -> GraphBuilder:
     return GraphBuilder(
         mongodb_client=db_manager.mongodb,
         graph_store=graph_store
+    )
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _estimate_batch_total_documents(max_docs: Optional[int]) -> int:
+    """Best-effort estimate used for async kickoff response."""
+    try:
+        total = int(db_manager.mongodb.count_documents("documents"))
+    except Exception as exc:
+        logger.warning("Failed to estimate document count for async graph build: %s", exc)
+        return 0
+    if max_docs is not None and max_docs > 0:
+        return min(total, max_docs)
+    return total
+
+
+def _snapshot_batch_build_state() -> Dict[str, Any]:
+    with _batch_build_lock:
+        return {
+            "in_flight": _batch_build_inflight,
+            "result": dict(_batch_build_last_result or {}) if _batch_build_last_result else None,
+            "error": _batch_build_last_error,
+            "started_at": _batch_build_started_at,
+            "finished_at": _batch_build_finished_at,
+        }
+
+
+def _run_async_batch_build(request: Any) -> None:
+    """Run batch build in a daemon thread and update module-level state."""
+    global _batch_build_inflight
+    global _batch_build_last_result
+    global _batch_build_last_error
+    global _batch_build_finished_at
+
+    result: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
+
+    try:
+        builder = _create_graph_builder()
+        result = builder.build_from_all_documents(
+            use_llm=request.use_llm,
+            max_docs=request.max_docs,
+            skip_built=request.skip_built,
+            force_rebuild=request.force_rebuild,
+        )
+    except Exception as exc:
+        error_message = str(exc)
+        logger.error("Async batch graph build failed: %s", exc)
+    finally:
+        with _batch_build_lock:
+            _batch_build_inflight = False
+            _batch_build_last_result = result
+            _batch_build_last_error = error_message
+            _batch_build_finished_at = _utc_now_iso()
+
+
+def _start_async_batch_build(request: Any) -> bool:
+    """Start async batch build if no active job exists."""
+    global _batch_build_inflight
+    global _batch_build_last_result
+    global _batch_build_last_error
+    global _batch_build_started_at
+    global _batch_build_finished_at
+
+    with _batch_build_lock:
+        if _batch_build_inflight:
+            return False
+        _batch_build_inflight = True
+        _batch_build_last_result = None
+        _batch_build_last_error = None
+        _batch_build_started_at = _utc_now_iso()
+        _batch_build_finished_at = None
+
+    request_copy = request.model_copy(deep=True) if hasattr(request, "model_copy") else request
+    threading.Thread(target=_run_async_batch_build, args=(request_copy,), daemon=True).start()
+    return True
+
+
+def _make_batch_state_response() -> BatchGraphBuildStateResponse:
+    state = _snapshot_batch_build_state()
+    in_flight = bool(state["in_flight"])
+    error = state["error"]
+    result_raw = state["result"]
+
+    status = "running" if in_flight else "idle"
+    if not in_flight and error:
+        status = "failed"
+    elif not in_flight and result_raw:
+        status = "completed"
+
+    result_model = BatchGraphBuildResponse(**result_raw) if result_raw else None
+    return BatchGraphBuildStateResponse(
+        status=status,
+        in_flight=in_flight,
+        started_at=state["started_at"],
+        finished_at=state["finished_at"],
+        error=error,
+        result=result_model,
     )
 
 
@@ -127,6 +236,25 @@ async def build_graph_batch(request: BatchGraphBuildRequest) -> BatchGraphBuildR
     a comprehensive knowledge graph.
     """
     try:
+        if request.async_mode:
+            _ensure_db_ready()
+            started = _start_async_batch_build(request)
+            if started:
+                logger.info("Accepted async batch graph build request")
+            else:
+                logger.info("Async batch graph build already running; returning current kickoff snapshot")
+
+            snapshot = _snapshot_batch_build_state()
+            if snapshot["result"] and not snapshot["in_flight"]:
+                return BatchGraphBuildResponse(**snapshot["result"])
+
+            return BatchGraphBuildResponse(
+                total=_estimate_batch_total_documents(request.max_docs),
+                success=0,
+                failed=0,
+                documents=[],
+            )
+
         builder = _create_graph_builder()
         result = await asyncio.to_thread(
             builder.build_from_all_documents,
@@ -139,6 +267,16 @@ async def build_graph_batch(request: BatchGraphBuildRequest) -> BatchGraphBuildR
 
     except Exception as e:
         logger.error(f"Failed to build batch graph: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/build/batch/state", response_model=BatchGraphBuildStateResponse)
+async def get_batch_build_state() -> BatchGraphBuildStateResponse:
+    """Return state of async batch graph build job."""
+    try:
+        return _make_batch_state_response()
+    except Exception as e:
+        logger.error(f"Failed to get batch graph build state: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -129,6 +129,15 @@ export interface BatchGraphBuildResponse {
   }>;
 }
 
+export interface BatchGraphBuildStateResponse {
+  status: "idle" | "running" | "completed" | "failed";
+  in_flight: boolean;
+  started_at?: string | null;
+  finished_at?: string | null;
+  error?: string | null;
+  result?: BatchGraphBuildResponse | null;
+}
+
 export interface GraphStatistics {
   total_nodes: number;
   total_relationships: number;
