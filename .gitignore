@@ -33,19 +33,11 @@ next-env.d.ts
 .env.test.local
 .env.test
 
-# 上传文件和缓存（保留目录结构，但忽略内容）
-data/uploads/*
-data/cache/*
-!data/uploads/.gitkeep
-!data/cache/.gitkeep
-
-# OCR 辅助模块数据（保留目录结构，但忽略内容）
-data/ocr_output/*
-data/ocr_tmp/*
-data/ocr_progress/*
-!data/ocr_output/.gitkeep
-!data/ocr_tmp/.gitkeep
-!data/ocr_progress/.gitkeep
+# data: 保留目录结构，不跟踪数据文件
+data/**/*
+!data/**/
+!data/.gitkeep
+!data/**/.gitkeep
 
 # IDE
 .vscode/
@@ -96,8 +88,3 @@ docker-compose.yml
 cloudflare/
 .claude/
 nginx/
-
-# data: 保留目录结构，不跟踪数据文件
-data/**/*
-!data/**/
-!data/**/.gitkeep
