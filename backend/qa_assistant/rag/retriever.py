@@ -87,14 +87,19 @@ class MultiSourceRetriever:
             "vector_results": [],
             "graph_results": [],
             "keyword_results": [],
-            "fused_results": []
+            "fused_results": [],
+            "timed_out": False,
+            "timed_out_branches": [],
         }
 
         # Fan out enabled retrieval branches in parallel so slower branches
         # do not block faster ones.
         futures: Dict[str, concurrent.futures.Future] = {}
         start_times: Dict[str, float] = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        branch_timeout = float(getattr(app_config, "QA_RETRIEVAL_BRANCH_TIMEOUT_SECONDS", 12.0))
+        total_timeout = float(getattr(app_config, "QA_RETRIEVAL_TOTAL_TIMEOUT_SECONDS", 25.0))
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        try:
             if use_vector:
                 start_times["vector_results"] = time.perf_counter()
                 futures["vector_results"] = executor.submit(self._vector_search, query, top_k)
@@ -105,17 +110,53 @@ class MultiSourceRetriever:
                 start_times["keyword_results"] = time.perf_counter()
                 futures["keyword_results"] = executor.submit(self._keyword_search, query, top_k)
 
-            for key, future in futures.items():
-                start_at = start_times.get(key, time.perf_counter())
-                try:
-                    branch_results = future.result()
-                    elapsed_ms = (time.perf_counter() - start_at) * 1000
-                    results[key] = branch_results
-                    hit_count = len(branch_results) if isinstance(branch_results, list) else 0
-                    logger.info("[TIMING] %s took %.2fms (%d hits)", key, elapsed_ms, hit_count)
-                except Exception as e:
-                    elapsed_ms = (time.perf_counter() - start_at) * 1000
-                    logger.error("[TIMING] %s failed after %.2fms: %s", key, elapsed_ms, e)
+            if futures:
+                overall_start = time.perf_counter()
+                pending_keys = set(futures.keys())
+                future_to_key = {future: key for key, future in futures.items()}
+
+                while pending_keys:
+                    elapsed = time.perf_counter() - overall_start
+                    remaining_total = total_timeout - elapsed
+                    if remaining_total <= 0:
+                        break
+
+                    done_futures, _ = concurrent.futures.wait(
+                        [futures[key] for key in pending_keys],
+                        timeout=min(branch_timeout, remaining_total),
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+                    if not done_futures:
+                        continue
+
+                    for done_future in done_futures:
+                        key = future_to_key.get(done_future)
+                        if not key:
+                            continue
+                        pending_keys.discard(key)
+                        start_at = start_times.get(key, time.perf_counter())
+                        elapsed_ms = (time.perf_counter() - start_at) * 1000
+                        try:
+                            branch_results = done_future.result()
+                            results[key] = branch_results
+                            hit_count = len(branch_results) if isinstance(branch_results, list) else 0
+                            logger.info("[TIMING] %s took %.2fms (%d hits)", key, elapsed_ms, hit_count)
+                        except Exception as exc:
+                            logger.error("[TIMING] %s failed after %.2fms: %s", key, elapsed_ms, exc)
+
+                if pending_keys:
+                    timed_out_keys = sorted(pending_keys)
+                    results["timed_out"] = True
+                    results["timed_out_branches"] = timed_out_keys
+                    logger.warning(
+                        "Retrieval timed out after %.2fs, degraded to partial results. pending=%s",
+                        total_timeout,
+                        ",".join(timed_out_keys),
+                    )
+                    for key in timed_out_keys:
+                        futures[key].cancel()
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         # Fuse results
         results["fused_results"] = self._fuse_results(
@@ -168,7 +209,9 @@ class MultiSourceRetriever:
         results = self.milvus.search(
             collection_name=self.collection_name,
             query_vector=query_embedding,
-            top_k=top_k
+            top_k=top_k,
+            load_timeout=float(getattr(app_config, "QA_MILVUS_LOAD_TIMEOUT_SECONDS", 6.0)),
+            search_timeout=float(getattr(app_config, "QA_MILVUS_SEARCH_TIMEOUT_SECONDS", 8.0)),
         )
         milvus_elapsed = (time.perf_counter() - milvus_start) * 1000
         logger.info(f"[TIMING] Vector search - Milvus query took {milvus_elapsed:.2f}ms")

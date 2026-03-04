@@ -8,6 +8,7 @@ to support dynamic knowledge graph visualization in the QA frontend.
 from typing import List, Dict, Any, Optional
 import logging
 
+from core import config as app_config
 from core.database.neo4j_client import Neo4jClient
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,9 @@ class GraphQueryService:
 
     def __init__(self, neo4j_client: Neo4jClient):
         self.neo4j = neo4j_client
+        self.query_timeout_seconds = float(
+            getattr(app_config, "QA_NEO4J_QUERY_TIMEOUT_SECONDS", 8.0)
+        )
 
     def query_graph(
         self,
@@ -25,7 +29,11 @@ class GraphQueryService:
         parameters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """Execute a Cypher query on the graph."""
-        return self.neo4j.query(cypher, parameters)
+        return self.neo4j.query(
+            cypher,
+            parameters,
+            timeout_seconds=self.query_timeout_seconds,
+        )
 
     def get_plot_info(self, plot_name: str) -> Dict[str, Any]:
         """Get comprehensive information about a plot (new schema: Chinese labels, properties on node)."""
@@ -40,7 +48,7 @@ class GraphQueryService:
                collect(distinct loc.name) as locations,
                collect(distinct {name: rule.name, label: labels(rule)[0]}) as rules
         """
-        results = self.neo4j.query(cypher, {"plot_name": plot_name})
+        results = self.query_graph(cypher, {"plot_name": plot_name})
         if results:
             return results[0]
         return {}
@@ -75,7 +83,7 @@ class GraphQueryService:
         LIMIT $limit
         """
         try:
-            results = self.neo4j.query(cypher, {"query": safe_query, "limit": limit})
+            results = self.query_graph(cypher, {"query": safe_query, "limit": limit})
             logger.info(f"Concept search for '{query_text[:30]}' returned {len(results)} results")
             return results
         except Exception as e:
@@ -147,7 +155,7 @@ class GraphQueryService:
             results = self.neo4j.query(cypher, {
                 "seeds": seed_names[:5],
                 "max_nodes": max_nodes,
-            })
+            }, timeout_seconds=max(self.query_timeout_seconds, 10.0))
 
             if results and results[0]:
                 nodes = results[0].get("nodes", [])
@@ -178,7 +186,7 @@ class GraphQueryService:
         LIMIT 10
         """
         try:
-            results = self.neo4j.query(cypher, {"seeds": seed_names[:5]})
+            results = self.query_graph(cypher, {"seeds": seed_names[:5]})
             nodes = [
                 {"id": r["id"], "label": r["label"], "name": r["name"],
                  "properties": r.get("properties", {})}
@@ -228,7 +236,7 @@ class GraphQueryService:
         LIMIT 20
         """
         try:
-            results = self.neo4j.query(cypher, {"prop_key": prop_key})
+            results = self.query_graph(cypher, {"prop_key": prop_key})
             return {
                 "indicator": indicator_name,
                 "property_key": prop_key,

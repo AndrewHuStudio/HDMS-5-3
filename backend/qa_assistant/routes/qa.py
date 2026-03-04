@@ -195,6 +195,28 @@ def _resolve_pdf_path(document: Optional[dict]) -> Optional[Path]:
 _pdf_page_texts_cache: dict[str, Optional[List[str]]] = {}
 
 
+class _DisabledRetriever:
+    """Fallback retriever used when database dependencies are temporarily unavailable."""
+
+    mongodb = None
+
+    @staticmethod
+    def retrieve(*args, **kwargs) -> dict:
+        return {
+            "vector_results": [],
+            "graph_results": [],
+            "keyword_results": [],
+            "fused_results": [],
+            "reranked": False,
+            "timed_out": False,
+            "timed_out_branches": [],
+        }
+
+    @staticmethod
+    def _compute_weights(query: str) -> dict:
+        return {"vector": 0.0, "graph": 0.0, "keyword": 0.0}
+
+
 def _safe_positive_int(value: object, default: int, *, minimum: int = 1, maximum: Optional[int] = None) -> int:
     try:
         parsed = int(value)
@@ -510,10 +532,14 @@ def _resolve_image_path(document: Optional[dict], image_ref: str) -> Optional[Pa
 def _create_retriever() -> MultiSourceRetriever:
     """Create multi-source retriever with all dependencies."""
     if not db_manager._initialized:
-        raise HTTPException(
-            status_code=503,
-            detail="Database connections not initialized"
-        )
+        try:
+            logger.warning("Database manager not initialized, attempting lazy init for QA")
+            db_manager.initialize()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Database connections not initialized: {exc}"
+            ) from exc
 
     embedder = create_embedding_service()
     graph_query = GraphQueryService(db_manager.neo4j)
@@ -535,7 +561,16 @@ def chat_stream(request: ChatRequest):
     logger.info(f"[TIMING] Request received at /qa/chat/stream")
 
     try:
-        retriever = _create_retriever()
+        retrieval_available = True
+        try:
+            retriever = _create_retriever()
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            retrieval_available = False
+            logger.warning("QA retrieval unavailable, degraded to model-only answer: %s", exc.detail)
+            retriever = _DisabledRetriever()
+
         rag_service = create_rag_service(retriever)
 
         history = _normalize_history(request.history)
@@ -548,7 +583,7 @@ def chat_stream(request: ChatRequest):
                 for event_type, data in rag_service.answer_question_stream(
                     question=request.question.strip(),
                     history=history,
-                    use_retrieval=request.use_retrieval,
+                    use_retrieval=request.use_retrieval and retrieval_available,
                     top_k=request.top_k,
                 ):
                     yield f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"

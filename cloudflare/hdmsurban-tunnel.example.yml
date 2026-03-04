@@ -1,35 +1,85 @@
-﻿
-
-tunnel: REPLACE_WITH_TUNNEL_UUID
+﻿tunnel: REPLACE_WITH_TUNNEL_UUID
 credentials-file: C:\\Users\\YOUR_WINDOWS_USER\\.cloudflared\\REPLACE_WITH_TUNNEL_UUID.json
 
 ingress:
   - hostname: hdmsurban.com
-    path: ^/qa/chat/stream$
+    path: /qa/chat/stream*
     service: http://localhost:8022
 
   - hostname: hdmsurban.com
-    path: ^/qa/.*$
+    path: /qa/*
     service: http://localhost:8022
 
   - hostname: hdmsurban.com
-    path: ^/rag/.*$
+    path: /rag/*
     service: http://localhost:8022
 
   - hostname: hdmsurban.com
-    path: ^/ingestion/.*$
-    service: http://localhost:8025
-
-  - hostname: hdmsurban.comw
-    path: ^/graph/.*$
-    service: http://localhost:8025
+    path: /api/approval/*
+    service: http://localhost:8021
 
   - hostname: hdmsurban.com
-    path: ^/approval/.*$
+    path: /approval/*
     service: http://localhost:8024
 
   - hostname: hdmsurban.com
-    path: ^/(models|height-check|setback-check|sight-corridor|fire-ladder|sky-bridge)(/.*)?$
+    path: /api/*
+    service: http://localhost:8025
+
+  - hostname: hdmsurban.com
+    path: /ingestion/*
+    service: http://localhost:8025
+
+  - hostname: hdmsurban.com
+    path: /graph/*
+    service: http://localhost:8025
+
+  - hostname: hdmsurban.com
+    path: /health/db*
+    service: http://localhost:8025
+
+  - hostname: hdmsurban.com
+    path: /models/*
+    service: http://localhost:8023
+
+  - hostname: hdmsurban.com
+    path: /height-check/*
+    service: http://localhost:8023
+
+  - hostname: hdmsurban.com
+    path: /setback-check*
+    service: http://localhost:8023
+
+  - hostname: hdmsurban.com
+    path: /setback-rate*
+    service: http://localhost:8023
+
+  - hostname: hdmsurban.com
+    path: /sight-corridor/*
+    service: http://localhost:8023
+
+  - hostname: hdmsurban.com
+    path: /fire-ladder*
+    service: http://localhost:8023
+
+  - hostname: hdmsurban.com
+    path: /sky-bridge*
+    service: http://localhost:8023
+
+  - hostname: hdmsurban.com
+    path: /green-setback*
+    service: http://localhost:8023
+
+  - hostname: hdmsurban.com
+    path: /plaza-setback*
+    service: http://localhost:8023
+
+  - hostname: hdmsurban.com
+    path: /vehicle-entrance*
+    service: http://localhost:8023
+
+  - hostname: hdmsurban.com
+    path: /pedestrian-entrance*
     service: http://localhost:8023
 
   - hostname: hdmsurban.com

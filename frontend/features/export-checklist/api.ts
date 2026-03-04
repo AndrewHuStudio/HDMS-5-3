@@ -3,12 +3,34 @@ import type { AISuggestionRequest, AISuggestionResponse, ExportWordRequest } fro
 const APPROVAL_CHECKLIST_PORTS = [8004, 8024];
 const APPROVAL_CHECKLIST_PATH_PREFIX = "/approval";
 const APPROVAL_CHECKLIST_API_PROXY_PREFIX = "/api/approval";
-const APPROVAL_BASE_CACHE_TTL_MS = 15_000;
+const APPROVAL_BASE_CACHE_TTL_MS = 5 * 60_000;
 const AI_SUGGESTION_TIMEOUT_BASE_MS = 45_000;
 const AI_SUGGESTION_TIMEOUT_PER_ITEM_MS = 8_000;
 const AI_SUGGESTION_TIMEOUT_MAX_MS = 180_000;
+const WORD_EXPORT_SYNC_TIMEOUT_MS = 90_000;
+const WORD_EXPORT_JOB_CREATE_TIMEOUT_MS = 10_000;
+const WORD_EXPORT_JOB_TIMEOUT_MS = 3 * 60_000;
+const WORD_EXPORT_JOB_POLL_INTERVAL_MS = 1_000;
 
 let cachedResolvedBase: { value: string; expiresAt: number } | null = null;
+
+interface ExportWordJobCreateResponse {
+  job_id: string;
+  status: string;
+}
+
+interface ExportWordJobStatusResponse {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  error?: string | null;
+}
+
+class AsyncWordExportNotSupportedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AsyncWordExportNotSupportedError";
+  }
+}
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
@@ -129,7 +151,102 @@ export async function generateAISuggestions(
   throw new Error(`AI 建议服务不可用，请稍后重试。${errors.length ? ` (${errors[0]})` : ""}`);
 }
 
-export async function exportChecklistWord(request: ExportWordRequest): Promise<Blob> {
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function createExportWordJob(
+  request: ExportWordRequest
+): Promise<{ base: string; jobId: string }> {
+  const primaryBase = await resolveApprovalChecklistBase();
+  const candidates = [primaryBase, ...getCandidateBases()].filter(
+    (base, index, list) => list.indexOf(base) === index
+  );
+  const errors: string[] = [];
+  let sawAsyncNotSupported = false;
+
+  for (const apiBase of candidates) {
+    try {
+      const response = await fetch(`${apiBase}/export-word/jobs`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+        },
+        body: JSON.stringify(request),
+        signal: AbortSignal.timeout(WORD_EXPORT_JOB_CREATE_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const detail = errorData.detail || `HTTP ${response.status}`;
+        if (response.status === 404 || response.status === 405) {
+          sawAsyncNotSupported = true;
+          errors.push(`${apiBase}: ${detail}`);
+          continue;
+        }
+        throw new Error(detail);
+      }
+
+      const payload = (await response.json()) as ExportWordJobCreateResponse;
+      return { base: apiBase, jobId: payload.job_id };
+    } catch (error) {
+      errors.push(`${apiBase}: ${error instanceof Error ? error.message : "请求失败"}`);
+    }
+  }
+
+  if (sawAsyncNotSupported) {
+    throw new AsyncWordExportNotSupportedError("当前服务不支持异步导出");
+  }
+
+  throw new Error(`Word 导出任务创建失败，请稍后重试。${errors.length ? ` (${errors[0]})` : ""}`);
+}
+
+async function waitForExportWordJob(base: string, jobId: string): Promise<void> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < WORD_EXPORT_JOB_TIMEOUT_MS) {
+    const response = await fetch(`${base}/export-word/jobs/${jobId}`, {
+      method: "GET",
+      cache: "no-store",
+      signal: AbortSignal.timeout(WORD_EXPORT_JOB_CREATE_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const detail = errorData.detail || `HTTP ${response.status}`;
+      throw new Error(detail);
+    }
+
+    const payload = (await response.json()) as ExportWordJobStatusResponse;
+    if (payload.status === "completed") {
+      return;
+    }
+    if (payload.status === "failed") {
+      throw new Error(payload.error || "Word 导出任务失败");
+    }
+
+    await sleep(WORD_EXPORT_JOB_POLL_INTERVAL_MS);
+  }
+
+  throw new Error("Word 导出超时，请稍后重试");
+}
+
+async function downloadExportWordJob(base: string, jobId: string): Promise<Blob> {
+  const response = await fetch(`${base}/export-word/jobs/${jobId}/download`, {
+    method: "GET",
+    signal: AbortSignal.timeout(WORD_EXPORT_SYNC_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    const detail = errorData.detail || `HTTP ${response.status}`;
+    throw new Error(detail);
+  }
+
+  return await response.blob();
+}
+
+async function exportChecklistWordSync(request: ExportWordRequest): Promise<Blob> {
   const primaryBase = await resolveApprovalChecklistBase();
   const candidates = [primaryBase, ...getCandidateBases()].filter(
     (base, index, list) => list.indexOf(base) === index
@@ -144,6 +261,7 @@ export async function exportChecklistWord(request: ExportWordRequest): Promise<B
           "Content-Type": "application/json; charset=utf-8",
         },
         body: JSON.stringify(request),
+        signal: AbortSignal.timeout(WORD_EXPORT_SYNC_TIMEOUT_MS),
       });
 
       if (!response.ok) {
@@ -163,4 +281,23 @@ export async function exportChecklistWord(request: ExportWordRequest): Promise<B
   }
 
   throw new Error(`Word 导出服务不可用，请稍后重试。${errors.length ? ` (${errors[0]})` : ""}`);
+}
+
+export async function exportChecklistWord(request: ExportWordRequest): Promise<Blob> {
+  try {
+    const job = await createExportWordJob(request);
+    await waitForExportWordJob(job.base, job.jobId);
+    return await downloadExportWordJob(job.base, job.jobId);
+  } catch (error) {
+    try {
+      return await exportChecklistWordSync(request);
+    } catch (syncError) {
+      if (error instanceof AsyncWordExportNotSupportedError) {
+        throw syncError;
+      }
+      const asyncMessage = error instanceof Error ? error.message : "异步导出失败";
+      const syncMessage = syncError instanceof Error ? syncError.message : "同步导出失败";
+      throw new Error(`异步导出失败（${asyncMessage}），同步兜底也失败（${syncMessage}）`);
+    }
+  }
 }

@@ -4,7 +4,7 @@
  * 功能：
  * - 自动探测本地开发环境的后端服务端口（review: 8003/8023, qa: 8000/8022）
  * - 支持环境变量配置（NEXT_PUBLIC_HDMS_API_BASE, NEXT_PUBLIC_HDMS_QA_BASE）
- * - 非本地环境自动替换 hostname，避免 localhost 跨域问题
+ * - 公网环境默认使用同源地址，避免误连 localhost/私有端口
  * - 健康检查探测（/health 端点）+ 缓存机制（30s TTL）
  *
  * 导出：
@@ -140,15 +140,8 @@ export const computePreferredApiBase = ({
     if (normalizedConfiguredBase && !isLoopbackBase(normalizedConfiguredBase)) {
       return normalizedConfiguredBase;
     }
-    // configuredBase 是 localhost:PORT 形式，把 hostname 替换为当前访问的 hostname
-    if (normalizedConfiguredBase) {
-      const configuredUrl = parseUrl(normalizedConfiguredBase);
-      if (configuredUrl?.port) {
-        return `${runtime.protocol}//${runtime.hostname}:${configuredUrl.port}`;
-      }
-    }
-    // 没有配置或无法解析端口，使用 fallbackPort
-    return `${runtime.protocol}//${runtime.hostname}:${fallbackPort}`;
+    // 公网环境下若配置缺失或误配为 localhost，则统一退回同源。
+    return normalizeApiBase(runtime.origin);
   }
 
   return normalizedConfiguredBase || `http://localhost:${fallbackPort}`;

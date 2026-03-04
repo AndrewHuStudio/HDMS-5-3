@@ -21,15 +21,15 @@ if (-not $Port) {
 }
 
 if (-not $ReviewBase) {
-  $ReviewBase = if ($Mode -eq 'external') { 'http://localhost:8023' } else { 'http://localhost:8003' }
+  $ReviewBase = if ($Mode -eq 'external') { '' } else { 'http://localhost:8003' }
 }
 
 if (-not $QaBase) {
-  $QaBase = if ($Mode -eq 'external') { 'http://localhost:8022' } else { 'http://localhost:8002' }
+  $QaBase = if ($Mode -eq 'external') { '' } else { 'http://localhost:8002' }
 }
 
 if (-not $QaServerBase) {
-  $QaServerBase = $QaBase
+  $QaServerBase = if ($Mode -eq 'external') { 'http://localhost:8022' } else { $QaBase }
 }
 
 if (-not $DataProcessBase) {

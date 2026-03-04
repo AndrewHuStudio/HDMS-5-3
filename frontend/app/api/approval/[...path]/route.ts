@@ -1,6 +1,11 @@
 export const runtime = "nodejs";
 
 const APPROVAL_PORTS = [8004, 8024];
+const APPROVAL_PROXY_TIMEOUT_MS = (() => {
+  const parsed = Number.parseInt(process.env.APPROVAL_PROXY_TIMEOUT_MS || "45000", 10);
+  if (Number.isNaN(parsed)) return 45000;
+  return Math.min(120000, Math.max(5000, parsed));
+})();
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
@@ -45,6 +50,8 @@ async function proxyApprovalRequest(
   const errors: string[] = [];
 
   for (const base of approvalBaseCandidates()) {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), APPROVAL_PROXY_TIMEOUT_MS);
     try {
       const upstream = await fetch(`${base}/${upstreamPath}${upstreamQuery}`, {
         method,
@@ -53,6 +60,7 @@ async function proxyApprovalRequest(
         },
         body: requestBody,
         cache: "no-store",
+        signal: controller.signal,
       });
 
       if (upstream.status === 404) {
@@ -68,6 +76,8 @@ async function proxyApprovalRequest(
       });
     } catch (error) {
       errors.push(`${base}: ${error instanceof Error ? error.message : "request failed"}`);
+    } finally {
+      clearTimeout(timeoutHandle);
     }
   }
 

@@ -27,7 +27,26 @@ def _read_parallel_limit() -> int:
         return 8
 
 
+def _read_float_env(name: str, default: float, minimum: float) -> float:
+    raw_value = os.getenv(name, str(default))
+    try:
+        return max(minimum, float(raw_value))
+    except ValueError:
+        return default
+
+
+def _read_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        return min(maximum, max(minimum, int(raw_value)))
+    except ValueError:
+        return default
+
+
 MAX_PARALLEL_REQUESTS = _read_parallel_limit()
+REQUEST_TIMEOUT_SECONDS = _read_float_env("HDMS_CHECK_LIST_TIMEOUT_SECONDS", 45.0, 5.0)
+MAX_RETRY_ATTEMPTS = _read_int_env("HDMS_CHECK_LIST_RETRIES", 2, 0, 5)
+RETRY_BASE_DELAY_SECONDS = _read_float_env("HDMS_CHECK_LIST_RETRY_BASE_DELAY", 0.8, 0.1)
 
 
 def _normalize_base_url(value: str) -> str:
@@ -91,11 +110,53 @@ async def _request_suggestion(client: httpx.AsyncClient, prompt: str) -> str:
         "Content-Type": "application/json",
     }
 
-    response = await client.post(completion_url, json=payload, headers=headers)
-    response.raise_for_status()
-    data = response.json()
-    text = _extract_completion_text(data)
-    return text or "暂无建议"
+    retriable_status_codes = {408, 409, 425, 429, 500, 502, 503, 504}
+    last_error: Exception | None = None
+
+    for attempt in range(MAX_RETRY_ATTEMPTS + 1):
+        try:
+            response = await client.post(
+                completion_url,
+                json=payload,
+                headers=headers,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            if response.status_code in retriable_status_codes:
+                raise httpx.HTTPStatusError(
+                    f"upstream status={response.status_code}",
+                    request=response.request,
+                    response=response,
+                )
+            response.raise_for_status()
+            data = response.json()
+            text = _extract_completion_text(data)
+            return text or "暂无建议"
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
+            last_error = exc
+            is_retriable = True
+            if isinstance(exc, httpx.HTTPStatusError):
+                status_code = exc.response.status_code if exc.response else None
+                is_retriable = bool(status_code in retriable_status_codes)
+            if (not is_retriable) or attempt >= MAX_RETRY_ATTEMPTS:
+                raise
+            await asyncio.sleep(RETRY_BASE_DELAY_SECONDS * (2 ** attempt))
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("request suggestion failed unexpectedly")
+
+
+def _build_fallback_suggestion(feature: "FeatureInput") -> str:
+    summary = (feature.summary or "").strip()
+    issue_hint = summary if summary else "当前检测输出信息不完整"
+    points = [
+        "先补齐问题对应的规范条款与验收口径，明确整改目标。",
+        f"围绕“{issue_hint}”拆解整改步骤，按优先级逐项闭环。",
+        "补充责任人、完成时限和复核标准，避免重复问题。",
+    ]
+    return "重点：\n" + "\n".join(f"- {item}" for item in points) + (
+        f"\n\n总结：建议优先处理“{feature.name}”相关风险点，按“问题定位-整改执行-复核留痕”三步推进。"
+    )
 
 
 async def _generate_feature_suggestion(
@@ -118,8 +179,16 @@ async def _generate_feature_suggestion(
             suggestion_text = await _request_suggestion(client, prompt)
             return SuggestionOutput(id=feature.id, suggestion=suggestion_text), False
         except Exception as exc:
-            logger.error(f"生成 {feature.name} 建议失败: {exc}")
-            return SuggestionOutput(id=feature.id, suggestion=""), True
+            logger.error(
+                "生成 %s 建议失败 (%s): %r",
+                feature.name,
+                type(exc).__name__,
+                exc,
+            )
+            return SuggestionOutput(
+                id=feature.id,
+                suggestion=_build_fallback_suggestion(feature),
+            ), True
 
 
 class FeatureInput(BaseModel):
@@ -150,7 +219,13 @@ async def generate_ai_suggestions(request: AISuggestionRequest):
 
     failed_feature_ids: list[str] = []
     semaphore = asyncio.Semaphore(MAX_PARALLEL_REQUESTS)
-    async with httpx.AsyncClient(timeout=40.0) as client:
+    timeout = httpx.Timeout(
+        connect=min(10.0, REQUEST_TIMEOUT_SECONDS),
+        read=REQUEST_TIMEOUT_SECONDS,
+        write=min(20.0, REQUEST_TIMEOUT_SECONDS),
+        pool=10.0,
+    )
+    async with httpx.AsyncClient(timeout=timeout) as client:
         tasks = [
             _generate_feature_suggestion(client, semaphore, feature)
             for feature in request.features
@@ -163,7 +238,12 @@ async def generate_ai_suggestions(request: AISuggestionRequest):
         if failed:
             failed_feature_ids.append(feature.id)
 
-    if failed_feature_ids and len(failed_feature_ids) == len(request.features):
-        raise HTTPException(status_code=502, detail="AI 建议服务不可用，请稍后重试")
+    if failed_feature_ids:
+        logger.warning(
+            "AI suggestion degraded for %d/%d features. ids=%s",
+            len(failed_feature_ids),
+            len(request.features),
+            ",".join(failed_feature_ids),
+        )
 
     return AISuggestionResponse(suggestions=suggestions)

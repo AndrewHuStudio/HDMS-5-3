@@ -5,13 +5,15 @@
 
 ## Phases
 - [x] Phase 1: 现状诊断与证据收集
-- [ ] Phase 2: 前端 data_process 基址优化
-- [ ] Phase 3: Nginx 路由与超时优化
-- [ ] Phase 4: 回归验证与上线说明
+- [x] Phase 2: 前端 data_process 基址优化
+- [x] Phase 3: 公网路由（Cloudflare Tunnel）规则修复
+- [x] Phase 4: 回归验证与上线说明
 
 ## Risks
 - Nginx 配置文件是模板，需部署后 `nginx -t && reload` 才生效。
 - 前端静态包需重建发布后，公网 JS 才会更新。
+- 当前公网 data_process 临时走 `8125`（绕过 8025 僵死端口），后续需清理 8025 旧进程并恢复统一端口规划。
+- 当前 data_process 通过进程级环境变量覆盖 `NEO4J_URI=bolt://localhost:7689`；若重启方式变化，需同步到正式启动脚本/环境文件。
 
 ## Errors Encountered
-- 暂无
+- 运行 `cloudflared tunnel ingress validate --config ...` 报参数位置错误；改为 `cloudflared tunnel --config ... ingress validate` 后通过。

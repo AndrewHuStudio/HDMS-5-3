@@ -5,8 +5,14 @@
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import io
+import logging
+import os
 import re
+import threading
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Final
 from urllib.parse import quote
 
@@ -29,6 +35,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - runtime guard
     DOCX_IMPORT_ERROR = exc
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 DATA_URL_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^data:image/(?P<format>[a-zA-Z0-9.+-]+);base64,(?P<data>.+)$"
@@ -39,6 +46,38 @@ DEFAULT_FONT_NAME = "微软雅黑"
 COLOR_TEXT_DEFAULT = RGBColor(0, 0, 0)
 COLOR_TEXT_PASS = RGBColor(22, 163, 74)
 COLOR_TEXT_FAIL = RGBColor(220, 38, 38)
+
+
+def _read_int_env(name: str, default: int, *, min_value: int, max_value: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        logger.warning("%s 不是有效整数，使用默认值 %s", name, default)
+        return default
+    return max(min_value, min(max_value, parsed))
+
+
+JOB_RETENTION_MINUTES = _read_int_env(
+    "HDMS_EXPORT_JOB_RETENTION_MINUTES",
+    default=30,
+    min_value=5,
+    max_value=12 * 60,
+)
+JOB_RUNNING_TIMEOUT_MINUTES = _read_int_env(
+    "HDMS_EXPORT_JOB_RUNNING_TIMEOUT_MINUTES",
+    default=120,
+    min_value=10,
+    max_value=24 * 60,
+)
+JOB_MAX_WORKERS = _read_int_env(
+    "HDMS_EXPORT_JOB_MAX_WORKERS",
+    default=2,
+    min_value=1,
+    max_value=4,
+)
 
 
 class ExportWordRequest(BaseModel):
@@ -89,6 +128,145 @@ class ExportWordItem(BaseModel):
 
 
 ExportWordRequest.model_rebuild()
+
+
+class ExportJobCreateResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class ExportJobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    file_name: str
+    created_at: str
+    updated_at: str
+    completed_at: str | None = None
+    error: str | None = None
+    download_ready: bool = False
+
+
+class _ExportJobRecord:
+    def __init__(self, job_id: str, file_name: str):
+        now = datetime.now(timezone.utc)
+        self.job_id = job_id
+        self.status = "queued"
+        self.file_name = file_name
+        self.created_at = now
+        self.updated_at = now
+        self.completed_at: datetime | None = None
+        self.error: str | None = None
+        self.word_bytes: bytes | None = None
+
+    def to_response(self) -> ExportJobStatusResponse:
+        return ExportJobStatusResponse(
+            job_id=self.job_id,
+            status=self.status,
+            file_name=self.file_name,
+            created_at=self.created_at.isoformat(),
+            updated_at=self.updated_at.isoformat(),
+            completed_at=self.completed_at.isoformat() if self.completed_at else None,
+            error=self.error,
+            download_ready=self.word_bytes is not None and self.status == "completed",
+        )
+
+
+class ExportJobManager:
+    def __init__(self):
+        self._jobs: dict[str, _ExportJobRecord] = {}
+        self._lock = threading.Lock()
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=JOB_MAX_WORKERS,
+            thread_name_prefix="word-export",
+        )
+
+    def create_job(self, request: ExportWordRequest) -> _ExportJobRecord:
+        request_copy = request.model_copy(deep=True)
+        job_id = uuid.uuid4().hex
+        record = _ExportJobRecord(job_id=job_id, file_name=_resolve_file_name(request_copy))
+        with self._lock:
+            self._purge_expired_locked()
+            self._jobs[job_id] = record
+        self._executor.submit(self._run_job, job_id, request_copy)
+        return record
+
+    def get_job(self, job_id: str) -> _ExportJobRecord:
+        with self._lock:
+            self._purge_expired_locked()
+            record = self._jobs.get(job_id)
+            if record is None:
+                raise HTTPException(status_code=404, detail="导出任务不存在或已过期")
+            return record
+
+    def _run_job(self, job_id: str, request: ExportWordRequest) -> None:
+        self._update_status(job_id, status="running")
+        try:
+            if request.items:
+                word_bytes = _build_word_from_items(request)
+            elif request.image_data_url:
+                image_bytes = _parse_image_data_url(request.image_data_url)
+                word_bytes = _build_word_bytes(image_bytes)
+            else:
+                raise HTTPException(status_code=400, detail="导出参数无效：items 或 image_data_url 至少提供一个")
+        except HTTPException as exc:
+            self._mark_failed(job_id, exc.detail if isinstance(exc.detail, str) else str(exc.detail))
+            return
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            logger.warning("Word 异步导出任务失败: %s (%s)", job_id, exc)
+            self._mark_failed(job_id, str(exc))
+            return
+
+        self._mark_completed(job_id, word_bytes)
+
+    def _update_status(self, job_id: str, status: str) -> None:
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return
+            record.status = status
+            record.updated_at = datetime.now(timezone.utc)
+            if status == "running":
+                record.error = None
+
+    def _mark_completed(self, job_id: str, word_bytes: bytes) -> None:
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return
+            record.status = "completed"
+            record.word_bytes = word_bytes
+            record.error = None
+            record.updated_at = datetime.now(timezone.utc)
+            record.completed_at = record.updated_at
+
+    def _mark_failed(self, job_id: str, error: str) -> None:
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return
+            record.status = "failed"
+            record.error = error
+            record.word_bytes = None
+            record.updated_at = datetime.now(timezone.utc)
+            record.completed_at = record.updated_at
+
+    def _purge_expired_locked(self) -> None:
+        now = datetime.now(timezone.utc)
+        finished_deadline = now - timedelta(minutes=JOB_RETENTION_MINUTES)
+        running_deadline = now - timedelta(minutes=JOB_RUNNING_TIMEOUT_MINUTES)
+
+        expired_job_ids: list[str] = []
+        for job_id, record in self._jobs.items():
+            if record.status in {"completed", "failed"} and record.updated_at < finished_deadline:
+                expired_job_ids.append(job_id)
+            elif record.status in {"queued", "running"} and record.updated_at < running_deadline:
+                expired_job_ids.append(job_id)
+
+        for job_id in expired_job_ids:
+            del self._jobs[job_id]
+
+
+JOB_MANAGER = ExportJobManager()
 
 
 def _ensure_docx_available() -> None:
@@ -172,7 +350,8 @@ def _set_run_font(run, color: RGBColor = COLOR_TEXT_DEFAULT) -> None:
 def _set_paragraph_text(paragraph, value: str, color: RGBColor = COLOR_TEXT_DEFAULT) -> None:
     paragraph.clear()
     run = paragraph.add_run(value)
-    _set_run_font(run, color=color)
+    if color != COLOR_TEXT_DEFAULT:
+        run.font.color.rgb = color
     paragraph.paragraph_format.space_before = 0
     paragraph.paragraph_format.space_after = 0
 
@@ -323,6 +502,43 @@ async def export_word(request: ExportWordRequest) -> Response:
     )
     return Response(
         content=word_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": content_disposition},
+    )
+
+
+@router.post("/export-word/jobs", response_model=ExportJobCreateResponse, status_code=202)
+async def create_export_word_job(request: ExportWordRequest) -> ExportJobCreateResponse:
+    _ensure_docx_available()
+    if not request.items and not request.image_data_url:
+        raise HTTPException(status_code=400, detail="导出参数无效：items 或 image_data_url 至少提供一个")
+
+    record = JOB_MANAGER.create_job(request)
+    return ExportJobCreateResponse(job_id=record.job_id, status=record.status)
+
+
+@router.get("/export-word/jobs/{job_id}", response_model=ExportJobStatusResponse)
+async def get_export_word_job_status(job_id: str) -> ExportJobStatusResponse:
+    record = JOB_MANAGER.get_job(job_id)
+    return record.to_response()
+
+
+@router.get("/export-word/jobs/{job_id}/download")
+async def download_export_word_job(job_id: str) -> Response:
+    record = JOB_MANAGER.get_job(job_id)
+    if record.status in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="导出任务仍在处理中")
+    if record.status == "failed":
+        raise HTTPException(status_code=409, detail=record.error or "导出任务失败")
+    if not record.word_bytes:
+        raise HTTPException(status_code=500, detail="导出任务结果异常")
+
+    content_disposition = (
+        f"attachment; filename={ASCII_FALLBACK_FILE_NAME}; "
+        f"filename*=UTF-8''{quote(record.file_name)}"
+    )
+    return Response(
+        content=record.word_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": content_disposition},
     )

@@ -27,17 +27,34 @@ class MilvusClient:
 
     def connect(self) -> None:
         """Establish connection to Milvus server."""
-        try:
-            connections.connect(
-                alias=self.connection_alias,
-                host=self.host,
-                port=str(self.port)
-            )
-            self._connected = True
-            logger.info(f"Connected to Milvus at {self.host}:{self.port}")
-        except Exception as e:
-            logger.error(f"Failed to connect to Milvus: {e}")
-            raise
+        candidate_hosts = [self.host]
+        if self.host == "localhost":
+            candidate_hosts.append("127.0.0.1")
+
+        last_error: Exception | None = None
+        for candidate_host in dict.fromkeys(candidate_hosts):
+            try:
+                connections.disconnect(alias=self.connection_alias)
+            except Exception:
+                pass
+
+            try:
+                connections.connect(
+                    alias=self.connection_alias,
+                    host=candidate_host,
+                    port=str(self.port)
+                )
+                self._connected = True
+                self.host = candidate_host
+                logger.info(f"Connected to Milvus at {candidate_host}:{self.port}")
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.warning(f"Failed to connect to Milvus at {candidate_host}:{self.port}: {exc}")
+
+        if last_error:
+            logger.error(f"Failed to connect to Milvus: {last_error}")
+            raise last_error
 
     def disconnect(self) -> None:
         """Disconnect from Milvus server."""
@@ -211,7 +228,10 @@ class MilvusClient:
         collection_name: str,
         query_vector: List[float],
         top_k: int = 5,
-        filter_expr: Optional[str] = None
+        filter_expr: Optional[str] = None,
+        *,
+        load_timeout: Optional[float] = None,
+        search_timeout: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search for similar vectors.
@@ -221,12 +241,14 @@ class MilvusClient:
             query_vector: Query embedding vector
             top_k: Number of results to return
             filter_expr: Optional filter expression
+            load_timeout: Optional timeout for collection.load()
+            search_timeout: Optional timeout for collection.search()
 
         Returns:
             List of search results with id, text, doc_id, chunk_index, metadata, and distance
         """
         collection = Collection(collection_name)
-        collection.load()
+        collection.load(timeout=load_timeout)
 
         search_params = {
             "metric_type": "COSINE",
@@ -239,7 +261,8 @@ class MilvusClient:
             param=search_params,
             limit=top_k,
             expr=filter_expr,
-            output_fields=["id", "text", "doc_id", "chunk_index", "metadata"]
+            output_fields=["id", "text", "doc_id", "chunk_index", "metadata"],
+            timeout=search_timeout,
         )
 
         # Format results

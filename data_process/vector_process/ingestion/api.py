@@ -8,6 +8,7 @@ from pathlib import Path
 import hashlib
 import re
 import logging
+import threading
 
 from ..schemas.ingestion_schemas import (
     IngestionRequest,
@@ -34,6 +35,8 @@ from ...core import config
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
+_db_init_lock = threading.Lock()
+_db_init_inflight = False
 
 
 def _select_best_doc(candidates: list[dict[str, Any]], markdown_name: str) -> Optional[Dict[str, Any]]:
@@ -74,17 +77,36 @@ def _create_pipeline() -> IngestionPipeline:
     )
 
 
+def _kickoff_db_init() -> None:
+    """Kick off DB initialization in background once, so request threads never block."""
+    global _db_init_inflight
+    with _db_init_lock:
+        if db_manager._initialized or _db_init_inflight:
+            return
+        _db_init_inflight = True
+
+    def _runner() -> None:
+        global _db_init_inflight
+        try:
+            db_manager.ensure_initialized(
+                max_retries=config.DB_INIT_MAX_RETRIES,
+                retry_delay_seconds=config.DB_INIT_RETRY_DELAY_SECONDS,
+            )
+        except Exception as exc:
+            logger.warning("Background DB init failed: %s", exc)
+        finally:
+            with _db_init_lock:
+                _db_init_inflight = False
+
+    threading.Thread(target=_runner, daemon=True).start()
+
+
 def _ensure_db_ready() -> None:
-    """Best-effort lazy database init for requests that arrive before startup init is ready."""
+    """Return fast when DB is not ready instead of blocking the whole API worker."""
     if db_manager._initialized:
         return
-    try:
-        db_manager.ensure_initialized(
-            max_retries=config.DB_INIT_MAX_RETRIES,
-            retry_delay_seconds=config.DB_INIT_RETRY_DELAY_SECONDS,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Database connections not initialized: {exc}") from exc
+    _kickoff_db_init()
+    raise HTTPException(status_code=503, detail="Database is initializing, please retry shortly.")
 
 
 @router.post("/document", response_model=IngestionResponse)
@@ -218,6 +240,8 @@ async def get_status() -> IngestionStatus:
             mongodb_documents=doc_count,
             mongodb_chunks=chunk_count
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get status: {e}")
         raise HTTPException(status_code=500, detail=str(e))

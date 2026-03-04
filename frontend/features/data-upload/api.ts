@@ -18,15 +18,40 @@ import type {
 import type { SubgraphData } from "@/features/qa/types";
 
 const normalizeBase = (value: string) => value.replace(/\/$/, "");
+const parseUrl = (value: string) => {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+};
+const isLoopbackHostname = (hostname: string) =>
+  hostname === "localhost" ||
+  hostname === "127.0.0.1" ||
+  hostname === "::1" ||
+  hostname === "[::1]";
 
 const resolveDataProcessBase = () => {
   const configured = process.env.NEXT_PUBLIC_DATA_PROCESS_BASE || "";
+
+  if (typeof window !== "undefined") {
+    const onLocalHost = isLoopbackHostname(window.location.hostname);
+    if (configured) {
+      const configuredHost = parseUrl(configured)?.hostname || "";
+      if (!onLocalHost && isLoopbackHostname(configuredHost)) {
+        // 公网访问时忽略误注入的 localhost，改走同源反向代理。
+        return "";
+      }
+      return normalizeBase(configured);
+    }
+
+    // Browser defaults to same-origin routes (/api, /ingestion, /graph) via proxy.
+    return "";
+  }
+
   if (configured) return normalizeBase(configured);
 
-  // Browser defaults to same-origin routes (/api, /ingestion, /graph) via Nginx.
-  if (typeof window !== "undefined") return "";
-
-  // SSR / local fallback.
+  // SSR/local fallback.
   return "http://localhost:8005";
 };
 

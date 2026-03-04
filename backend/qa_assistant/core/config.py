@@ -212,6 +212,31 @@ QA_LLM_TIMEOUT_SECONDS = _parse_int(os.getenv("QA_LLM_TIMEOUT_SECONDS", "60"), 6
 QA_STREAM_MAX_TOKENS = _parse_int(os.getenv("QA_STREAM_MAX_TOKENS", "4096"), 4096, min_value=1)
 QA_CONTEXT_CHUNK_MAX_CHARS = _parse_int(os.getenv("QA_CONTEXT_CHUNK_MAX_CHARS", "0"), 0, min_value=0)
 QA_CONTEXT_QUOTE_MAX_CHARS = _parse_int(os.getenv("QA_CONTEXT_QUOTE_MAX_CHARS", "260"), 260, min_value=0)
+QA_RETRIEVAL_BRANCH_TIMEOUT_SECONDS = _parse_float(
+    os.getenv("QA_RETRIEVAL_BRANCH_TIMEOUT_SECONDS", "12"),
+    12.0,
+    min_value=1.0,
+)
+QA_RETRIEVAL_TOTAL_TIMEOUT_SECONDS = _parse_float(
+    os.getenv("QA_RETRIEVAL_TOTAL_TIMEOUT_SECONDS", "25"),
+    25.0,
+    min_value=1.0,
+)
+QA_MILVUS_LOAD_TIMEOUT_SECONDS = _parse_float(
+    os.getenv("QA_MILVUS_LOAD_TIMEOUT_SECONDS", "6"),
+    6.0,
+    min_value=1.0,
+)
+QA_MILVUS_SEARCH_TIMEOUT_SECONDS = _parse_float(
+    os.getenv("QA_MILVUS_SEARCH_TIMEOUT_SECONDS", "8"),
+    8.0,
+    min_value=1.0,
+)
+QA_NEO4J_QUERY_TIMEOUT_SECONDS = _parse_float(
+    os.getenv("QA_NEO4J_QUERY_TIMEOUT_SECONDS", "8"),
+    8.0,
+    min_value=1.0,
+)
 
 
 # --- Rerank Configuration ---

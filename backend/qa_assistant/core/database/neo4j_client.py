@@ -2,7 +2,7 @@
 Neo4j graph database client for HDMS.
 """
 
-from neo4j import GraphDatabase, Driver
+from neo4j import GraphDatabase, Driver, Query
 from typing import List, Dict, Any, Optional
 import logging
 
@@ -139,7 +139,9 @@ class Neo4jClient:
     def query(
         self,
         cypher: str,
-        parameters: Optional[Dict[str, Any]] = None
+        parameters: Optional[Dict[str, Any]] = None,
+        *,
+        timeout_seconds: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """
         Execute a Cypher query.
@@ -151,8 +153,9 @@ class Neo4jClient:
         Returns:
             List of result records as dictionaries
         """
+        query = Query(cypher, timeout=timeout_seconds) if timeout_seconds else cypher
         with self.driver.session() as session:
-            result = session.run(cypher, parameters or {})
+            result = session.run(query, parameters or {})
             return [record.data() for record in result]
 
     def get_node_with_relationships(

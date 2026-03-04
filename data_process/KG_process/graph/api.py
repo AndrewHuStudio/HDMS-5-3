@@ -5,6 +5,7 @@ Graph API endpoints for knowledge graph construction and querying.
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any, List
 import logging
+import threading
 
 from ..schemas.graph_schemas import (
     GraphBuildRequest,
@@ -26,19 +27,44 @@ from ..graph_store import create_graph_store_service
 from ..fusion import create_fusion_service
 from ..orchestrator import create_orchestrator
 from ...core.database.manager import db_manager
+from ...core import config
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/graph", tags=["graph"])
+_db_init_lock = threading.Lock()
+_db_init_inflight = False
+
+
+def _kickoff_db_init() -> None:
+    """Kick off DB initialization in background once, so graph endpoints fail fast."""
+    global _db_init_inflight
+    with _db_init_lock:
+        if db_manager._initialized or _db_init_inflight:
+            return
+        _db_init_inflight = True
+
+    def _runner() -> None:
+        global _db_init_inflight
+        try:
+            db_manager.ensure_initialized(
+                max_retries=config.DB_INIT_MAX_RETRIES,
+                retry_delay_seconds=config.DB_INIT_RETRY_DELAY_SECONDS,
+            )
+        except Exception as exc:
+            logger.warning("Background DB init failed: %s", exc)
+        finally:
+            with _db_init_lock:
+                _db_init_inflight = False
+
+    threading.Thread(target=_runner, daemon=True).start()
 
 
 def _ensure_db_ready() -> None:
     if db_manager._initialized:
         return
-    try:
-        db_manager.ensure_initialized()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Database connections not initialized: {exc}") from exc
+    _kickoff_db_init()
+    raise HTTPException(status_code=503, detail="Database is initializing, please retry shortly.")
 
 
 def _create_graph_builder() -> GraphBuilder:
@@ -231,6 +257,8 @@ async def get_graph_statistics() -> GraphStatistics:
         stats = builder.get_graph_statistics()
         return GraphStatistics(**stats)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get graph statistics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
