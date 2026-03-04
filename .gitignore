@@ -83,3 +83,21 @@ coverage/
 
 # 其他
 .turbo/
+
+# 文档
+docs/
+
+# 本地协作与部署文件
+CLAUDE.md
+docker-compose.external.yml
+docker-compose.yml
+.env.external
+.env
+cloudflare/
+.claude/
+nginx/
+
+# data: 保留目录结构，不跟踪数据文件
+data/**/*
+!data/**/
+!data/**/.gitkeep
