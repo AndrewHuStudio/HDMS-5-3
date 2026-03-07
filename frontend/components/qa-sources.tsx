@@ -590,7 +590,7 @@ function ChunkMarkdown({
     <div className="chunk-markdown prose-xs prose max-w-none text-xs leading-relaxed text-muted-foreground dark:prose-invert">
       <ReactMarkdown
         remarkPlugins={QA_REMARK_PLUGINS}
-        rehypePlugins={[rehypeKatex, rehypeRaw]}
+        rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }], rehypeRaw]}
         components={{
           p: ({ children }) => {
             // Skip empty paragraphs that only produce whitespace

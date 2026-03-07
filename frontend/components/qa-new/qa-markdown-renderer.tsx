@@ -14,6 +14,7 @@ import type { PluggableList } from "unified";
 import { QA_REMARK_PLUGINS } from "@/lib/qa-markdown-plugins";
 import { API_BASE, QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
 import { cn } from "@/lib/utils";
+import { isMathComplete, fixUnpairedDelimiters, extractMathBlocks, fixMathInText, ensureBlockMathSpacing } from "@/lib/math";
 
 /* ------------------------------------------------------------------ */
 /*  Helper functions (moved from qa-shell.tsx)                        */
@@ -117,6 +118,8 @@ interface QAMarkdownRendererProps {
   showStreamingCursor?: boolean;
   onImageClick?: (src: string) => void;
   className?: string;
+  /** 是否正在流式输出 */
+  isStreaming?: boolean;
 }
 
 export function QAMarkdownRenderer({
@@ -127,8 +130,34 @@ export function QAMarkdownRenderer({
   showStreamingCursor,
   onImageClick,
   className,
+  isStreaming = false,
 }: QAMarkdownRendererProps) {
   const markdownRef = useRef<HTMLDivElement>(null);
+
+  // 处理公式：流式时如果公式不完整则不渲染，完成后自动修复格式
+  const processedMarkdown = useMemo(() => {
+    if (!markdown) return '';
+
+    // 流式显示时，如果公式不完整，直接返回原始文本
+    if (isStreaming && !isMathComplete(markdown)) {
+      return markdown;
+    }
+
+    // 完成后，修复公式格式
+    let processed = markdown;
+
+    // 1. 修复不配对的分隔符
+    processed = fixUnpairedDelimiters(processed);
+
+    // 2. 提取公式块并修复
+    const mathBlocks = extractMathBlocks(processed);
+    processed = fixMathInText(processed, mathBlocks);
+
+    // 3. 确保块级公式前后有空行
+    processed = ensureBlockMathSpacing(processed);
+
+    return processed;
+  }, [markdown, isStreaming]);
 
   // Detect overflowing KaTeX display formulas and add scroll-hint class.
   useEffect(() => {
@@ -142,7 +171,7 @@ export function QAMarkdownRenderer({
         d.classList.remove("katex-overflow");
       }
     });
-  }, [markdown]);
+  }, [processedMarkdown]);
 
   const defaultComponents: Partial<Components> = useMemo(() => ({
     h2: ({ children }) => (
@@ -260,14 +289,28 @@ export function QAMarkdownRenderer({
     [defaultComponents, componentOverrides],
   );
 
+  // 流式显示时，如果公式不完整，显示原始文本（不渲染公式）
+  if (isStreaming && !isMathComplete(markdown)) {
+    return (
+      <div ref={markdownRef} className={cn("qa-markdown prose prose-sm max-w-none break-words dark:prose-invert", className)}>
+        <div className="whitespace-pre-wrap break-words">
+          {processedMarkdown}
+        </div>
+        {showStreamingCursor && (
+          <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-foreground" />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div ref={markdownRef} className={cn("qa-markdown prose prose-sm max-w-none break-words dark:prose-invert", className)}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins ?? [rehypeKatex]}
+        rehypePlugins={rehypePlugins ?? [[rehypeKatex, { strict: false, throwOnError: false }]]}
         components={mergedComponents}
       >
-        {markdown}
+        {processedMarkdown}
       </ReactMarkdown>
       {showStreamingCursor && (
         <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-foreground" />

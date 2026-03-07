@@ -651,6 +651,7 @@ function AssistantContent({
             componentOverrides={{ a: citationAnchorComponent }}
             showStreamingCursor={renderModel.showStreamingCursor}
             onImageClick={onImageClick}
+            isStreaming={isStreaming}
           />
 
           {/* Citation source panel (isolated module) */}
