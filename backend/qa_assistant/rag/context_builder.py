@@ -202,7 +202,13 @@ def build_context_and_sources(
             or ""
         )
 
-        if isinstance(file_name, str) and file_name and not pdf_is_available(file_name):
+        require_local_pdf = bool(getattr(app_config, "QA_REQUIRE_LOCAL_PDF_FOR_SOURCES", False))
+        if (
+            require_local_pdf
+            and isinstance(file_name, str)
+            and file_name
+            and not pdf_is_available(file_name)
+        ):
             continue
 
         raw_page = (

@@ -7,6 +7,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
+# Ensure all application loggers actually emit output
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -60,6 +66,7 @@ app.add_middleware(
 )
 
 app.include_router(qa_router)
+app.include_router(qa_router, prefix="/api")
 
 
 @app.get("/health")

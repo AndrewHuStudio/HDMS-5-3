@@ -212,6 +212,14 @@ QA_LLM_TIMEOUT_SECONDS = _parse_int(os.getenv("QA_LLM_TIMEOUT_SECONDS", "60"), 6
 QA_STREAM_MAX_TOKENS = _parse_int(os.getenv("QA_STREAM_MAX_TOKENS", "4096"), 4096, min_value=1)
 QA_CONTEXT_CHUNK_MAX_CHARS = _parse_int(os.getenv("QA_CONTEXT_CHUNK_MAX_CHARS", "0"), 0, min_value=0)
 QA_CONTEXT_QUOTE_MAX_CHARS = _parse_int(os.getenv("QA_CONTEXT_QUOTE_MAX_CHARS", "260"), 260, min_value=0)
+# Backward-compat safeguard:
+# if enabled, drop document sources when no local PDF is discoverable.
+# Keep disabled by default so citations/images don't disappear in deployments
+# where PDFs are stored outside scanned data roots.
+QA_REQUIRE_LOCAL_PDF_FOR_SOURCES = _parse_bool(
+    os.getenv("QA_REQUIRE_LOCAL_PDF_FOR_SOURCES", "0"),
+    False,
+)
 QA_RETRIEVAL_BRANCH_TIMEOUT_SECONDS = _parse_float(
     os.getenv("QA_RETRIEVAL_BRANCH_TIMEOUT_SECONDS", "12"),
     12.0,
