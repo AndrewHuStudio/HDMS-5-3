@@ -4,6 +4,44 @@ from typing import Dict, List, Optional, Tuple
 
 # Matches a single [N-M] marker.
 _SINGLE_CITE_RE = re.compile(r"\[(\d+)-(\d+)\]")
+_PAREN_CITE_RE = re.compile(r"[（(]\s*(\d{1,2}-\d{1,2})\s*[)）]")
+_STANDALONE_CITE_RE = re.compile(
+    r"(^|[\s，。！？；：,.!?;:、（）()【】《》<>“”\"'])"
+    r"(\d{1,2}-\d{1,2})"
+    r"(?=$|[\s，。！？；：,.!?;:、（）()【】《》<>“”\"'])",
+    flags=re.MULTILINE,
+)
+
+
+def _normalize_loose_citation_labels(text: str, valid_labels: Optional[set]) -> str:
+    """
+    Normalize loose citation labels into canonical [N-M] markers.
+
+    Supported loose forms:
+    - （2-3） / (2-3)
+    - standalone 2-3 surrounded by punctuation/whitespace
+
+    Only labels present in valid_labels are normalized to avoid false positives.
+    """
+    if not text or not valid_labels:
+        return text
+
+    def _replace_paren(match: re.Match) -> str:
+        label = str(match.group(1) or "").strip()
+        if label in valid_labels:
+            return f"[{label}]"
+        return match.group(0)
+
+    normalized = _PAREN_CITE_RE.sub(_replace_paren, text)
+
+    def _replace_standalone(match: re.Match) -> str:
+        prefix = match.group(1) or ""
+        label = str(match.group(2) or "").strip()
+        if label in valid_labels:
+            return f"{prefix}[{label}]"
+        return match.group(0)
+
+    return _STANDALONE_CITE_RE.sub(_replace_standalone, normalized)
 
 
 def normalize_citations(text: str, valid_labels: Optional[set] = None) -> Tuple[str, Dict[str, str]]:
@@ -21,6 +59,8 @@ def normalize_citations(text: str, valid_labels: Optional[set] = None) -> Tuple[
     """
     if not text:
         return text, {}
+
+    text = _normalize_loose_citation_labels(text, valid_labels)
 
     # Step 1: Collapse stacked citations — keep at most one valid marker per-doc within a stacked group.
     def _collapse_stacked(match: re.Match) -> str:

@@ -192,6 +192,8 @@ async function _streamChatOnce(
   let receivedDone = false;
   let pendingThinkingToken = "";
   let pendingAnswerToken = "";
+  let pendingEvent = "";
+  let pendingDataLines: string[] = [];
 
   const flushTokenBuffers = () => {
     if (pendingThinkingToken) {
@@ -204,67 +206,78 @@ async function _streamChatOnce(
     }
   };
 
+  const dispatchPendingEvent = () => {
+    if (!pendingEvent) {
+      pendingDataLines = [];
+      return;
+    }
+
+    const payload = pendingDataLines.join("\n");
+    try {
+      const data = JSON.parse(payload);
+      switch (pendingEvent) {
+        case "sources":
+          flushTokenBuffers();
+          callbacks.onSources(data.sources || []);
+          break;
+        case "retrieval_stats":
+          flushTokenBuffers();
+          callbacks.onRetrievalStats(data);
+          break;
+        case "graph":
+          flushTokenBuffers();
+          callbacks.onGraph({
+            nodes: data.nodes || [],
+            edges: data.edges || [],
+          });
+          break;
+        case "thinking":
+          pendingThinkingToken += data.content || "";
+          break;
+        case "thinking_done":
+          flushTokenBuffers();
+          callbacks.onThinkingDone?.();
+          break;
+        case "status":
+          flushTokenBuffers();
+          callbacks.onStatus(data.stage || "", data.message || "");
+          break;
+        case "answer":
+          pendingAnswerToken += data.content || "";
+          break;
+        case "answer_replaced":
+          flushTokenBuffers();
+          callbacks.onAnswerReplaced?.(data.content || "", data.sources);
+          break;
+        case "done":
+          flushTokenBuffers();
+          callbacks.onDone(data);
+          receivedDone = true;
+          log("done", "stream completed");
+          break;
+        case "error":
+          flushTokenBuffers();
+          callbacks.onError(data.detail || "Unknown error");
+          receivedDone = true;
+          log("error", "server error event", { detail: data.detail });
+          break;
+      }
+    } catch {
+      // skip malformed JSON events
+    } finally {
+      pendingEvent = "";
+      pendingDataLines = [];
+    }
+  };
+
   const processLines = (lines: string[]) => {
-    let currentEvent = "";
     for (const line of lines) {
       if (line.startsWith("event: ")) {
-        currentEvent = line.slice(7).trim();
-      } else if (line.startsWith("data: ") && currentEvent) {
-        try {
-          const data = JSON.parse(line.slice(6));
-          switch (currentEvent) {
-            case "sources":
-              flushTokenBuffers();
-              callbacks.onSources(data.sources || []);
-              break;
-            case "retrieval_stats":
-              flushTokenBuffers();
-              callbacks.onRetrievalStats(data);
-              break;
-            case "graph":
-              flushTokenBuffers();
-              callbacks.onGraph({
-                nodes: data.nodes || [],
-                edges: data.edges || [],
-              });
-              break;
-            case "thinking":
-              pendingThinkingToken += data.content || "";
-              break;
-            case "thinking_done":
-              flushTokenBuffers();
-              callbacks.onThinkingDone?.();
-              break;
-            case "status":
-              flushTokenBuffers();
-              callbacks.onStatus(data.stage || "", data.message || "");
-              break;
-            case "answer":
-              pendingAnswerToken += data.content || "";
-              break;
-            case "answer_replaced":
-              flushTokenBuffers();
-              callbacks.onAnswerReplaced?.(data.content || "", data.sources);
-              break;
-            case "done":
-              flushTokenBuffers();
-              callbacks.onDone(data);
-              receivedDone = true;
-              log("done", "stream completed");
-              break;
-            case "error":
-              flushTokenBuffers();
-              callbacks.onError(data.detail || "Unknown error");
-              receivedDone = true;
-              log("error", "server error event", { detail: data.detail });
-              break;
-          }
-        } catch {
-          // skip malformed JSON lines
-        }
-        currentEvent = "";
+        pendingEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ")) {
+        pendingDataLines.push(line.slice(6));
       } else if (line.trim() === "") {
-        currentEvent = "";
+        dispatchPendingEvent();
       }
     }
     flushTokenBuffers();
@@ -284,6 +297,8 @@ async function _streamChatOnce(
   if (buffer.trim()) {
     processLines(buffer.split("\n"));
   }
+  // Flush a final pending event if stream ended without a trailing blank line.
+  dispatchPendingEvent();
 
   // Safety fallback: if we never received a done event, fire it
   if (!receivedDone) {

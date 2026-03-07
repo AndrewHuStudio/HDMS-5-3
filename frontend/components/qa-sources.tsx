@@ -134,6 +134,7 @@ export function QASources({
   const setPreviewCache = setExternalPreviewCache ?? setLocalPreviewCache;
   // If parent provides a cache, parent is responsible for prefetching.
   const prefetchingKeysRef = useRef<Set<string>>(new Set());
+  const prefetchedImageUrlsRef = useRef<Set<string>>(new Set());
 
   if (!sourcesNormalized || sourcesNormalized.length === 0) return null;
 
@@ -175,6 +176,42 @@ export function QASources({
         });
     });
   }, [externalPreviewCache, previewCache, query, setExternalPreviewCache, sourcesNormalized]);
+
+  // Prefetch image binaries as soon as source metadata/preview metadata is available.
+  // This reduces the delay between answer render and first visible image.
+  useEffect(() => {
+    const urls: string[] = [];
+
+    for (const source of sourcesNormalized) {
+      if (source.image_url) urls.push(source.image_url);
+      if (Array.isArray(source.image_urls)) {
+        urls.push(...source.image_urls.filter(Boolean));
+      }
+    }
+
+    for (const previews of Object.values(previewCache)) {
+      for (const preview of previews || []) {
+        for (const image of preview.images || []) {
+          if (image?.url) urls.push(image.url);
+        }
+      }
+    }
+
+    const MAX_PREFETCH_IMAGES = 12;
+    for (const rawUrl of urls) {
+      if (!rawUrl) continue;
+      const resolved = resolveAssetLink(rawUrl);
+      if (!resolved) continue;
+      if (prefetchedImageUrlsRef.current.has(resolved)) continue;
+      prefetchedImageUrlsRef.current.add(resolved);
+
+      const img = new Image();
+      img.decoding = "async";
+      img.src = resolved;
+
+      if (prefetchedImageUrlsRef.current.size >= MAX_PREFETCH_IMAGES) break;
+    }
+  }, [previewCache, sourcesNormalized]);
 
   return (
     <div

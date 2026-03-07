@@ -610,7 +610,9 @@ function AssistantContent({
     hasRetrievalStats: Boolean(retrievalStats),
   });
 
-  const hasSourcePanel = Boolean(sourcesNormalized && sourcesNormalized.length > 0 && !isStreaming);
+  // Show source panel as soon as retrieval sources arrive, even during streaming.
+  // This enables early preview fetching and makes citations visible earlier.
+  const hasSourcePanel = Boolean(sourcesNormalized && sourcesNormalized.length > 0);
   const useSidebarSourceLayout = hasSourcePanel && !embedded;
 
   return (
