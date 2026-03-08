@@ -23,7 +23,8 @@ const ORDERED_LIST_RE = /^\s{0,3}\d+[.)]\s+/;
 const LIST_CONTINUATION_RE = /^\s{2,}\S/;
 const TABLE_SEPARATOR_LINE_RE = /^[\s|:\-]+$/;
 const TABLE_BOUNDARY_NOTE_RE = /^(?:注|备注|说明|注释|提示|注意)\s*[：:]/;
-const FULLWIDTH_PIPE_RE = /｜/g;
+// OCR/LLM outputs may use visual pipe variants (丨│┃¦...) instead of ASCII '|'.
+const PIPE_VARIANT_RE = /[｜丨│┃¦￨￤]/g;
 
 function buildBlock(type: MarkdownBlockType, start: number, end: number, lines: string[]): MarkdownBlock {
   return {
@@ -42,7 +43,7 @@ function parseCodeFenceMarker(line: string): string | null {
 }
 
 function normalizePipeDelimiters(line: string): string {
-  return (line || "").replace(FULLWIDTH_PIPE_RE, "|");
+  return (line || "").replace(PIPE_VARIANT_RE, "|");
 }
 
 function looksLikeTableBoundaryNoteRow(trimmedLine: string): boolean {

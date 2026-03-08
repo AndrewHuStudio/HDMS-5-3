@@ -67,6 +67,37 @@ function countRenderableMarkdownImages(text: string): number {
   return count;
 }
 
+/**
+ * During streaming, hide trailing incomplete GFM table fragments.
+ * A table is "incomplete" if it has pipe-delimited rows at the end
+ * but no separator row (|---|---|) following the header.
+ */
+function stripTrailingIncompleteTable(text: string): string {
+  if (!text) return text;
+  const lines = text.split("\n");
+  // Walk backwards to find trailing pipe-heavy lines without a separator
+  let trailingPipeStart = -1;
+  let hasSeparator = false;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+    const pipeCount = (trimmed.match(/\|/g) || []).length;
+    if (pipeCount >= 2 && /^\|/.test(trimmed)) {
+      if (/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(trimmed)) {
+        hasSeparator = true;
+      }
+      trailingPipeStart = i;
+    } else {
+      break;
+    }
+  }
+  // If we found trailing pipe lines but no separator, they're an incomplete table
+  if (trailingPipeStart >= 0 && !hasSeparator) {
+    return lines.slice(0, trailingPipeStart).join("\n");
+  }
+  return text;
+}
+
 export function buildAnswerMarkdown(args: BuildAnswerMarkdownArgs): string {
   const {
     content,
@@ -90,8 +121,12 @@ export function buildAnswerMarkdown(args: BuildAnswerMarkdownArgs): string {
   });
 
   if (phase !== "final") {
+    // During streaming, strip trailing incomplete table to prevent raw pipe text flash
+    const safeContent = streamLike
+      ? stripTrailingIncompleteTable(withoutInlineCitations)
+      : withoutInlineCitations;
     const withPhaseImages = injectAnswerImagesByPhase({
-      markdown: withoutInlineCitations,
+      markdown: safeContent,
       sources,
       precedingQuestion,
       renderPhase: phase,

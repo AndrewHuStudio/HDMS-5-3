@@ -13,7 +13,8 @@ import type { NormalizeContext } from "../types";
 import { bumpCounter } from "../utils";
 
 const TABLE_BOUNDARY_NOTE_RE = /^(?:注|备注|说明|注释|提示|注意)\s*[：:]/;
-const FULLWIDTH_PIPE_RE = /｜/g;
+// OCR/LLM outputs may use visual pipe variants (丨│┃¦...) instead of ASCII '|'.
+const PIPE_VARIANT_RE = /[｜丨│┃¦￨￤]/g;
 
 function stripInlineMdWrappers(value: string): string {
   let s = (value || "").trim();
@@ -30,7 +31,7 @@ function escapeTableCell(value: string): string {
 }
 
 function normalizePipeDelimiters(line: string): string {
-  return (line || "").replace(FULLWIDTH_PIPE_RE, "|");
+  return (line || "").replace(PIPE_VARIANT_RE, "|");
 }
 
 export const loosePipeTables = {

@@ -50,18 +50,20 @@ type MarkdownShapeMetrics = {
 
 function inspectMarkdownShape(markdown: string): MarkdownShapeMetrics {
   const text = String(markdown || "");
+  const normalized = text.replace(/[｜丨│┃¦￨￤]/g, "|");
   const lines = text.split("\n");
+  const normalizedLines = normalized.split("\n");
   let gfmTableBlocks = 0;
   let pipeHeavyLines = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? "";
+  for (let i = 0; i < normalizedLines.length; i++) {
+    const line = normalizedLines[i] ?? "";
     const pipeCount = (line.match(/\|/g) || []).length;
     if (pipeCount >= 2) pipeHeavyLines += 1;
 
     const headerLike = /^\s*\|.+\|\s*$/.test(line.trim());
     const sepLike = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(
-      (lines[i + 1] || "").trim(),
+      (normalizedLines[i + 1] || "").trim(),
     );
     if (headerLike && sepLike) gfmTableBlocks += 1;
   }

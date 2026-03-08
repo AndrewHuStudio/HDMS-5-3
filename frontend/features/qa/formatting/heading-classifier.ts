@@ -22,6 +22,7 @@ export interface HeadingClassification {
 
 const SENTENCE_PUNCT_RE = /[，,:：；。！？.!?]/g;
 const SENTENCE_END_RE = /[。！？.!?；;:]$/;
+const PIPE_VARIANT_RE = /[｜丨│┃¦￨￤]/g;
 const STRUCTURED_HEADING_PREFIX_RE =
   /^(?:#{1,6}\s+|[一二三四五六七八九十]+[、.．]\s*|[（(][一二三四五六七八九十]+[)）]\s*|\d{1,2}[.、．]\s+|[.。]?\d{1,2}(?:\.\d{1,2}){1,3}\s*)/;
 const INLINE_HEADING_SPLIT_RE =
@@ -47,7 +48,8 @@ function punctuationDensity(text: string): number {
 
 function separatorDensity(text: string): number {
   if (!text) return 0;
-  const separatorCount = (text.match(/[|｜]+/g) || []).join("").length;
+  const normalized = text.replace(PIPE_VARIANT_RE, "|");
+  const separatorCount = (normalized.match(/\|+/g) || []).join("").length;
   return separatorCount / Math.max(text.length, 1);
 }
 
@@ -74,10 +76,11 @@ export function splitInlineHeadingAndBody(line: string): string {
   if (!prefixMatch) return line;
   const prefix = prefixMatch[0];
   const tail = trimmed.slice(prefix.length).trim();
+  const normalizedTail = tail.replace(PIPE_VARIANT_RE, "|");
   if (!tail) return line;
 
-  const pipeSegments = tail
-    .split(/[|｜]+/)
+  const pipeSegments = normalizedTail
+    .split(/\|+/)
     .map((segment) => segment.trim())
     .filter(Boolean);
   const looksLikeInlineEnumeration =
@@ -105,15 +108,15 @@ export function splitInlineHeadingAndBody(line: string): string {
     }
   }
 
-  const firstPipe = tail.search(/[|｜]/);
+  const firstPipe = normalizedTail.indexOf("|");
   const tableSignal =
-    /\|\|/.test(tail) ||
-    /\|\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+/.test(tail) ||
-    (tail.match(/[|｜]/g) || []).length >= 4;
+    /\|\|/.test(normalizedTail) ||
+    /\|\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+/.test(normalizedTail) ||
+    (normalizedTail.match(/\|/g) || []).length >= 4;
   if (firstPipe <= 10 && !tableSignal) return line;
 
-  const headingBody = tail.slice(0, firstPipe).trim();
-  const remainder = tail.slice(firstPipe).replace(/^[|｜\s]+/, "").trim();
+  const headingBody = normalizedTail.slice(0, firstPipe).trim();
+  const remainder = normalizedTail.slice(firstPipe).replace(/^[|\s]+/, "").trim();
   if (!headingBody || !remainder) return line;
   if (!tableSignal && remainder.length < 14 && !/[，,:：；。！？.!?]/.test(remainder)) return line;
 

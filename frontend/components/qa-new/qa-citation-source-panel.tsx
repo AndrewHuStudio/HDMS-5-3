@@ -55,7 +55,14 @@ export function useCitationState({ sources, messageId, scrollRef, onCitationJump
     const container = scrollRef?.current ?? (document.querySelector(".qa-scrollbar") as HTMLElement | null);
     if (!container) return;
     const savedScrollTop = container.scrollTop;
-    const target = document.getElementById(`source-${messageId}-${label}`);
+
+    // Try exact ID first, then fallback to doc-level label (e.g. "1-1" → "1")
+    const exactId = `source-${messageId}-${label}`;
+    let target = document.getElementById(exactId);
+    if (!target) {
+      const docLabel = label.split("-")[0];
+      target = document.getElementById(`source-${messageId}-${docLabel}`);
+    }
     if (!target) return;
 
     // Calculate target's offset relative to the scroll container

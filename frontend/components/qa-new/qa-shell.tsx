@@ -376,6 +376,7 @@ export function QAShell({
                         onFillInput={onInputChange}
                         onImageClick={openLightbox}
                         onCitationJump={handleCitationJump}
+                        scrollRef={scrollRef}
                       />
                     ) : (
                       <p className="whitespace-pre-wrap">{message.content}</p>
