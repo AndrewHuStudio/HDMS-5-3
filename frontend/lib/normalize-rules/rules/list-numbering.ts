@@ -14,6 +14,11 @@ function normalizeListContent(content: string): string {
   let orderedCounter = 0;
   let changed = false;
 
+  const isSectionBreakLine = (trimmed: string): boolean =>
+    /^#{1,6}\s+/.test(trimmed) ||
+    /^[-*_]{3,}$/.test(trimmed) ||
+    /^\*\*.+\*\*$/.test(trimmed);
+
   const isOrderedListInterludeLine = (trimmed: string): boolean => {
     const pipeCount = (trimmed.match(/\|/g) || []).length;
     return (
@@ -28,12 +33,41 @@ function normalizeListContent(content: string): string {
     );
   };
 
+  const isFormulaOrExplanatoryInterlude = (trimmed: string): boolean =>
+    /^\$\$/.test(trimmed) ||
+    /^\\\[$/.test(trimmed) ||
+    /^\\\]$/.test(trimmed) ||
+    /^(?:(?:where|wherein|note|notes)\b|式中|其中|注|说明)/i.test(trimmed);
+
+  const orderedLineRe =
+    /^(\s*)(\*{1,2})?\s*(\d+)([.)．])(\s*)(.+?)(?:\s*(\*{1,2}))?\s*$/;
+
+  const hasUpcomingOrderedSibling = (lineIndex: number, indent: string): boolean => {
+    const maxLookahead = Math.min(lines.length, lineIndex + 9);
+    for (let i = lineIndex + 1; i < maxLookahead; i += 1) {
+      const probeRaw = lines[i] ?? "";
+      const probe = probeRaw.trim();
+      if (!probe) continue;
+      if (isSectionBreakLine(probe)) return false;
+
+      const orderedProbe = probeRaw.match(orderedLineRe);
+      if (orderedProbe) {
+        return (orderedProbe[1] ?? "") === indent;
+      }
+
+      if (isOrderedListInterludeLine(probe) || isFormulaOrExplanatoryInterlude(probe)) {
+        continue;
+      }
+    }
+    return false;
+  };
+
   const normalized = lines
-    .map((line) => {
+    .map((line, idx) => {
       const trimmed = line.trim();
       if (!trimmed) return line;
 
-      const orderedMatch = line.match(/^(\s*)(\*{1,2})?\s*(\d+)([.)．])(\s*)(.+?)(?:\s*(\*{1,2}))?\s*$/);
+      const orderedMatch = line.match(orderedLineRe);
       if (orderedMatch) {
         const indent = orderedMatch[1] ?? "";
         const wrapperOpen = orderedMatch[2] ?? "";
@@ -71,11 +105,7 @@ function normalizeListContent(content: string): string {
         return rewritten;
       }
 
-      const sectionBreak =
-        /^#{1,6}\s+/.test(trimmed) ||
-        /^[-*_]{3,}$/.test(trimmed) ||
-        /^\*\*.+\*\*$/.test(trimmed);
-      if (sectionBreak) {
+      if (isSectionBreakLine(trimmed)) {
         orderedCounter = 0;
         activeIndent = "";
       }
@@ -85,7 +115,14 @@ function normalizeListContent(content: string): string {
         return line;
       }
 
-      if (orderedCounter > 0 && isOrderedListInterludeLine(trimmed)) {
+      if (
+        orderedCounter > 0 &&
+        (
+          isOrderedListInterludeLine(trimmed) ||
+          isFormulaOrExplanatoryInterlude(trimmed) ||
+          hasUpcomingOrderedSibling(idx, activeIndent)
+        )
+      ) {
         return line;
       }
 

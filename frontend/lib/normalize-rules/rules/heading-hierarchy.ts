@@ -12,7 +12,7 @@ import {
 import { registerRules } from "../registry";
 import type { NormalizeContext } from "../types";
 import { recordHeadingDecision } from "../utils";
-import { MAJOR_SECTION_TITLE_RE, normalizeHeadingTitle } from "./related-concepts";
+import { normalizeHeadingTitle } from "./related-concepts";
 
 const HEADING_LINE_RE = /^(#{1,6})\s*(.*?)\s*$/;
 
@@ -66,9 +66,7 @@ export const headingHierarchy = {
 
       const isExplicitMarkdownHeading = /^#{1,6}\s+/.test(trimmed);
       if (isExplicitMarkdownHeading) {
-        let level = originalLevel;
-        if (MAJOR_SECTION_TITLE_RE.test(semanticTitle)) level = 2;
-        level = Math.max(2, Math.min(6, level));
+        const level = Math.max(1, Math.min(6, originalLevel));
         recordHeadingDecision(ctx.diagnostics, "heading", ["explicit-markdown-heading"]);
         return `${"#".repeat(level)} ${rawTitle}`;
       }
@@ -83,9 +81,7 @@ export const headingHierarchy = {
 
       if (classification.decision !== "heading") return semanticTitle;
 
-      let level = originalLevel;
-      if (MAJOR_SECTION_TITLE_RE.test(semanticTitle)) level = 2;
-      level = Math.max(2, Math.min(6, level));
+      const level = Math.max(1, Math.min(6, originalLevel));
       return `${"#".repeat(level)} ${rawTitle}`;
     });
 
@@ -109,7 +105,6 @@ export const headingHierarchy = {
       if (prevHeadingLevel > 0 && level > prevHeadingLevel + 1) {
         level = prevHeadingLevel + 1;
       }
-      if (level < 2) level = 2;
 
       out.push(`${"#".repeat(level)} ${title}`);
       prevHeadingLevel = level;

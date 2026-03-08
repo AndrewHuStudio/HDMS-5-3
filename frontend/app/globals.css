@@ -423,6 +423,35 @@
   margin-bottom: 0.5rem;
 }
 
+/* QA ordinal line rendering (separated from heading rendering) */
+.qa-markdown .qa-ordinal-paragraph {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.35rem;
+  align-items: start;
+}
+
+.qa-markdown .qa-ordinal-prefix {
+  display: inline-block;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--foreground) 80%, var(--primary) 20%);
+  white-space: nowrap;
+}
+
+.qa-markdown .qa-ordinal-prefix--cn_major {
+  color: color-mix(in oklab, var(--primary) 78%, var(--foreground) 22%);
+}
+
+.qa-markdown .qa-ordinal-prefix--arabic,
+.qa-markdown .qa-ordinal-prefix--cn_nested,
+.qa-markdown .qa-ordinal-prefix--circled {
+  color: color-mix(in oklab, var(--foreground) 72%, var(--primary) 28%);
+}
+
+.qa-markdown .qa-ordinal-body {
+  min-width: 0;
+}
+
 /* Improve QA body readability: loosen text line spacing. */
 .qa-markdown p,
 .qa-markdown li {

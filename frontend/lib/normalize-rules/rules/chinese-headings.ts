@@ -31,6 +31,8 @@ const CN_H3_RE = /^(?:\*{2})?\s*(\d+)[)）]\s*(.+?)(?:\*{2})?\s*$/;
 const CIRCLED_H3_RE = /^(?:\*{2})?\s*([\u2460-\u2469])\s*(.+?)(?:\*{2})?\s*$/;
 const DECIMAL_SECTION_RE =
   /^(?:\*{2})?\s*[.。]?\s*(\d{1,2}(?:\.\d{1,2}){1,3})\s*(.+?)(?:\*{2})?\s*$/;
+const BULLET_LINE_RE = /^\s{0,3}[-*+]\s+/;
+const ORDERED_LIST_LINE_RE = /^\s{0,3}\d+[.)．、]\s+/;
 
 export const chineseHeadings = {
   id: "chinese-headings",
@@ -54,6 +56,18 @@ export const chineseHeadings = {
         if (t) return t;
       }
       return null;
+    };
+
+    const isLikelyListHeadingLeadIn = (idx: number, title: string): boolean => {
+      const normalized = String(title || "").trim();
+      const next = nextNonEmptyLine(idx) || "";
+      const followedByList = BULLET_LINE_RE.test(next) || ORDERED_LIST_LINE_RE.test(next);
+      if (!followedByList) return false;
+      if (/[：:]$/.test(normalized)) return true;
+      // Numbered lead-in lines followed by list blocks are usually list items
+      // instead of real headings, even without a trailing colon.
+      if (normalized.length <= 40 && !/[。！？.!?；;]$/.test(normalized)) return true;
+      return false;
     };
 
     for (let idx = 0; idx < lines.length; idx++) {
@@ -112,6 +126,10 @@ export const chineseHeadings = {
       match = trimmed.match(NUM_H2_RE);
       if (match) {
         const title = match[2].trim();
+        if (isLikelyListHeadingLeadIn(idx, title)) {
+          result.push(line);
+          continue;
+        }
         const classification = classifyHeadingCandidate(`${match[1]}. ${title}`, {
           previousNonEmptyLine: prevNonEmptyLine(idx) || "",
           nextNonEmptyLine: nextNonEmptyLine(idx) || "",

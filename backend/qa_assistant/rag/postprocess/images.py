@@ -283,3 +283,22 @@ def normalize_image_reference_markers(text: str, valid_labels: Optional[set[str]
         out.append(normalized)
 
     return "".join(out)
+
+
+def remap_structured_image_markers(text: str, remap: dict[str, str]) -> str:
+    """
+    Apply citation-label remap to structured image markers.
+
+    Example:
+      [[IMG:1-5#2]] with remap { "1-5": "1-1" } -> [[IMG:1-1#2]]
+    """
+    if not text or not remap:
+        return text
+
+    def _repl(match: re.Match) -> str:
+        old_label = str(match.group(1) or "").strip()
+        raw_ordinal = str(match.group(2) or "").strip()
+        new_label = remap.get(old_label, old_label)
+        return _format_structured_img_marker(new_label, raw_ordinal, None)
+
+    return _STRUCTURED_IMG_MARKER_RE.sub(_repl, text)

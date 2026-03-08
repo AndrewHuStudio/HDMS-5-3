@@ -15,6 +15,8 @@ import { QA_REMARK_PLUGINS } from "@/lib/qa-markdown-plugins";
 import { API_BASE, QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
 import { cn } from "@/lib/utils";
 import { isMathComplete, fixUnpairedDelimiters, extractMathBlocks, fixMathInText, ensureBlockMathSpacing } from "@/lib/math";
+import { QA_HEADING_COMPONENTS } from "@/features/qa/render/heading-components";
+import { renderOrdinalParagraph } from "@/features/qa/render/ordinal-rendering";
 
 /* ------------------------------------------------------------------ */
 /*  Helper functions (moved from qa-shell.tsx)                        */
@@ -174,21 +176,7 @@ export function QAMarkdownRenderer({
   }, [processedMarkdown]);
 
   const defaultComponents: Partial<Components> = useMemo(() => ({
-    h2: ({ children }) => (
-      <h2 className="qa-heading-1 mt-5 mb-2 text-base font-bold border-l-4 border-primary pl-2">
-        {children}
-      </h2>
-    ),
-    h3: ({ children }) => (
-      <h3 className="qa-heading-2 mt-4 mb-1.5 text-[15px] font-semibold text-primary/85">
-        {children}
-      </h3>
-    ),
-    h4: ({ children }) => (
-      <h4 className="qa-heading-3 mt-3 mb-1 text-sm font-medium text-foreground/80">
-        {children}
-      </h4>
-    ),
+    ...QA_HEADING_COMPONENTS,
     p: ({ children }) => {
       const flattened = flattenReactText(children).trim();
       const isPlainTextOnly =
@@ -213,6 +201,11 @@ export function QAMarkdownRenderer({
         );
       }
 
+      const ordinalNode = renderOrdinalParagraph(children);
+      if (ordinalNode) {
+        return <p className="qa-ordinal-paragraph mb-3 last:mb-0">{ordinalNode}</p>;
+      }
+
       return <p className="mb-3 last:mb-0">{children}</p>;
     },
     ul: ({ children }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
@@ -229,6 +222,10 @@ export function QAMarkdownRenderer({
       const content = (isRetrievalReason || isRetrievalList)
         ? highlightRetrievalDocNames(children, "retrieval-doc")
         : children;
+      const ordinalNode = renderOrdinalParagraph(content);
+      if (ordinalNode) {
+        return <li className="qa-ordinal-list-item mb-1.5 last:mb-0">{ordinalNode}</li>;
+      }
       return <li className="mb-1.5 last:mb-0">{content}</li>;
     },
     strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
@@ -250,7 +247,7 @@ export function QAMarkdownRenderer({
       </blockquote>
     ),
     table: ({ children }) => (
-      <div className="qa-table-wrap mb-2 overflow-x-hidden rounded-md border border-border/80 bg-white/90 dark:bg-background/75">
+      <div className="qa-table-wrap mb-2 overflow-x-auto rounded-md border border-border/80 bg-white/90 dark:bg-background/75">
         <table className="w-full table-fixed border-collapse text-xs">{children}</table>
       </div>
     ),

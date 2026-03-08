@@ -106,4 +106,6 @@ def postprocess_answer(text: str, valid_labels: Optional[set] = None) -> Tuple[s
     text = pp_math.unescape_dollar_delimiters(text)
     # Citation dedup and index remap (needs chunk_id mapping).
     text, remap = pp_citations.normalize_citations(text, valid_labels)
+    # Keep structured image markers aligned with remapped citation labels.
+    text = pp_images.remap_structured_image_markers(text, remap)
     return text, remap

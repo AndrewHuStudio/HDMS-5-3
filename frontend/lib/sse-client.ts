@@ -272,12 +272,33 @@ async function _streamChatOnce(
 
   const processLines = (lines: string[]) => {
     for (const line of lines) {
-      if (line.startsWith("event: ")) {
-        pendingEvent = line.slice(7).trim();
-      } else if (line.startsWith("data: ")) {
-        pendingDataLines.push(line.slice(6));
-      } else if (line.trim() === "") {
+      const normalizedLine = line.endsWith("\r") ? line.slice(0, -1) : line;
+
+      if (normalizedLine.trim() === "") {
         dispatchPendingEvent();
+        continue;
+      }
+
+      // SSE comment/heartbeat lines start with ":" and should be ignored.
+      if (normalizedLine.startsWith(":")) {
+        continue;
+      }
+
+      const separatorIndex = normalizedLine.indexOf(":");
+      if (separatorIndex < 0) {
+        continue;
+      }
+
+      const field = normalizedLine.slice(0, separatorIndex);
+      let value = normalizedLine.slice(separatorIndex + 1);
+      if (value.startsWith(" ")) {
+        value = value.slice(1);
+      }
+
+      if (field === "event") {
+        pendingEvent = value.trim();
+      } else if (field === "data") {
+        pendingDataLines.push(value);
       }
     }
     flushTokenBuffers();

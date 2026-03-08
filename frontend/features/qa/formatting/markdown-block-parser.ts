@@ -204,6 +204,13 @@ export function parseMarkdownBlocks(text: string): MarkdownBlock[] {
           let peek = index + 1;
           while (peek < lines.length && !(lines[peek] ?? "").trim()) peek++;
           const afterBlank = lines[peek] ?? "";
+          if (isLikelyTableRow(afterBlank)) {
+            // End the list before a following table block. Keep one trailing
+            // blank line attached to list for stable spacing.
+            blockLines.push(nextLine);
+            index += 1;
+            break;
+          }
           if (isListStart(afterBlank) || LIST_CONTINUATION_RE.test(afterBlank)) {
             // Absorb blank lines and continue the list block
             while (index < peek) {
@@ -215,6 +222,11 @@ export function parseMarkdownBlocks(text: string): MarkdownBlock[] {
           // List ends here — absorb the trailing blank line and stop
           blockLines.push(nextLine);
           index += 1;
+          break;
+        }
+        if (isLikelyTableRow(nextLine)) {
+          // Do not swallow table-looking rows into a preceding list block.
+          // Let the main parser handle them as independent table blocks.
           break;
         }
         if (isListStart(nextLine) || LIST_CONTINUATION_RE.test(nextLine)) {

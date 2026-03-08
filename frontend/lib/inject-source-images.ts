@@ -433,7 +433,16 @@ export function injectSourceImages(
   query?: string,
   options: InjectSourceImagesOptions = {}
 ): string {
-  if (!text || !sources || sources.length === 0) return text;
+  if (!text) return text;
+  if (!sources || sources.length === 0) {
+    // Never leak structured IMG protocol markers to users when source payload
+    // is missing (or filtered out). Keep plain text readable.
+    return text
+      .replace(STRUCTURED_IMG_ANCHOR_RE, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/([（(])\s+([)）])/g, "$1$2")
+      .replace(/\n{3,}/g, "\n\n");
+  }
   const streaming = Boolean(options.streaming);
   const allowAppendixFallback = options.allowAppendixFallback ?? !streaming;
   const allowPlaceholderReplacement = options.allowPlaceholderReplacement ?? !streaming;

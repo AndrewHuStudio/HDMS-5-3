@@ -30,6 +30,8 @@ export function normalizeCitations(text: string, sources: SourceInfo[]): string 
     (line) => line.replace(/\[\d{1,2}-\d{1,2}\]/g, ""),
   );
 
-  result = sanitizeAnswerCitations({ text: result, validLabels });
+  if (validLabels.size > 0) {
+    result = sanitizeAnswerCitations({ text: result, validLabels });
+  }
   return result;
 }

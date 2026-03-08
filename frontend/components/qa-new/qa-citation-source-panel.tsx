@@ -1,13 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
 import type { Components } from "react-markdown";
 import type { SourceInfo } from "@/features/qa/types";
 import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
 import {
+  buildAnswerCitationAnchorComponent,
   buildCitationLabelIndexMap,
-  CitationLink,
 } from "@/features/qa/citation-engine";
 import { QASources } from "@/components/qa-sources";
 import { cn } from "@/lib/utils";
@@ -72,22 +71,17 @@ export function useCitationState({ sources, messageId, scrollRef, onCitationJump
     setTimeout(() => target.classList.remove("qa-source-flash"), 1200);
   }, [messageId, scrollRef, onCitationJump]);
 
-  const citationAnchorComponent: Components["a"] = useMemo(() => {
-    const AnchorComponent = ({ href, children }: { href?: string; children?: ReactNode }) => (
-      <CitationLink
-        href={href}
-        sources={sourcesNormalized}
-        labelIndexMap={labelIndexMap}
-        activeInstanceId={activeInstanceId}
-        onCitationHover={setActiveInstanceId}
-        onCitationSelect={handleCitationSelect}
-      >
-        {children}
-      </CitationLink>
-    );
-    AnchorComponent.displayName = "CitationAnchor";
-    return AnchorComponent;
-  }, [sourcesNormalized, labelIndexMap, activeInstanceId, handleCitationSelect]);
+  const citationAnchorComponent: Components["a"] = useMemo(
+    () =>
+      buildAnswerCitationAnchorComponent({
+        sources: sourcesNormalized,
+        labelIndexMap,
+        activeInstanceId,
+        onCitationHover: setActiveInstanceId,
+        onCitationSelect: handleCitationSelect,
+      }),
+    [sourcesNormalized, labelIndexMap, activeInstanceId, handleCitationSelect],
+  );
 
   return {
     sourcesNormalized,

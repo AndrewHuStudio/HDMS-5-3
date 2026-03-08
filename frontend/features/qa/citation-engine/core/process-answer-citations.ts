@@ -16,6 +16,15 @@ interface ProcessAnswerCitationsArgs {
   isStreaming?: boolean;
 }
 
+function collectCitationLabelsFromText(text: string): Set<string> {
+  const labels = new Set<string>();
+  for (const match of text.matchAll(/\[(\d{1,2}-\d{1,2})\]/g)) {
+    const label = (match[1] || "").trim();
+    if (label) labels.add(label);
+  }
+  return labels;
+}
+
 /**
  * Keep answer-body citation processing in one place so renderers can stay thin.
  */
@@ -25,9 +34,13 @@ export function processAnswerCitations(args: ProcessAnswerCitationsArgs): string
 
   const streaming = Boolean(isStreaming);
   const normalized = streaming ? text : normalizeCitations(text, sources);
+  const validLabels = collectValidCitationLabels(sources);
+  const fallbackLabels = validLabels.size > 0
+    ? validLabels
+    : collectCitationLabelsFromText(normalized);
   const withAnchors = streaming
     ? normalized
-    : convertCitationsToAnchors(normalized, collectValidCitationLabels(sources));
+    : convertCitationsToAnchors(normalized, fallbackLabels);
   const withCircledFallback = streaming
     ? withAnchors
     : convertCircledCitationsToAnchors(withAnchors, sources);
