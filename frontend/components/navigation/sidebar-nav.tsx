@@ -55,8 +55,11 @@ export function SidebarNav({ items, activeId, onNavigate }: SidebarNavProps) {
               toggleExpand(item.id);
             } else if (item.href) {
               router.push(item.href);
+            } else if (onNavigate) {
+              onNavigate(item.id);
             } else {
-              onNavigate?.(item.id);
+              // 工具子项：不在 /reviews 页面时，跳转到 /reviews 并激活该工具
+              router.push(`/reviews?tool=${item.id}`);
             }
           }}
           className={cn(

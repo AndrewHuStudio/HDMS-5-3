@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import "@/features";
 import { Button } from "@/components/ui/button";
-import { CityScene, type ImportedMeshInfo, type ModelFileType, type ViewMode } from "@/components/city-scene";
+import { CityScene, type ImportedMeshInfo, type ViewMode } from "@/components/city-scene";
 import { ViewControls } from "@/components/view-controls";
-import { ModelUploader, type LayerInfo } from "@/components/model-uploader";
+import { ModelUploader } from "@/components/model-uploader";
 import { AppShell } from "@/components/app-shell";
 import { ToolPanelWrapper } from "@/components/tools/tool-panel-wrapper";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -17,7 +17,7 @@ import {
   REVIEW_TOOL_IDS,
   showOnlyReviewToolVisuals,
 } from "@/lib/review-visual-controls";
-import { useModelStore } from "@/lib/stores/model-store";
+import { useModelLoader } from "@/lib/hooks/use-model-loader";
 import { useHeightCheckStore } from "@/features/height-check/store";
 import { useSetbackCheckStore } from "@/features/setback-check/store";
 import { useSightCorridorStore } from "@/features/sight-corridor/store";
@@ -43,19 +43,21 @@ export default function ReviewsPage() {
   const [rightPanelWidth, setRightPanelWidth] = useState(360);
   const [isResizing, setIsResizing] = useState(false);
 
-  const externalModelUrl = useModelStore((state) => state.externalModelUrl);
-  const externalModelType = useModelStore((state) => state.externalModelType);
-  const externalModelName = useModelStore((state) => state.externalModelName);
-  const modelError = useModelStore((state) => state.modelError);
-  const setExternalModel = useModelStore((state) => state.setExternalModel);
-  const setModelFilePath = useModelStore((state) => state.setModelFilePath);
-  const setModelLayers = useModelStore((state) => state.setModelLayers);
-  const setModelBounds = useModelStore((state) => state.setModelBounds);
-  const setModelScale = useModelStore((state) => state.setModelScale);
-  const setModelTransform = useModelStore((state) => state.setModelTransform);
-  const setModelBuildings = useModelStore((state) => state.setModelBuildings);
-  const setModelError = useModelStore((state) => state.setModelError);
-  const resetModel = useModelStore((state) => state.resetModel);
+  const {
+    externalModelUrl, externalModelType, externalModelName, modelError,
+    setModelError, setModelBounds, setModelScale, setModelTransform, setModelBuildings,
+    handleModelLoad, handleClearModel,
+  } = useModelLoader();
+
+  // 从 URL query param 读取初始激活工具（从其他页面跳转过来时）
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const toolParam = params.get("tool");
+    if (toolParam && toolRegistry.has(toolParam)) {
+      setActiveToolId(toolParam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const heightCheckResults = useHeightCheckStore((state) => state.results);
   const setbackResult = useSetbackCheckStore((state) => state.result);
@@ -115,7 +117,6 @@ export default function ReviewsPage() {
   ]);
 
   const reviewToolIds = useMemo<string[]>(() => [...REVIEW_TOOL_IDS], []);
-  const currentModelRef = useRef<{ url: string | null; type: ModelFileType | null }>({ url: null, type: null });
 
   const toolSceneProps = useToolSceneProps(activeToolId);
   const activeTool = toolRegistry.get(activeToolId);
@@ -148,40 +149,6 @@ export default function ReviewsPage() {
       document.body.style.userSelect = "";
     };
   }, [isResizing]);
-
-  const handleModelLoad = (
-    url: string,
-    fileName: string,
-    fileType: ModelFileType,
-    modelPath?: string,
-    layers?: LayerInfo[],
-    file?: File
-  ) => {
-    const isSameModel = currentModelRef.current.url === url && currentModelRef.current.type === fileType;
-    if (isSameModel) {
-      if (modelPath) setModelFilePath(modelPath);
-      if (layers) setModelLayers(layers);
-      if (fileName || file) setExternalModel({ url, type: fileType, name: fileName, file: file ?? null });
-      return;
-    }
-    setExternalModel({ url, type: fileType, name: fileName, file: file ?? null });
-    currentModelRef.current = { url, type: fileType };
-    setModelError(null);
-    setModelFilePath(modelPath ?? null);
-    setModelLayers(layers || []);
-    setModelBounds(undefined);
-    setModelScale(1);
-    setModelTransform(null);
-    setModelBuildings([]);
-    toolRegistry.resetAll();
-  };
-
-  const handleClearModel = () => {
-    if (externalModelUrl) URL.revokeObjectURL(externalModelUrl);
-    currentModelRef.current = { url: null, type: null };
-    resetModel();
-    toolRegistry.resetAll();
-  };
 
   return (
     <AppShell toolStatusMap={toolStatusMap} activeToolId={activeToolId} onToolNavigate={setActiveToolId}>
