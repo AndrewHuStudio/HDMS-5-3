@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { CheckSquare, ChevronDown, ChevronRight, Square, SquareX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NavigationItem } from "@/lib/navigation-types";
@@ -8,10 +9,11 @@ import type { NavigationItem } from "@/lib/navigation-types";
 interface SidebarNavProps {
   items: NavigationItem[];
   activeId: string;
-  onNavigate: (id: string) => void;
+  onNavigate?: (id: string) => void;
 }
 
 export function SidebarNav({ items, activeId, onNavigate }: SidebarNavProps) {
+  const router = useRouter();
   // 默认展开"管控审查系统"
   const [expandedItems, setExpandedItems] = useState<Set<string>>(
     new Set(["control-review"])
@@ -51,8 +53,10 @@ export function SidebarNav({ items, activeId, onNavigate }: SidebarNavProps) {
           onClick={() => {
             if (hasChildren) {
               toggleExpand(item.id);
+            } else if (item.href) {
+              router.push(item.href);
             } else {
-              onNavigate(item.id);
+              onNavigate?.(item.id);
             }
           }}
           className={cn(

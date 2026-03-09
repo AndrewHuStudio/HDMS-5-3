@@ -15,6 +15,7 @@ export interface NavigationItem {
   label: string;
   icon: LucideIcon;
   description?: string;
+  href?: string;
   toolRunStatus?: ToolRunStatus;
   children?: NavigationItem[];
 }
