@@ -23,16 +23,20 @@ import {
   X,
 } from "lucide-react";
 import { useGraphStore } from "./graph-store";
+import { useOCRStore } from "./store";
 import {
   submitBatchGraphBuild,
   getBatchGraphBuildState,
   getGraphStatistics,
   getOCRSummary,
+  getOCRJobStatus,
   getIngestionReport,
   getGraphDocumentStatuses,
   getGraphVisualization,
 } from "./api";
 import { buildGraphProgressRows, computeGraphPanelStats, type GraphProgressRow } from "./graph-progress";
+import { buildIngestionScopeDirs, mergeIngestionReports } from "./ingestion-report-utils.mjs";
+import { buildVectorSourceDocs, pickGraphEligibleDocs } from "./pipeline-scope.mjs";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import type { SubgraphData } from "@/features/qa/types";
 
@@ -44,15 +48,6 @@ function formatDuration(ms: number): string {
   if (h > 0) return `${h}h ${m}m ${s}s`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
-}
-
-function deriveOcrOutputDir(markdownPath: string): string {
-  const normalized = markdownPath.replace(/\\/g, "/");
-  const parts = normalized.split("/");
-  if (parts.length >= 3) {
-    return parts.slice(0, -2).join("/");
-  }
-  return parts.slice(0, -1).join("/");
 }
 
 function getGraphProgressValue(row: GraphProgressRow): number {
@@ -100,6 +95,12 @@ export function GraphUploadPanel() {
     setShowGraphDialog,
     reset,
   } = useGraphStore();
+  const {
+    currentJob,
+    setCurrentJob,
+    summary: ocrSummary,
+    setSummary: setOcrSummary,
+  } = useOCRStore();
 
   const isRunning = status === "building";
 
@@ -147,16 +148,51 @@ export function GraphUploadPanel() {
 
   const loadProgressRows = useCallback(async (freshBuildResult?: typeof buildResult): Promise<GraphProgressRow[]> => {
     try {
-      const ocrSummary = await getOCRSummary();
-      const ocrDocs = ocrSummary.documents ?? [];
-      if (ocrDocs.length === 0) {
+      let latestJob = currentJob;
+      let latestSummary = ocrSummary;
+
+      if (latestJob?.job_id) {
+        try {
+          latestJob = await getOCRJobStatus(latestJob.job_id);
+          setCurrentJob(latestJob);
+        } catch {
+          // 任务可能已过期，继续用当前缓存
+        }
+      }
+
+      try {
+        latestSummary = await getOCRSummary();
+        setOcrSummary(latestSummary);
+      } catch {
+        // 回退到 store 中的 summary
+      }
+
+      const vectorSourceDocs = buildVectorSourceDocs({
+        currentJob: latestJob,
+        summary: latestSummary,
+      });
+      if (vectorSourceDocs.length === 0) {
         setProgressRows([]);
         return [];
       }
 
-      const ocrOutputDir = deriveOcrOutputDir(ocrDocs[0].markdown_path);
-      const ingestionReport = await getIngestionReport(ocrOutputDir);
-      const reportDocs = ingestionReport.documents ?? [];
+      const reportDirs = buildIngestionScopeDirs(vectorSourceDocs);
+      const reports = await Promise.all(
+        reportDirs.map(async (dir) => {
+          try {
+            return await getIngestionReport(dir);
+          } catch {
+            return null;
+          }
+        })
+      );
+      const mergedReport = mergeIngestionReports(reports);
+      const reportDocs = pickGraphEligibleDocs(vectorSourceDocs, mergedReport.documents ?? []) as Array<{
+        file_name: string;
+        markdown_path: string;
+        status: "not_started" | "in_progress" | "complete" | "failed";
+        doc_id?: string;
+      }>;
 
       // 优先使用传入的最新结果，避免 React 状态异步更新导致闭包读到旧值
       const effectiveBuildResult = freshBuildResult ?? buildResult;
@@ -201,7 +237,7 @@ export function GraphUploadPanel() {
       setProgressRows([]);
       return [];
     }
-  }, [buildResult]);
+  }, [buildResult, currentJob, ocrSummary, setCurrentJob, setOcrSummary]);
 
   useEffect(() => {
     loadProgressRows();

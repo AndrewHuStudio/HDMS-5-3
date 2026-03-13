@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import "@/features";
 import { Button } from "@/components/ui/button";
 import { CityScene, type ImportedMeshInfo, type ViewMode } from "@/components/city-scene";
@@ -9,6 +10,8 @@ import { ModelUploader } from "@/components/model-uploader";
 import { AppShell } from "@/components/app-shell";
 import { ToolPanelWrapper } from "@/components/tools/tool-panel-wrapper";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ApprovalChecklistPanel } from "@/components/approval-checklist-panel";
+import { QAView } from "@/features/qa";
 import type { CityElement } from "@/lib/city-data";
 import { toolRegistry, useToolSceneProps } from "@/lib/registries/tool-registry";
 import { deriveToolRunStatus, resolveAutoRevealToolId } from "@/lib/tool-view-state";
@@ -35,29 +38,42 @@ import {
   XCircle,
 } from "lucide-react";
 
-export default function ReviewsPage() {
+export function PersistentWorkspaceShell() {
+  const pathname = usePathname();
+  const isReviewsRoute = pathname === "/reviews";
+  const isAssistantRoute = pathname === "/assistant";
+  const isApprovalsRoute = pathname === "/approvals";
+
   const [selectedElement, setSelectedElement] = useState<CityElement | null>(null);
-  const [activeToolId, setActiveToolId] = useState<string>("");
   const [selectedImportedMesh, setSelectedImportedMesh] = useState<ImportedMeshInfo | null>(null);
+  const [activeToolId, setActiveToolId] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("perspective");
-  const [rightPanelWidth, setRightPanelWidth] = useState(360);
+  const [reviewPanelWidth, setReviewPanelWidth] = useState(360);
   const [isResizing, setIsResizing] = useState(false);
 
   const {
-    externalModelUrl, externalModelType, externalModelName, modelError,
-    setModelError, setModelBounds, setModelScale, setModelTransform, setModelBuildings,
-    handleModelLoad, handleClearModel,
+    externalModelUrl,
+    externalModelType,
+    externalModelName,
+    modelError,
+    setModelError,
+    setModelBounds,
+    setModelScale,
+    setModelTransform,
+    setModelBuildings,
+    handleModelLoad,
+    handleClearModel,
   } = useModelLoader();
 
-  // 从 URL query param 读取初始激活工具（从其他页面跳转过来时）
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const toolParam = params.get("tool");
+    if (!isReviewsRoute) {
+      return;
+    }
+    const toolParam = new URLSearchParams(window.location.search).get("tool");
     if (toolParam && toolRegistry.has(toolParam)) {
       setActiveToolId(toolParam);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isReviewsRoute, pathname]);
 
   const heightCheckResults = useHeightCheckStore((state) => state.results);
   const setbackResult = useSetbackCheckStore((state) => state.result);
@@ -73,7 +89,7 @@ export default function ReviewsPage() {
   const toolStatusMap = useMemo<Record<string, "idle" | "pass" | "fail">>(() => ({
     "height-check": deriveToolRunStatus(
       heightCheckResults.length > 0,
-      heightCheckResults.some((r) => r.is_exceeded)
+      heightCheckResults.some((result) => result.is_exceeded)
     ),
     "setback-check": deriveToolRunStatus(
       Boolean(setbackResult),
@@ -85,11 +101,11 @@ export default function ReviewsPage() {
     ),
     "fire-ladder-check": deriveToolRunStatus(
       fireLadderResults.length > 0,
-      fireLadderResults.some((r) => r.status === "fail")
+      fireLadderResults.some((result) => result.status === "fail")
     ),
     "sky-bridge-check": deriveToolRunStatus(
       skyBridgeResults.length > 0,
-      skyBridgeResults.some((r) => r.status === "fail")
+      skyBridgeResults.some((result) => result.status === "fail")
     ),
     "vehicle-entrance-check": deriveToolRunStatus(
       Boolean(vehicleResult),
@@ -109,31 +125,44 @@ export default function ReviewsPage() {
     ),
     "setback-rate-check": deriveToolRunStatus(
       Boolean(setbackRateResult),
-      setbackRateResult ? setbackRateResult.plots.some((p) => p.is_compliant === false) : false
+      setbackRateResult ? setbackRateResult.plots.some((plot) => plot.is_compliant === false) : false
     ),
   }), [
-    heightCheckResults, setbackResult, corridorResult, fireLadderResults,
-    skyBridgeResults, vehicleResult, pedestrianResult, greenResult, plazaResult, setbackRateResult,
+    heightCheckResults,
+    setbackResult,
+    corridorResult,
+    fireLadderResults,
+    skyBridgeResults,
+    vehicleResult,
+    pedestrianResult,
+    greenResult,
+    plazaResult,
+    setbackRateResult,
   ]);
 
   const reviewToolIds = useMemo<string[]>(() => [...REVIEW_TOOL_IDS], []);
-
-  const toolSceneProps = useToolSceneProps(activeToolId);
+  const reviewSceneProps = useToolSceneProps(activeToolId);
+  const approvalSceneProps = useToolSceneProps("approval-checklist");
   const activeTool = toolRegistry.get(activeToolId);
 
   useEffect(() => {
+    if (!isReviewsRoute) {
+      return;
+    }
     const autoRevealToolId = resolveAutoRevealToolId(activeToolId, reviewToolIds, toolStatusMap);
     hideAllReviewToolVisuals();
     if (autoRevealToolId) {
       showOnlyReviewToolVisuals(autoRevealToolId);
     }
-  }, [activeToolId, reviewToolIds, toolStatusMap]);
+  }, [activeToolId, isReviewsRoute, reviewToolIds, toolStatusMap]);
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
-      const newWidth = window.innerWidth - e.clientX;
-      setRightPanelWidth(Math.max(360, Math.min(500, newWidth)));
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isResizing) {
+        return;
+      }
+      const newWidth = window.innerWidth - event.clientX;
+      setReviewPanelWidth(Math.max(360, Math.min(500, newWidth)));
     };
     const handleMouseUp = () => setIsResizing(false);
     if (isResizing) {
@@ -150,11 +179,33 @@ export default function ReviewsPage() {
     };
   }, [isResizing]);
 
+  const activeSceneViewId = isReviewsRoute
+    ? activeToolId
+    : isApprovalsRoute
+      ? "approval-checklist"
+      : "";
+
+  const activeSceneProps = isReviewsRoute
+    ? reviewSceneProps
+    : isApprovalsRoute
+      ? approvalSceneProps
+      : {};
+
+  const sceneTitle = isApprovalsRoute
+    ? "管控审批清单"
+    : isAssistantRoute
+      ? "管控问答助手"
+      : "";
+
   return (
-    <AppShell toolStatusMap={toolStatusMap} activeToolId={activeToolId} onToolNavigate={setActiveToolId}>
-      {/* 3D 场景主区域 */}
+    <AppShell
+      toolStatusMap={isReviewsRoute ? toolStatusMap : {}}
+      activeToolId={isReviewsRoute ? activeToolId : undefined}
+      onToolNavigate={isReviewsRoute ? setActiveToolId : undefined}
+    >
       <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-        <header className="h-12 border-b border-border bg-card flex items-center justify-end px-4 flex-shrink-0">
+        <header className="h-12 border-b border-border bg-card flex items-center justify-between px-4 flex-shrink-0">
+          <h2 className="font-medium">{sceneTitle}</h2>
           <div className="flex items-center gap-4">
             <ViewControls currentView={viewMode} onViewChange={setViewMode} />
             <div className="w-px h-6 bg-border" />
@@ -170,39 +221,55 @@ export default function ReviewsPage() {
 
         <div className="flex-1 min-h-0 relative isometric-grid overflow-hidden">
           <CityScene
-            onSelectElement={(el) => { setSelectedElement(el); if (el) setSelectedImportedMesh(null); }}
+            onSelectElement={(element) => {
+              setSelectedElement(element);
+              if (element) {
+                setSelectedImportedMesh(null);
+              }
+            }}
             selectedElement={selectedElement}
             externalModelUrl={externalModelUrl}
             externalModelType={externalModelType}
             onModelError={setModelError}
-            onImportedMeshSelect={(mesh) => { setSelectedImportedMesh(mesh); if (mesh) setSelectedElement(null); }}
+            onImportedMeshSelect={(mesh) => {
+              setSelectedImportedMesh(mesh);
+              if (mesh) {
+                setSelectedElement(null);
+              }
+            }}
             selectedImportedMesh={selectedImportedMesh}
             viewMode={viewMode}
-            activeViewId={activeToolId}
-            {...toolSceneProps}
+            activeViewId={activeSceneViewId}
+            {...activeSceneProps}
             onModelBoundsComputed={(bounds) => {
               if (bounds) {
-                setModelBounds({ min: [bounds.min.x, bounds.min.y, bounds.min.z], max: [bounds.max.x, bounds.max.y, bounds.max.z] });
+                setModelBounds({
+                  min: [bounds.min.x, bounds.min.y, bounds.min.z],
+                  max: [bounds.max.x, bounds.max.y, bounds.max.z],
+                });
               } else {
                 setModelBounds(undefined);
               }
             }}
             onModelScaleComputed={(scale) => {
-              if (Number.isFinite(scale) && scale > 0) setModelScale(scale);
-              else setModelScale(1);
+              if (Number.isFinite(scale) && scale > 0) {
+                setModelScale(scale);
+              } else {
+                setModelScale(1);
+              }
             }}
             onModelTransformComputed={setModelTransform}
             onBuildingsExtracted={setModelBuildings}
           />
 
-          {selectedElement && selectedElement.controls.some(c => c.status === "exceeded") && (
-            <div className="absolute bg-card border border-red-200 rounded-lg shadow-lg p-4 max-w-[300px]" style={{ right: "380px", top: "20px" }}>
+          {isReviewsRoute && selectedElement && selectedElement.controls.some((control) => control.status === "exceeded") && (
+            <div className="absolute bg-card border border-red-200 rounded-lg shadow-lg p-4 max-w-[300px]" style={{ right: `${reviewPanelWidth + 20}px`, top: "20px" }}>
               <div className="flex items-center gap-2 mb-3">
                 <XCircle className="h-5 w-5 text-red-500" />
                 <span className="font-medium text-red-600">管控报错</span>
               </div>
               <div className="space-y-3">
-                {selectedElement.controls.filter(c => c.status === "exceeded").map((control) => (
+                {selectedElement.controls.filter((control) => control.status === "exceeded").map((control) => (
                   <div key={control.id} className="pb-2 border-b border-border last:border-0 last:pb-0">
                     <p className="text-sm font-medium text-red-600">{control.name}</p>
                     <p className="text-xs text-muted-foreground mt-1">来源: {selectedElement.name}</p>
@@ -220,11 +287,18 @@ export default function ReviewsPage() {
             <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg shadow-lg">
               <AlertCircle className="h-4 w-4" />
               <span className="text-sm">{modelError}</span>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs hover:bg-red-100" onClick={() => setModelError(null)}>关闭</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs hover:bg-red-100"
+                onClick={() => setModelError(null)}
+              >
+                关闭
+              </Button>
             </div>
           )}
 
-          {selectedElement && (
+          {isReviewsRoute && selectedElement && (
             <div className="absolute bottom-4 left-4 bg-card border border-border rounded-lg shadow-lg p-4 max-w-[320px]">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-medium">{selectedElement.name}</h3>
@@ -246,7 +320,7 @@ export default function ReviewsPage() {
             </div>
           )}
 
-          {selectedImportedMesh && (
+          {isReviewsRoute && selectedImportedMesh && (
             <div className="absolute bottom-4 left-4 bg-card border border-border rounded-lg shadow-lg p-4 max-w-[320px]">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-medium">{selectedImportedMesh.name}</h3>
@@ -267,30 +341,42 @@ export default function ReviewsPage() {
         </div>
       </main>
 
-      {/* 右侧工具面板 */}
-      <aside
-        className="border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden relative"
-        style={{ width: `${rightPanelWidth}px` }}
-      >
-        <div
-          className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 transition-colors z-10"
-          onMouseDown={() => setIsResizing(true)}
-          title="拖动调整宽度"
-        />
-        <div className="h-12 border-b border-border flex items-center px-4 flex-shrink-0">
-          <h2 className="font-medium">{activeTool?.name ?? "管控审查系统"}</h2>
-        </div>
-        <div className="relative flex-1 min-h-0 overflow-y-auto p-4 review-result-scrollbar">
-          {activeTool && (
-            <ToolPanelWrapper tool={activeTool}>
-              {activeTool.Panel ? <activeTool.Panel /> : null}
-            </ToolPanelWrapper>
-          )}
-          {!activeTool && (
-            <p className="text-sm text-muted-foreground">从左侧选择管控工具开始检测</p>
-          )}
-        </div>
-      </aside>
+      {isReviewsRoute ? (
+        <aside
+          className="border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden relative"
+          style={{ width: `${reviewPanelWidth}px` }}
+        >
+          <div
+            className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 transition-colors z-10"
+            onMouseDown={() => setIsResizing(true)}
+            title="拖动调整宽度"
+          />
+          <div className="h-12 border-b border-border flex items-center px-4 flex-shrink-0">
+            <h2 className="font-medium">{activeTool?.name ?? "管控审查系统"}</h2>
+          </div>
+          <div className="relative flex-1 min-h-0 overflow-y-auto p-4 review-result-scrollbar">
+            {activeTool ? (
+              <ToolPanelWrapper tool={activeTool}>
+                {activeTool.Panel ? <activeTool.Panel /> : null}
+              </ToolPanelWrapper>
+            ) : (
+              <p className="text-sm text-muted-foreground">从左侧选择管控工具开始检测</p>
+            )}
+          </div>
+        </aside>
+      ) : isAssistantRoute ? (
+        <aside className="w-[400px] border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <QAView embedded />
+          </div>
+        </aside>
+      ) : (
+        <aside className="w-[420px] border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <ApprovalChecklistPanel />
+          </div>
+        </aside>
+      )}
     </AppShell>
   );
 }

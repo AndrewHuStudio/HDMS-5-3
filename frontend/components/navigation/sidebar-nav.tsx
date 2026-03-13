@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { CheckSquare, ChevronDown, ChevronRight, Square, SquareX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NavigationItem } from "@/lib/navigation-types";
@@ -14,6 +14,7 @@ interface SidebarNavProps {
 
 export function SidebarNav({ items, activeId, onNavigate }: SidebarNavProps) {
   const router = useRouter();
+  const pathname = usePathname();
   // 默认展开"管控审查系统"
   const [expandedItems, setExpandedItems] = useState<Set<string>>(
     new Set(["control-review"])
@@ -47,21 +48,19 @@ export function SidebarNav({ items, activeId, onNavigate }: SidebarNavProps) {
     const isActive = activeId === item.id;
     const showToolStatus = level > 0 && !hasChildren;
 
+    const handleNavigate = () => {
+      if (item.href) {
+        router.push(item.href);
+      } else if (onNavigate) {
+        onNavigate(item.id);
+      } else {
+        router.push(`/reviews?tool=${item.id}`);
+      }
+    };
+
     return (
       <div key={item.id}>
-        <button
-          onClick={() => {
-            if (hasChildren) {
-              toggleExpand(item.id);
-            } else if (item.href) {
-              router.push(item.href);
-            } else if (onNavigate) {
-              onNavigate(item.id);
-            } else {
-              // 工具子项：不在 /reviews 页面时，跳转到 /reviews 并激活该工具
-              router.push(`/reviews?tool=${item.id}`);
-            }
-          }}
+        <div
           className={cn(
             "w-full flex items-center gap-3 px-4 py-3 text-sm transition-colors",
             level > 0 && "pl-8",
@@ -70,17 +69,37 @@ export function SidebarNav({ items, activeId, onNavigate }: SidebarNavProps) {
               : "text-muted-foreground hover:bg-secondary/50"
           )}
         >
-          {showToolStatus && renderToolRunStatus(item.toolRunStatus)}
-          <item.icon className="h-4 w-4 flex-shrink-0" />
-          <span className="flex-1 text-left">{item.label}</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (hasChildren && item.href && pathname === item.href) {
+                toggleExpand(item.id);
+                return;
+              }
+              handleNavigate();
+            }}
+            className="flex flex-1 items-center gap-3 text-left"
+          >
+            {showToolStatus && renderToolRunStatus(item.toolRunStatus)}
+            <item.icon className="h-4 w-4 flex-shrink-0" />
+            <span className="flex-1 text-left">{item.label}</span>
+          </button>
+
           {hasChildren && (
-            isExpanded ? (
-              <ChevronDown className="h-4 w-4" />
-            ) : (
-              <ChevronRight className="h-4 w-4" />
-            )
+            <button
+              type="button"
+              aria-label={isExpanded ? `收起${item.label}` : `展开${item.label}`}
+              onClick={() => toggleExpand(item.id)}
+              className="flex h-6 w-6 items-center justify-center rounded-sm hover:bg-secondary/80"
+            >
+              {isExpanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+            </button>
           )}
-        </button>
+        </div>
 
         {hasChildren && isExpanded && (
           <div className="bg-secondary/20">

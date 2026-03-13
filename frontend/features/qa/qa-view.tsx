@@ -6,6 +6,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { QAConversationToolbar } from "@/components/qa-new/qa-conversation-toolbar";
 import { QAShell } from "@/components/qa-new";
 import { useQAViewStore } from "@/lib/stores/qa-store";
 import { sendQuestionStream } from "./api";
@@ -114,12 +115,46 @@ interface QAViewProps {
 }
 
 export function QAView({ embedded = false }: QAViewProps = {}) {
+  const conversations = useQAViewStore((state) => state.conversations);
+  const activeConversationId = useQAViewStore((state) => state.activeConversationId);
+  const createConversation = useQAViewStore((state) => state.createConversation);
+  const switchConversation = useQAViewStore((state) => state.switchConversation);
+  const renameConversation = useQAViewStore((state) => state.renameConversation);
+  const deleteConversation = useQAViewStore((state) => state.deleteConversation);
+  const togglePinConversation = useQAViewStore((state) => state.togglePinConversation);
   const messages = useQAViewStore((state) => state.messages);
   const appendMessage = useQAViewStore((state) => state.appendMessage);
   const updateMessage = useQAViewStore((state) => state.updateMessage);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
+
+  const handleCreateConversation = useCallback(() => {
+    if (isSending) return;
+    createConversation();
+    setInput("");
+  }, [createConversation, isSending]);
+
+  const handleSwitchConversation = useCallback((id: string) => {
+    if (isSending) return;
+    switchConversation(id);
+    setInput("");
+  }, [isSending, switchConversation]);
+
+  const handleRenameConversation = useCallback((id: string, title: string) => {
+    renameConversation(id, title);
+  }, [renameConversation]);
+
+  const handleDeleteConversation = useCallback((id: string) => {
+    if (isSending) return;
+    deleteConversation(id);
+    setInput("");
+  }, [deleteConversation, isSending]);
+
+  const handleTogglePinConversation = useCallback((id: string) => {
+    if (isSending) return;
+    togglePinConversation(id);
+  }, [isSending, togglePinConversation]);
 
   const handleFeedback = (messageId: string, feedback: "useful" | "not_useful") => {
     updateMessage(messageId, (msg) => ({ ...msg, feedback }));
@@ -271,6 +306,36 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
       setIsSending(false);
     }
   };
+
+  if (embedded) {
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <QAConversationToolbar
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          disabled={isSending}
+          onCreateConversation={handleCreateConversation}
+          onSwitchConversation={handleSwitchConversation}
+          onRenameConversation={handleRenameConversation}
+          onDeleteConversation={handleDeleteConversation}
+          onTogglePinConversation={handleTogglePinConversation}
+        />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <QAShell
+            embedded={embedded}
+            messages={messages}
+            input={input}
+            isSending={isSending}
+            quickQuestions={quickQuestions}
+            onInputChange={setInput}
+            onSend={handleSend}
+            onStop={handleStop}
+            onFeedback={handleFeedback}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <QAShell

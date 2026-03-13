@@ -26,6 +26,7 @@ import {
   getOCRSummary,
 } from "./api";
 import type { OCRJobFile } from "./types";
+import { buildMergedOcrRows } from "./ocr-rows.mjs";
 
 function formatDuration(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -50,6 +51,7 @@ interface MergedRow {
   fileSize: number;
   // OCR 状态：null 表示还没提交
   ocrFile: OCRJobFile | null;
+  source: "selected" | "job" | "summary";
 }
 
 export function OCRUploadPanel() {
@@ -246,45 +248,11 @@ export function OCRUploadPanel() {
 
   // 构建合并行
   const jobFiles = currentJob?.files ?? [];
-  const jobFileMap = new Map(jobFiles.map((f) => [f.file_name, f]));
-
-  const mergedRows: MergedRow[] = selectedFiles.map((file) => ({
-    key: file.name,
-    fileName: file.name,
-    fileSize: file.size,
-    ocrFile: jobFileMap.get(file.name) ?? null,
-  }));
-  // 追加 OCR 结果中有但 selectedFiles 中没有的（理论上不会，但防御性处理）
-  for (const jf of jobFiles) {
-    if (!selectedFiles.some((f) => f.name === jf.file_name)) {
-      mergedRows.push({
-        key: jf.file_name,
-        fileName: jf.file_name,
-        fileSize: 0,
-        ocrFile: jf,
-      });
-    }
-  }
-
-  // 无活跃任务时，用 summary.documents 填充历史 OCR 结果
-  if (mergedRows.length === 0 && summary?.documents?.length) {
-    for (const doc of summary.documents) {
-      mergedRows.push({
-        key: doc.name,
-        fileName: doc.name,
-        fileSize: 0,
-        ocrFile: {
-          id: `summary-${doc.name}`,
-          file_name: doc.name,
-          status: "done",
-          pages: doc.pages ?? 0,
-          total_pages: doc.pages ?? 0,
-          progress: 100,
-          markdown_path: doc.markdown_path,
-        },
-      });
-    }
-  }
+  const mergedRows = buildMergedOcrRows({
+    selectedFiles,
+    jobFiles,
+    summaryDocuments: summary?.documents ?? [],
+  }) as MergedRow[];
 
   // 从 summary 构建文件名 → 图片数映射
   const summaryImageMap = new Map(
@@ -418,7 +386,8 @@ export function OCRUploadPanel() {
                       ocr?.status === "downloading";
                     const isQueued = ocr?.status === "queued";
                     const isPending = !ocr;
-                    const canRemove = !isRunning || isDone || isFailed;
+                    const canRemove =
+                      row.source !== "summary" && (!isRunning || isDone || isFailed);
 
                     return (
                       <tr

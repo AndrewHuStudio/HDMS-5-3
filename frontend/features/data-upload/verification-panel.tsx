@@ -216,7 +216,7 @@ export function VerificationPanel() {
         getHealthDb(),
         runConsistencyCheck(),
         getGraphStatistics().catch(() => null),
-        ocrSummary ? Promise.resolve(ocrSummary) : getOCRSummary().catch(() => null),
+        getOCRSummary().catch(() => ocrSummary ?? null),
       ]);
 
       const result = buildReport(healthDb, consistency, graphStats, ocrData);
