@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { CheckSquare, ChevronDown, ChevronRight, Square, SquareX } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,19 @@ export function SidebarNav({ items, activeId, onNavigate }: SidebarNavProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(
     new Set(["control-review"])
   );
+
+  useEffect(() => {
+    for (const item of items) {
+      if (item.href) {
+        router.prefetch(item.href);
+      }
+      for (const child of item.children ?? []) {
+        if (child.href) {
+          router.prefetch(child.href);
+        }
+      }
+    }
+  }, [items, router]);
 
   const toggleExpand = (id: string) => {
     setExpandedItems((prev) => {

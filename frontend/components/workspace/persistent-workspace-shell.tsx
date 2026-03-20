@@ -8,6 +8,7 @@ import { CityScene, type ImportedMeshInfo, type ViewMode } from "@/components/ci
 import { ViewControls } from "@/components/view-controls";
 import { ModelUploader } from "@/components/model-uploader";
 import { AppShell } from "@/components/app-shell";
+import { DataUploadPanel } from "@/components/data-upload-panel";
 import { ToolPanelWrapper } from "@/components/tools/tool-panel-wrapper";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ApprovalChecklistPanel } from "@/components/approval-checklist-panel";
@@ -43,6 +44,7 @@ export function PersistentWorkspaceShell() {
   const ASSISTANT_BASE_PANEL_WIDTH = 420;
   const ASSISTANT_HISTORY_PANEL_WIDTH = 280;
   const pathname = usePathname();
+  const isUploadsRoute = pathname === "/uploads";
   const isReviewsRoute = pathname === "/reviews";
   const isAssistantRoute = pathname === "/assistant";
   const isApprovalsRoute = pathname === "/approvals";
@@ -212,6 +214,29 @@ export function PersistentWorkspaceShell() {
       setAssistantHistoryOpen(false);
     }
   };
+
+  if (isUploadsRoute) {
+    return (
+      <AppShell
+        toolStatusMap={{}}
+        activeToolId={undefined}
+        onToolNavigate={undefined}
+      >
+        <section className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+          <header className="h-12 border-b border-border bg-card flex items-center justify-between px-4 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <h2 className="font-medium">管控资料上传</h2>
+              <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
+                严格串行
+              </span>
+            </div>
+            <ThemeToggle />
+          </header>
+          <DataUploadPanel />
+        </section>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell
