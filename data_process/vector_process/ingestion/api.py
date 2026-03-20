@@ -199,6 +199,17 @@ async def delete_document(request: DeleteDocumentRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/clear", response_model=Dict[str, Any])
+async def clear_ingestion_data(delete_versions: bool = True) -> Dict[str, Any]:
+    """Clear all ingestion data from MongoDB and Milvus."""
+    try:
+        pipeline = _create_pipeline()
+        return pipeline.clear_all_documents(delete_versions=delete_versions)
+    except Exception as e:
+        logger.error(f"Failed to clear ingestion data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/repair", response_model=ConsistencyRepairResponse)
 async def repair_consistency(request: ConsistencyRepairRequest) -> ConsistencyRepairResponse:
     """Check and optionally repair cross-store consistency."""

@@ -161,6 +161,41 @@ class IngestionPipeline:
             "deleted_versions": int(deleted_versions),
         }
 
+    def clear_all_documents(self, delete_versions: bool = True) -> Dict[str, Any]:
+        """Clear all vector-ingestion data from MongoDB and Milvus."""
+        deleted_vectors = 0
+        deleted_documents = 0
+        deleted_chunks = 0
+        deleted_versions = 0
+
+        try:
+            stats = self.milvus.get_collection_stats(config.MILVUS_COLLECTION_TEXT)
+            if stats.get("exists"):
+                deleted_vectors = int(stats.get("num_entities") or 0)
+        except Exception as exc:
+            logger.warning(f"Failed to read Milvus stats before clear: {exc}")
+
+        self.milvus.delete_collection(config.MILVUS_COLLECTION_TEXT)
+        self.milvus.create_collection(
+            collection_name=config.MILVUS_COLLECTION_TEXT,
+            dimension=config.EMBEDDING_DIMENSION,
+            recreate_on_mismatch=config.MILVUS_RECREATE_ON_MISMATCH,
+            strict=config.MILVUS_DIMENSION_STRICT,
+        )
+
+        deleted_chunks = self.mongodb.delete_many(self.CHUNKS_COLLECTION, {})
+        deleted_documents = self.mongodb.delete_many(self.DOCUMENTS_COLLECTION, {})
+        if delete_versions:
+            deleted_versions = self.mongodb.delete_many(self.VERSIONS_COLLECTION, {})
+
+        return {
+            "status": "success",
+            "deleted_vectors": int(deleted_vectors),
+            "deleted_documents": int(deleted_documents),
+            "deleted_chunks": int(deleted_chunks),
+            "deleted_versions": int(deleted_versions),
+        }
+
     def get_document_versions(self, doc_id: str, limit: int = 20) -> Dict[str, Any]:
         """Return current version and history snapshots for one document."""
         if limit <= 0:

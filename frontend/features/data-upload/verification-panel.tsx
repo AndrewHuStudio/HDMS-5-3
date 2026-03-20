@@ -23,11 +23,16 @@ import {
 } from "lucide-react";
 import { useVerificationStore } from "./verification-store";
 import { useOCRStore } from "./store";
+import { useVectorStore } from "./vector-store";
+import { useGraphStore } from "./graph-store";
 import {
   getHealthDb,
   runConsistencyCheck,
   getGraphStatistics,
   getOCRSummary,
+  clearOCROutputs,
+  clearIngestionData,
+  clearGraphData,
 } from "./api";
 import type {
   CheckItem,
@@ -173,6 +178,13 @@ export function VerificationPanel() {
   } = useVerificationStore();
 
   const { summary: ocrSummary } = useOCRStore();
+  const resetOcrStore = useOCRStore((state) => state.reset);
+  const setOcrSummary = useOCRStore((state) => state.setSummary);
+  const resetVectorStore = useVectorStore((state) => state.reset);
+  const setVectorReport = useVectorStore((state) => state.setReport);
+  const setVectorSysStatus = useVectorStore((state) => state.setSysStatus);
+  const resetGraphStore = useGraphStore((state) => state.reset);
+  const setGraphStatistics = useGraphStore((state) => state.setStatistics);
 
   const isRunning = status === "checking";
 
@@ -229,9 +241,30 @@ export function VerificationPanel() {
   };
 
   const handleReset = () => {
-    reset();
-    setElapsed(0);
-    setShowInconsistent(false);
+    void (async () => {
+      const confirmed = window.confirm(
+        "警告：这将删除 OCR 结果、MongoDB 和 Milvus 中的向量化数据，以及 Neo4j 中的图谱数据，且不可恢复。确认继续吗？"
+      );
+      if (!confirmed) return;
+
+      await clearOCROutputs();
+      await clearIngestionData(true);
+      await clearGraphData();
+
+      reset();
+      resetOcrStore();
+      setOcrSummary(null);
+      resetVectorStore();
+      setVectorReport(null);
+      setVectorSysStatus(null);
+      resetGraphStore();
+      setGraphStatistics(null);
+      setElapsed(0);
+      setShowInconsistent(false);
+    })().catch((err) => {
+      setError(err instanceof Error ? err.message : "一键重置失败");
+      setStatus("error");
+    });
   };
 
   const passedCount = report?.checks.filter((c) => c.passed).length ?? 0;

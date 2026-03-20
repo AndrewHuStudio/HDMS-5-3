@@ -26,9 +26,15 @@ import {
   getIngestionStatus,
   getOCRSummary,
   getOCRJobStatus,
+  clearIngestionData,
 } from "./api";
 import type { IngestionDocState, IngestionReportResponse } from "./types";
-import { buildIngestionScopeDirs, mergeIngestionReports } from "./ingestion-report-utils.mjs";
+import {
+  buildIngestionScopeDirs,
+  isIngestionReportComplete,
+  mergeIngestionReports,
+  normalizeIngestionReportForRefresh,
+} from "./ingestion-report-utils.mjs";
 import { buildVectorSourceDocs } from "./pipeline-scope.mjs";
 
 function formatDuration(ms: number): string {
@@ -159,7 +165,10 @@ export function VectorUploadPanel() {
 
   // 加载入库报告
   const loadReport = useCallback(
-    async (docs: Array<{ markdown_path: string }> = ocrDocs): Promise<IngestionReportResponse | null> => {
+    async (
+      docs: Array<{ markdown_path: string }> = ocrDocs,
+      options: { normalizeFailedForRefresh?: boolean } = {}
+    ): Promise<IngestionReportResponse | null> => {
       const reportDirs = buildIngestionScopeDirs(docs);
       if (reportDirs.length === 0) {
         setReport(null);
@@ -177,17 +186,16 @@ export function VectorUploadPanel() {
           })
         );
         const merged = mergeIngestionReports(reports);
-        setReport(merged as IngestionReportResponse);
+        const finalReport = options.normalizeFailedForRefresh
+          ? normalizeIngestionReportForRefresh(merged)
+          : merged;
+        setReport(finalReport as IngestionReportResponse);
         setError(null);
-        const allDone =
-          merged.total > 0 &&
-          merged.in_progress === 0 &&
-          merged.not_started === 0 &&
-          merged.complete + merged.failed === merged.total;
+        const allDone = isIngestionReportComplete(finalReport);
         if (allDone) {
           setStatus("completed");
         }
-        return merged as IngestionReportResponse;
+        return finalReport as IngestionReportResponse;
       } catch {
         return null;
       }
@@ -253,12 +261,27 @@ export function VectorUploadPanel() {
   };
 
   const handleReset = () => {
-    reset();
-    setElapsed(0);
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
+    void (async () => {
+      const confirmed = window.confirm("警告：这将删除 MongoDB 和 Milvus 中的向量化数据，且不可恢复。确认继续吗？");
+      if (!confirmed) return;
+
+      await clearIngestionData(true);
+      reset();
+      setElapsed(0);
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+      await loadSysStatus();
+      if (ocrDocs.length > 0) {
+        await loadReport(ocrDocs);
+      } else {
+        setReport(null);
+      }
+    })().catch((err) => {
+      setError(err instanceof Error ? err.message : "重置向量化数据失败");
+      setStatus("error");
+    });
   };
 
   const handleRefresh = async () => {
@@ -267,7 +290,7 @@ export function VectorUploadPanel() {
       const docs = await loadOcrDocs(true);
       await loadSysStatus();
       if (docs.length > 0) {
-        await loadReport(docs);
+        await loadReport(docs, { normalizeFailedForRefresh: true });
       }
       setError(null);
     } finally {

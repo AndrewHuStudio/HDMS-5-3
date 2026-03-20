@@ -24,6 +24,7 @@ import {
   submitOCRJob,
   getOCRJobStatus,
   getOCRSummary,
+  clearOCROutputs,
 } from "./api";
 import type { OCRJobFile } from "./types";
 import { buildMergedOcrRows } from "./ocr-rows.mjs";
@@ -207,14 +208,23 @@ export function OCRUploadPanel() {
   };
 
   const handleReset = () => {
-    reset();
-    setSelectedFiles([]);
-    setElapsed(0);
-    setNotice(null);
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-    }
+    void (async () => {
+      const confirmed = window.confirm("警告：这将删除 OCR 结果数据，且不可恢复。确认继续吗？");
+      if (!confirmed) return;
+
+      await clearOCROutputs();
+      reset();
+      setSelectedFiles([]);
+      setElapsed(0);
+      setNotice(null);
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+      await loadSummary();
+    })().catch((err) => {
+      setError(err instanceof Error ? err.message : "重置 OCR 数据失败");
+    });
   };
 
   const handleRefresh = async () => {

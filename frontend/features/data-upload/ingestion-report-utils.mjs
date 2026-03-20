@@ -157,3 +157,65 @@ export function mergeIngestionReports(reports) {
     documents,
   };
 }
+
+/**
+ * 刷新时将失败项恢复为待开始，方便用户重新发起向量化。
+ *
+ * @param {IngestionReportLite | null | undefined} report
+ * @returns {IngestionReportLite | null}
+ */
+export function normalizeIngestionReportForRefresh(report) {
+  if (!report || !Array.isArray(report.documents)) {
+    return null;
+  }
+
+  const documents = report.documents.map((doc) => {
+    if (normalizeStatus(doc?.status) !== "failed") {
+      return {
+        ...doc,
+        status: normalizeStatus(doc?.status),
+      };
+    }
+    return {
+      ...doc,
+      status: "not_started",
+      ingest_error: undefined,
+    };
+  });
+
+  const counts = {
+    not_started: 0,
+    in_progress: 0,
+    complete: 0,
+    failed: 0,
+  };
+  for (const doc of documents) {
+    counts[normalizeStatus(doc.status)] += 1;
+  }
+
+  return {
+    total: documents.length,
+    not_started: counts.not_started,
+    in_progress: counts.in_progress,
+    complete: counts.complete,
+    failed: counts.failed,
+    documents,
+  };
+}
+
+/**
+ * 判断 ingestion 报告是否已全部完成。
+ *
+ * @param {IngestionReportLite | null | undefined} report
+ * @returns {boolean}
+ */
+export function isIngestionReportComplete(report) {
+  if (!report) return false;
+
+  return (
+    report.total > 0 &&
+    report.in_progress === 0 &&
+    report.not_started === 0 &&
+    report.complete + report.failed === report.total
+  );
+}

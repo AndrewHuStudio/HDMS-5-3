@@ -266,6 +266,22 @@ export async function getGraphDocumentStatuses(): Promise<GraphDocumentStatusRes
   return response.json();
 }
 
+export async function clearIngestionData(deleteVersions: boolean = true): Promise<Record<string, unknown>> {
+  const params = new URLSearchParams({
+    delete_versions: deleteVersions ? "true" : "false",
+  });
+  const response = await fetch(`${DATA_PROCESS_BASE}/ingestion/clear?${params.toString()}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: "清空向量化数据失败" }));
+    throw new Error(error.detail || "清空向量化数据失败");
+  }
+
+  return response.json();
+}
+
 /**
  * 获取批量图谱构建后台任务状态（idle/running/completed/failed）
  */
@@ -275,6 +291,19 @@ export async function getBatchGraphBuildState(): Promise<BatchGraphBuildStateRes
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "获取图谱构建状态失败" }));
     throw new Error(error.detail || "获取图谱构建状态失败");
+  }
+
+  return response.json();
+}
+
+export async function clearGraphData(): Promise<Record<string, unknown>> {
+  const response = await fetch(`${DATA_PROCESS_BASE}/graph/clear`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: "清空图谱数据失败" }));
+    throw new Error(error.detail || "清空图谱数据失败");
   }
 
   return response.json();

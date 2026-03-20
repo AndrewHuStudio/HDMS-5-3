@@ -33,6 +33,7 @@ import {
   getIngestionReport,
   getGraphDocumentStatuses,
   getGraphVisualization,
+  clearGraphData,
 } from "./api";
 import { buildGraphProgressRows, computeGraphPanelStats, type GraphProgressRow } from "./graph-progress";
 import { buildIngestionScopeDirs, mergeIngestionReports } from "./ingestion-report-utils.mjs";
@@ -303,9 +304,19 @@ export function GraphUploadPanel() {
   };
 
   const handleReset = () => {
-    stopPolling();
-    reset();
-    setElapsed(0);
+    void (async () => {
+      const confirmed = window.confirm("警告：这将删除 Neo4j 中的图谱数据，且不可恢复。确认继续吗？");
+      if (!confirmed) return;
+
+      await clearGraphData();
+      stopPolling();
+      reset();
+      setElapsed(0);
+      await Promise.all([loadStatistics(), loadProgressRows()]);
+    })().catch((err) => {
+      setError(err instanceof Error ? err.message : "重置图谱数据失败");
+      setStatus("error");
+    });
   };
 
   const handleRefresh = async () => {
