@@ -1,12 +1,9 @@
 # Findings
 
-- Current vector refresh only reloads report data; it does not remap failed items to `not_started`.
-- Vector upload panel computed completion state from `finalReport` without guarding the nullable return from refresh normalization, which broke Next.js TypeScript build.
-- Current reset buttons in OCR/vector/graph/verification panels only reset frontend store state.
-- OCR backend already exposes `/api/outputs/clear`.
-- Vector backend already supports per-document deletion, but no bulk clear endpoint exists.
-- Graph backend appears to expose a graph clear endpoint that should be inspected for reuse.
-- Added bulk ingestion clear via `/ingestion/clear`, which recreates the Milvus collection and clears Mongo ingestion collections.
-- Verification-panel reset can orchestrate OCR clear, ingestion clear, and graph clear without a dedicated backend "reset all" endpoint.
-- Local panel refresh behavior can be adjusted safely in frontend by normalizing failed ingestion states back to `not_started`.
-- The cleanest fix is to centralize the completion check in a null-safe helper shared by tests and the vector upload panel.
+- `/assistant` currently renders a fixed `400px` aside directly from `PersistentWorkspaceShell`, so drawer-driven viewport compression needs to be introduced at that shell level.
+- Embedded QA history management currently lives inside `QAConversationToolbar` as a select/dropdown, which does not match the requested slide-out history list.
+- Existing frontend coverage for embedded QA is a `node:test` file that statically inspects source files; the new behavior can be guarded the same way without introducing a new test harness.
+- `QAShell` already handles the actual chat transcript and input area, so the redesign can focus on shell composition and toolbar/history navigation instead of rewriting chat rendering.
+- The clean implementation split is: shell owns drawer visibility and aside width; `QAView` owns assistant content composition; a new history-panel component owns create/switch/rename/delete/pin controls.
+- A pointer-down handler on the central viewport container is sufficient to satisfy the requested "click main viewport to close history" behavior without affecting right-side controls.
+- The first assistant redesign still misplaced the assistant header inside the assistant content body. The correct structure is: assistant sidebar header belongs to `PersistentWorkspaceShell`, aligned with the viewport top bar, while `QAView` only renders the area below that header.

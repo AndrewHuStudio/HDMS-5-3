@@ -1,22 +1,29 @@
 # Progress Log
 
-- Started investigation of reset flows and confirmation requirements.
-- Captured confirmed reset scope from user:
-  - OCR reset => clear OCR outputs
-  - Vector reset => clear MongoDB + Milvus ingestion data
-  - Graph reset => clear Neo4j graph data
-  - All-in-one reset => clear all of the above
-  - Every destructive reset => explicit warning confirmation dialog
-- Added node test for ingestion refresh normalization and destructive reset wiring.
-- Added pytest coverage for bulk ingestion clear behavior.
-- Implemented frontend confirmation prompts on OCR/vector/graph/all resets.
-- Implemented vector refresh normalization to show failed items as `待开始`.
+- Confirmed revised interaction details with the user:
+  - history button should use the product theme, not a pink accent
+  - history list closes only when clicking the history button again or clicking the main viewport
+  - selecting a history conversation should switch the conversation without closing the drawer
+- Located current assistant shell integration in `frontend/components/workspace/persistent-workspace-shell.tsx`.
+- Located current embedded QA toolbar in `frontend/components/qa-new/qa-conversation-toolbar.tsx`.
+- Located existing regression entry point in `frontend/frontend/tests/qa-embedded-toolbar.test.mjs`.
+- Added failing source-structure tests for:
+  - shell-owned assistant drawer state and width
+  - toolbar history toggle contract
+  - dedicated slide-out history panel component
+- Reworked the embedded assistant layout into:
+  - a branded top toolbar card
+  - a rounded chat card
+  - a separate slide-out history panel card
+- Added `frontend/components/qa-new/qa-conversation-history-panel.tsx` to hold new conversation and history management actions.
+- Connected `PersistentWorkspaceShell` to:
+  - expand/collapse assistant aside width
+  - close history on main viewport pointer-down
+  - keep history open when switching conversations
+- Corrected the layout hierarchy after user review:
+  - moved the assistant title/history toggle into the assistant sidebar's own top header
+  - removed the lowered internal assistant header card from `QAView`
+  - made the history drawer and chat body start directly below the aligned top header
 - Verification:
-  - `node --test tests/ingestion-refresh-and-reset.test.mjs tests/ingestion-report-utils.test.mjs`
-  - `$env:PYTHONPATH='e:\\MyPrograms\\HDMS'; pytest data_process/tests/test_ingestion_clear_all.py data_process/tests/test_graph_progress_tracking.py`
-  - `python -m py_compile data_process/vector_process/ingestion/pipeline.py data_process/vector_process/ingestion/api.py`
-- ESLint could not run because frontend config dependency `@eslint/eslintrc` is missing in the current environment.
-- Added a regression test for nullable ingestion reports and introduced `isIngestionReportComplete()` to keep completion logic null-safe.
-- Verification for the build failure fix:
-  - `node --test tests/ingestion-refresh-and-reset.test.mjs`
+  - `node --test frontend/tests/qa-embedded-toolbar.test.mjs`
   - `npm run build`

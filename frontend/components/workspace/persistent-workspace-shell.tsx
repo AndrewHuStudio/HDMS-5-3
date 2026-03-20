@@ -12,6 +12,7 @@ import { ToolPanelWrapper } from "@/components/tools/tool-panel-wrapper";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ApprovalChecklistPanel } from "@/components/approval-checklist-panel";
 import { QAView } from "@/features/qa";
+import { QAConversationToolbar } from "@/components/qa-new/qa-conversation-toolbar";
 import type { CityElement } from "@/lib/city-data";
 import { toolRegistry, useToolSceneProps } from "@/lib/registries/tool-registry";
 import { deriveToolRunStatus, resolveAutoRevealToolId } from "@/lib/tool-view-state";
@@ -39,6 +40,8 @@ import {
 } from "lucide-react";
 
 export function PersistentWorkspaceShell() {
+  const ASSISTANT_BASE_PANEL_WIDTH = 420;
+  const ASSISTANT_HISTORY_PANEL_WIDTH = 280;
   const pathname = usePathname();
   const isReviewsRoute = pathname === "/reviews";
   const isAssistantRoute = pathname === "/assistant";
@@ -49,6 +52,7 @@ export function PersistentWorkspaceShell() {
   const [activeToolId, setActiveToolId] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("perspective");
   const [reviewPanelWidth, setReviewPanelWidth] = useState(360);
+  const [assistantHistoryOpen, setAssistantHistoryOpen] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
 
   const {
@@ -179,6 +183,12 @@ export function PersistentWorkspaceShell() {
     };
   }, [isResizing]);
 
+  useEffect(() => {
+    if (!isAssistantRoute && assistantHistoryOpen) {
+      setAssistantHistoryOpen(false);
+    }
+  }, [assistantHistoryOpen, isAssistantRoute]);
+
   const activeSceneViewId = isReviewsRoute
     ? activeToolId
     : isApprovalsRoute
@@ -193,9 +203,15 @@ export function PersistentWorkspaceShell() {
 
   const sceneTitle = isApprovalsRoute
     ? "管控审批清单"
-    : isAssistantRoute
-      ? "管控问答助手"
-      : "";
+    : "";
+  const assistantPanelWidth = assistantHistoryOpen
+    ? ASSISTANT_BASE_PANEL_WIDTH + ASSISTANT_HISTORY_PANEL_WIDTH
+    : ASSISTANT_BASE_PANEL_WIDTH;
+  const handleAssistantViewportPointerDown = () => {
+    if (isAssistantRoute && assistantHistoryOpen) {
+      setAssistantHistoryOpen(false);
+    }
+  };
 
   return (
     <AppShell
@@ -219,7 +235,10 @@ export function PersistentWorkspaceShell() {
           </div>
         </header>
 
-        <div className="flex-1 min-h-0 relative isometric-grid overflow-hidden">
+        <div
+          className="flex-1 min-h-0 relative isometric-grid overflow-hidden"
+          onPointerDownCapture={handleAssistantViewportPointerDown}
+        >
           <CityScene
             onSelectElement={(element) => {
               setSelectedElement(element);
@@ -365,9 +384,22 @@ export function PersistentWorkspaceShell() {
           </div>
         </aside>
       ) : isAssistantRoute ? (
-        <aside className="w-[400px] border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden">
+        <aside
+          className="border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden transition-[width] duration-300 ease-out"
+          style={{ width: `${assistantPanelWidth}px` }}
+        >
+          <div className="h-12 border-b border-border flex items-center px-4 flex-shrink-0">
+            <QAConversationToolbar
+              historyOpen={assistantHistoryOpen}
+              onToggleHistory={() => setAssistantHistoryOpen((open) => !open)}
+            />
+          </div>
           <div className="flex-1 min-h-0 overflow-hidden">
-            <QAView embedded />
+            <QAView
+              embedded
+              historyOpen={assistantHistoryOpen}
+              onHistoryOpenChange={setAssistantHistoryOpen}
+            />
           </div>
         </aside>
       ) : (

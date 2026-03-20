@@ -6,8 +6,9 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { QAConversationToolbar } from "@/components/qa-new/qa-conversation-toolbar";
+import { QAConversationHistoryPanel } from "@/components/qa-new/qa-conversation-history-panel";
 import { QAShell } from "@/components/qa-new";
+import { cn } from "@/lib/utils";
 import { useQAViewStore } from "@/lib/stores/qa-store";
 import { sendQuestionStream } from "./api";
 import type { ChatHistoryMessage, ChatMessage } from "./types";
@@ -112,9 +113,15 @@ function shouldAcceptAnswerReplacement(current: string, replacement: string): bo
 
 interface QAViewProps {
   embedded?: boolean;
+  historyOpen?: boolean;
+  onHistoryOpenChange?: (open: boolean) => void;
 }
 
-export function QAView({ embedded = false }: QAViewProps = {}) {
+export function QAView({
+  embedded = false,
+  historyOpen = false,
+  onHistoryOpenChange,
+}: QAViewProps = {}) {
   const conversations = useQAViewStore((state) => state.conversations);
   const activeConversationId = useQAViewStore((state) => state.activeConversationId);
   const createConversation = useQAViewStore((state) => state.createConversation);
@@ -128,6 +135,7 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
+  void onHistoryOpenChange;
 
   const handleCreateConversation = useCallback(() => {
     if (isSending) return;
@@ -309,18 +317,8 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
 
   if (embedded) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <QAConversationToolbar
-          conversations={conversations}
-          activeConversationId={activeConversationId}
-          disabled={isSending}
-          onCreateConversation={handleCreateConversation}
-          onSwitchConversation={handleSwitchConversation}
-          onRenameConversation={handleRenameConversation}
-          onDeleteConversation={handleDeleteConversation}
-          onTogglePinConversation={handleTogglePinConversation}
-        />
-        <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="flex h-full min-h-0 overflow-hidden">
+        <div className="min-w-0 flex-1 overflow-hidden bg-background">
           <QAShell
             embedded={embedded}
             messages={messages}
@@ -331,6 +329,25 @@ export function QAView({ embedded = false }: QAViewProps = {}) {
             onSend={handleSend}
             onStop={handleStop}
             onFeedback={handleFeedback}
+          />
+        </div>
+
+        <div
+          className={cn(
+            "min-h-0 shrink-0 overflow-hidden border-l border-border bg-card transition-[width] duration-300 ease-out",
+            historyOpen ? "w-[280px]" : "w-0 border-l-transparent"
+          )}
+        >
+          <QAConversationHistoryPanel
+            conversations={conversations}
+            activeConversationId={activeConversationId}
+            disabled={isSending}
+            historyOpen={historyOpen}
+            onCreateConversation={handleCreateConversation}
+            onSwitchConversation={handleSwitchConversation}
+            onRenameConversation={handleRenameConversation}
+            onDeleteConversation={handleDeleteConversation}
+            onTogglePinConversation={handleTogglePinConversation}
           />
         </div>
       </div>

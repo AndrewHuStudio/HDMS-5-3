@@ -1,21 +1,19 @@
 # Task Plan
 
 ## Goal
-Implement destructive reset behavior with explicit user confirmation for OCR, vector ingestion, graph build, and all-in-one reset flows. Also fix the vector upload production build failure caused by nullable ingestion reports.
+Implement the assistant-side panel redesign so the QA view uses a review-tool-style right layout, adds a theme-aligned history drawer, and shrinks the 3D viewport when the drawer is open.
 
 ## Phases
-- [completed] Document confirmed requirements and inspect current reset implementation.
-- [completed] Add failing tests for refresh and reset behavior.
-- [completed] Implement backend reset endpoints and frontend confirmation dialogs.
-- [completed] Add regression coverage for nullable ingestion reports during vector refresh.
-- [completed] Fix vector upload build failure by guarding nullable merged reports.
-- [completed] Verify behavior with targeted tests.
+- [completed] Inspect current assistant shell, QA view, and existing tests.
+- [completed] Add failing regression tests for the history drawer controls and collapse rules.
+- [completed] Implement the new assistant toolbar, right-side drawer layout, and viewport-dismiss interaction.
+- [completed] Verify with targeted tests and a relevant frontend build/check.
 
 ## Confirmed Requirements
-- Vector page refresh should turn failed items back into `not_started` in the UI.
-- Vector page build must not fail when merged/normalized ingestion report is `null`.
-- OCR reset deletes OCR output data.
-- Vector reset primarily deletes MongoDB and Milvus ingestion data.
-- Graph reset deletes Neo4j graph data.
-- Every destructive reset must show a warning confirmation dialog before executing.
-- All-in-one reset should clear OCR outputs, vector data, and graph data.
+- Right-side assistant area should visually align with the `限高检测` style rather than the current full chat sidebar style.
+- Top area should include a small logo and the `管控问答助手` title.
+- Top-right should expose a theme-aligned `历史对话` button.
+- Clicking the history button opens a sliding history list on the far right and compresses the 3D viewport.
+- Clicking the history button again closes the history list.
+- Clicking the main viewport also closes the history list.
+- Clicking a history conversation switches the active conversation but does not auto-close the history list.
