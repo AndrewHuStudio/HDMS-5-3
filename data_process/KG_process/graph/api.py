@@ -92,10 +92,13 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _estimate_batch_total_documents(max_docs: Optional[int]) -> int:
+def _estimate_batch_total_documents(max_docs: Optional[int], doc_ids: Optional[List[str]] = None) -> int:
     """Best-effort estimate used for async kickoff response."""
+    normalized_doc_ids = [str(doc_id).strip() for doc_id in (doc_ids or []) if str(doc_id).strip()]
+    if normalized_doc_ids:
+        return len(normalized_doc_ids)
     try:
-        total = int(db_manager.mongodb.count_documents("documents"))
+        total = int(db_manager.mongodb.count_documents("documents", {"ingest_status": "complete"}))
     except Exception as exc:
         logger.warning("Failed to estimate document count for async graph build: %s", exc)
         return 0
@@ -127,12 +130,21 @@ def _run_async_batch_build(request: Any) -> None:
 
     try:
         builder = _create_graph_builder()
-        result = builder.build_from_all_documents(
-            use_llm=request.use_llm,
-            max_docs=request.max_docs,
-            skip_built=request.skip_built,
-            force_rebuild=request.force_rebuild,
-        )
+        normalized_doc_ids = [str(doc_id).strip() for doc_id in (getattr(request, "doc_ids", None) or []) if str(doc_id).strip()]
+        if normalized_doc_ids:
+            result = builder.build_from_documents(
+                doc_ids=normalized_doc_ids,
+                use_llm=request.use_llm,
+                skip_built=request.skip_built,
+                force_rebuild=request.force_rebuild,
+            )
+        else:
+            result = builder.build_from_all_documents(
+                use_llm=request.use_llm,
+                max_docs=request.max_docs,
+                skip_built=request.skip_built,
+                force_rebuild=request.force_rebuild,
+            )
     except Exception as exc:
         error_message = str(exc)
         logger.error("Async batch graph build failed: %s", exc)
@@ -249,20 +261,30 @@ async def build_graph_batch(request: BatchGraphBuildRequest) -> BatchGraphBuildR
                 return BatchGraphBuildResponse(**snapshot["result"])
 
             return BatchGraphBuildResponse(
-                total=_estimate_batch_total_documents(request.max_docs),
+                total=_estimate_batch_total_documents(request.max_docs, request.doc_ids),
                 success=0,
                 failed=0,
                 documents=[],
             )
 
         builder = _create_graph_builder()
-        result = await asyncio.to_thread(
-            builder.build_from_all_documents,
-            use_llm=request.use_llm,
-            max_docs=request.max_docs,
-            skip_built=request.skip_built,
-            force_rebuild=request.force_rebuild,
-        )
+        normalized_doc_ids = [str(doc_id).strip() for doc_id in (request.doc_ids or []) if str(doc_id).strip()]
+        if normalized_doc_ids:
+            result = await asyncio.to_thread(
+                builder.build_from_documents,
+                normalized_doc_ids,
+                request.use_llm,
+                request.skip_built,
+                request.force_rebuild,
+            )
+        else:
+            result = await asyncio.to_thread(
+                builder.build_from_all_documents,
+                use_llm=request.use_llm,
+                max_docs=request.max_docs,
+                skip_built=request.skip_built,
+                force_rebuild=request.force_rebuild,
+            )
         return BatchGraphBuildResponse(**result)
 
     except Exception as e:

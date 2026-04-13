@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .core import (
     OCRError,
     clear_output_dir,
+    delete_ocr_document,
     get_destinations,
     get_job_status,
     get_sources,
@@ -19,6 +20,9 @@ from .core import (
     submit_ocr_job,
     submit_ocr_job_from_source,
 )
+from ..core import config
+from ..core.database.manager import db_manager
+from ..vector_process.ingestion.pipeline import IngestionPipeline
 
 # ---------------------------------------------------------------------------
 # Router (can be mounted into the main app)
@@ -61,6 +65,32 @@ class CreateJobFromSourceRequest(BaseModel):
     recursive: bool = True
 
 
+class DeleteOCRDocumentRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+    markdown_path: str = Field(..., min_length=1)
+
+
+def _ensure_db_ready() -> None:
+    if db_manager._initialized:
+        return
+    db_manager.ensure_initialized(
+        max_retries=config.DB_INIT_MAX_RETRIES,
+        retry_delay_seconds=config.DB_INIT_RETRY_DELAY_SECONDS,
+    )
+
+
+def _create_cleanup_pipeline() -> IngestionPipeline:
+    _ensure_db_ready()
+    return IngestionPipeline(
+        milvus_client=db_manager.milvus,
+        mongodb_client=db_manager.mongodb,
+        embedding_service=None,  # type: ignore[arg-type]
+        vision_service=None,  # type: ignore[arg-type]
+        chunker=None,  # type: ignore[arg-type]
+        neo4j_client=db_manager.neo4j,
+    )
+
+
 @router.get("/api/sources", response_model=SourcesResponse)
 def list_sources() -> SourcesResponse:
     try:
@@ -81,6 +111,21 @@ def list_destinations() -> DestinationsResponse:
 def clear_outputs() -> dict:
     try:
         return clear_output_dir()
+    except OCRError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+
+
+@router.delete("/api/document")
+def delete_document(request: DeleteOCRDocumentRequest) -> dict:
+    try:
+        pipeline = _create_cleanup_pipeline()
+        return delete_ocr_document(
+            request.markdown_path,
+            delete_downstream=lambda markdown_path: pipeline.delete_documents_by_markdown_path(
+                markdown_path,
+                delete_versions=True,
+            ),
+        )
     except OCRError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message)
 

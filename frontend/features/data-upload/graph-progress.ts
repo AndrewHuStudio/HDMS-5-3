@@ -8,6 +8,7 @@ export type GraphDocStatus =
 
 export interface GraphProgressRow {
   key: string;
+  docId: string | null;
   fileName: string;
   status: GraphDocStatus;
   progress: number;
@@ -54,6 +55,13 @@ function _isBuiltSuccess(status: string): boolean {
   return status === "success" || status === "skipped";
 }
 
+function _normalizeBuiltStatus(status: string): GraphDocStatus {
+  if (_isBuiltSuccess(status)) return "success";
+  if (status === "in_progress" || status === "running") return "in_progress";
+  if (status === "failed") return "failed";
+  return "pending";
+}
+
 function _normalizeProgress(value: number | null | undefined): number {
   if (value == null || Number.isNaN(Number(value))) return 0;
   const progress = Math.floor(Number(value));
@@ -80,13 +88,20 @@ export function buildGraphProgressRows(
 
     if (built) {
       const builtStatus = String(built.status || "");
-      const builtOk = _isBuiltSuccess(builtStatus);
-      const inProgress = builtStatus === "in_progress";
+      const normalizedBuiltStatus = _normalizeBuiltStatus(builtStatus);
       return {
         key: String(built.doc_id),
+        docId: String(built.doc_id),
         fileName: built.file_name || doc.file_name,
-        status: builtOk ? "success" : inProgress ? "in_progress" : "failed",
-        progress: builtOk ? 100 : inProgress ? _normalizeProgress(built.progress) : 100,
+        status: normalizedBuiltStatus,
+        progress:
+          normalizedBuiltStatus === "success"
+            ? 100
+            : normalizedBuiltStatus === "in_progress"
+              ? _normalizeProgress(built.progress)
+              : normalizedBuiltStatus === "failed"
+                ? 100
+                : 0,
         entitiesCount: built.entities_count ?? 0,
         relationshipsCount: built.relationships_count ?? 0,
         error: built.error,
@@ -95,6 +110,7 @@ export function buildGraphProgressRows(
 
     return {
       key: doc.markdown_path,
+      docId: doc.doc_id ? String(doc.doc_id) : null,
       fileName: doc.file_name,
       status:
         doc.status === "complete"

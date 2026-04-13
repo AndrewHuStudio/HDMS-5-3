@@ -88,6 +88,20 @@ class GraphStoreService:
         self.entity_filter = create_entity_filter() if enable_entity_filtering else None
         self.importance_scorer = create_importance_scorer() if enable_importance_scoring else None
 
+    def _should_bypass_llm_extraction(self, text: str, is_table: bool = False) -> bool:
+        """Use deterministic extraction for table-heavy or oversized chunks."""
+        content = str(text or "")
+        if not content.strip():
+            return True
+        if is_table:
+            return True
+        lowered = content.lower()
+        if "<table" in lowered or "</table>" in lowered:
+            return True
+        if len(content) > 6000:
+            return True
+        return False
+
     # ------------------------------------------------------------------
     # LLM call helper
     # ------------------------------------------------------------------
@@ -352,7 +366,8 @@ class GraphStoreService:
         chunks: List[Dict[str, Any]],
         use_llm: bool = True,
         file_name: str = "",
-        file_path: str = ""
+        file_path: str = "",
+        source_document: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Build knowledge graph from document chunks using two-pass extraction.
@@ -367,6 +382,21 @@ class GraphStoreService:
         total_chunks = max(len(chunks), 1)
         processed_chunks = 0
         progress_update_interval = 5
+        source_document = dict(source_document or {})
+
+        source_props = {
+            "source_version": source_document.get("version"),
+            "source_content_hash": source_document.get("content_hash"),
+            "source_updated_at": source_document.get("updated_at"),
+            "source_chunks_count": source_document.get("chunks_count"),
+        }
+
+        def _merge_source_props(extra: Dict[str, Any]) -> Dict[str, Any]:
+            merged = dict(extra)
+            for key, value in source_props.items():
+                if value is not None:
+                    merged[key] = value
+            return merged
 
         def _doc_progress(phase: str, processed: int, status: str = "in_progress") -> None:
             if not doc_node_id:
@@ -379,12 +409,12 @@ class GraphStoreService:
                     file_name=file_name,
                     file_path=file_path,
                     kg_status=status,
-                    extra_props={
+                    extra_props=_merge_source_props({
                         "kg_phase": phase,
                         "kg_total_chunks": total_chunks,
                         "kg_processed_chunks": clamped_processed,
                         "kg_progress": progress,
-                    },
+                    }),
                 )
             except Exception as progress_error:
                 logger.warning(f"Failed to update progress for {doc_id}: {progress_error}")
@@ -395,12 +425,12 @@ class GraphStoreService:
                 file_name=file_name,
                 file_path=file_path,
                 kg_status="in_progress",
-                extra_props={
+                extra_props=_merge_source_props({
                     "kg_phase": "analyzing",
                     "kg_total_chunks": total_chunks,
                     "kg_processed_chunks": 0,
                     "kg_progress": 0,
-                },
+                }),
             )
         except Exception as e:
             # Don't block graph building if document tracking fails.
@@ -451,7 +481,7 @@ class GraphStoreService:
 
                 is_table = chunk.get("has_table", False)
 
-                if use_llm:
+                if use_llm and not self._should_bypass_llm_extraction(text, is_table):
                     extracted = self.extract_entities_and_relations(
                         text=text,
                         doc_type=doc_type,
@@ -522,14 +552,14 @@ class GraphStoreService:
                         file_name=file_name,
                         file_path=file_path,
                         kg_status="success",
-                        extra_props={
+                        extra_props=_merge_source_props({
                             "kg_entities_count": len(all_entities),
                             "kg_relationships_count": len(all_relationships),
                             "kg_phase": "completed",
                             "kg_total_chunks": total_chunks,
                             "kg_processed_chunks": total_chunks,
                             "kg_progress": 100,
-                        },
+                        }),
                     )
                 except Exception as e:
                     logger.warning(f"Failed to mark Document as success for {doc_id}: {e}")
@@ -553,7 +583,7 @@ class GraphStoreService:
                         file_name=file_name,
                         file_path=file_path,
                         kg_status="failed",
-                        extra_props={
+                        extra_props=_merge_source_props({
                             "kg_error": str(e),
                             "kg_phase": "failed",
                             "kg_total_chunks": total_chunks,
@@ -561,7 +591,7 @@ class GraphStoreService:
                             "kg_progress": int(
                                 round((max(0, min(processed_chunks, total_chunks)) / total_chunks) * 100)
                             ),
-                        },
+                        }),
                     )
                 except Exception as ee:
                     logger.warning(f"Failed to mark Document as failed for {doc_id}: {ee}")

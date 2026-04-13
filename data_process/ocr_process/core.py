@@ -1,11 +1,12 @@
 ﻿from __future__ import annotations
 
 import bisect
-import http.client
+import copy
 import hashlib
 import json
 import logging
 import os
+import requests
 import shutil
 import threading
 import time
@@ -17,7 +18,9 @@ import uuid
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+from requests import RequestException
 
 
 # Configure logging
@@ -135,41 +138,44 @@ def _http_json(method: str, url: str, payload: dict | None, headers: dict[str, s
 
 def _http_put(url: str, file_path: Path) -> None:
     """
-    MinerU returns a pre-signed OSS URL for PUT. urllib adds a default
-    `Content-Type: application/x-www-form-urlencoded` when `data` is present,
-    which can break the signature. Use http.client to control headers.
+    Upload to MinerU's pre-signed URL without forcing a Content-Type header.
+    The current OSS flow is compatible with requests.put but not the lower-level
+    http.client implementation used previously.
     """
     data = file_path.read_bytes()
     parts = urllib.parse.urlsplit(url)
     if not parts.scheme or not parts.netloc:
         raise OCRError("Invalid upload URL from MinerU", status_code=502)
 
-    path = parts.path + (f"?{parts.query}" if parts.query else "")
-    timeout = 600
+    max_attempts = max(1, int(_load_setting("MINERU_UPLOAD_MAX_ATTEMPTS", "3") or "3"))
+    retry_delay = max(0.0, float(_load_setting("MINERU_UPLOAD_RETRY_DELAY", "1") or "1"))
+    last_error: RequestException | None = None
 
-    conn: http.client.HTTPConnection
-    if parts.scheme.lower() == "https":
-        conn = http.client.HTTPSConnection(parts.hostname, parts.port or 443, timeout=timeout)
-    else:
-        conn = http.client.HTTPConnection(parts.hostname, parts.port or 80, timeout=timeout)
-
-    try:
-        # Keep headers minimal to match the signature. Content-Length is safe.
-        conn.request("PUT", path, body=data, headers={"Content-Length": str(len(data))})
-        resp = conn.getresponse()
-        body = resp.read() or b""
-        if resp.status >= 400:
-            detail = body.decode("utf-8", errors="ignore").strip()
-            raise OCRError(detail or f"Upload failed: {resp.status}", status_code=resp.status)
-    except OCRError:
-        raise
-    except Exception as exc:
-        raise OCRError(f"Upload failed: {exc}", status_code=502) from exc
-    finally:
+    for attempt in range(1, max_attempts + 1):
         try:
-            conn.close()
-        except Exception:
-            pass
+            resp = requests.put(url, data=data, timeout=600)
+            if resp.status_code >= 400:
+                detail = (resp.text or "").strip()
+                raise OCRError(detail or f"Upload failed: {resp.status_code}", status_code=resp.status_code)
+            return
+        except OCRError:
+            raise
+        except RequestException as exc:
+            last_error = exc
+            if attempt >= max_attempts:
+                break
+            logger.warning(
+                "MinerU upload attempt %s/%s failed for %s: %s; retrying in %.1fs",
+                attempt,
+                max_attempts,
+                file_path.name,
+                exc,
+                retry_delay,
+            )
+            if retry_delay > 0:
+                time.sleep(retry_delay)
+
+    raise OCRError(f"Upload failed: {last_error}", status_code=502) from last_error
 
 
 def _compact_upload_error(detail: str) -> str:
@@ -443,17 +449,83 @@ def _collect_existing_source_hashes(output_root: Path, category: str) -> set[str
 _jobs_lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
 _worker_sema = threading.Semaphore(int(os.getenv("OCR_MAX_WORKERS", "2")))
+_terminal_job_statuses = {"done", "failed"}
+
+
+def _job_store_dir() -> Path:
+    root = _resolve_path(_load_setting("OCR_JOB_STORE_DIR"), "data/ocr_jobs")
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _job_store_path(job_id: str) -> Path:
+    safe_job_id = Path(str(job_id or "").strip()).name
+    return _job_store_dir() / f"{safe_job_id}.json"
+
+
+def _serialize_job(job: dict[str, Any]) -> dict[str, Any]:
+    payload = copy.deepcopy(job)
+    for item in payload.get("files", []):
+        item.pop("tmp_file", None)
+    return payload
+
+
+def _persist_job_snapshot(job: dict[str, Any]) -> None:
+    payload = _serialize_job(job)
+    target = _job_store_path(str(payload.get("job_id") or ""))
+    tmp_path = target.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(target)
+
+
+def _load_persisted_job(job_id: str) -> dict[str, Any] | None:
+    target = _job_store_path(job_id)
+    if not target.exists() or not target.is_file():
+        return None
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or str(payload.get("job_id") or "") != str(job_id):
+        return None
+    return payload
+
+
+def _recover_interrupted_job(job: dict[str, Any]) -> dict[str, Any]:
+    payload = copy.deepcopy(job)
+    recovered_at = time.strftime("%Y-%m-%d %H:%M:%S")
+    interrupted = False
+
+    for item in payload.get("files", []):
+        status = str(item.get("status") or "").strip().lower()
+        if status in _terminal_job_statuses:
+            continue
+        item["status"] = "failed"
+        item["progress"] = 0
+        item["error"] = item.get("error") or "OCR 服务重启，任务已中断，请重新提交"
+        item["updated_at"] = recovered_at
+        interrupted = True
+
+    if interrupted:
+        payload["updated_at"] = recovered_at
+
+    return payload
 
 
 def _job_set(job_id: str, update: dict[str, Any]) -> None:
+    snapshot: dict[str, Any] | None = None
     with _jobs_lock:
         job = _jobs.get(job_id)
         if not job:
             return
         job.update(update)
+        snapshot = copy.deepcopy(job)
+    if snapshot is not None:
+        _persist_job_snapshot(snapshot)
 
 
 def _job_update_file(job_id: str, file_id: str, update: dict[str, Any]) -> None:
+    snapshot: dict[str, Any] | None = None
     with _jobs_lock:
         job = _jobs.get(job_id)
         if not job:
@@ -463,6 +535,9 @@ def _job_update_file(job_id: str, file_id: str, update: dict[str, Any]) -> None:
                 item.update(update)
                 break
         job["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        snapshot = copy.deepcopy(job)
+    if snapshot is not None:
+        _persist_job_snapshot(snapshot)
 
 
 def _poll_progress(extract_result: dict[str, Any]) -> tuple[int, int, int]:
@@ -818,6 +893,10 @@ def clear_output_dir() -> dict:
     if not root.exists():
         root.mkdir(parents=True, exist_ok=True)
         _ensure_default_destination(root)
+        job_store = _job_store_dir()
+        if job_store.exists():
+            shutil.rmtree(job_store, ignore_errors=True)
+            job_store.mkdir(parents=True, exist_ok=True)
         return {"deleted": 0}
 
     deleted = 0
@@ -832,8 +911,66 @@ def clear_output_dir() -> dict:
         except Exception:
             continue
 
+    job_store = _job_store_dir()
+    if job_store.exists():
+        try:
+            shutil.rmtree(job_store, ignore_errors=True)
+        except Exception:
+            pass
+        job_store.mkdir(parents=True, exist_ok=True)
+    with _jobs_lock:
+        _jobs.clear()
+
     _ensure_default_destination(root)
     return {"deleted": deleted}
+
+
+def delete_ocr_document(
+    markdown_path: str,
+    delete_downstream: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Delete one OCR output directory and optionally cascade downstream cleanup."""
+    output_root = _resolve_path(_load_setting("OCR_OUTPUT_DIR"), "data/ocr_output")
+    if not markdown_path:
+        raise OCRError("markdown_path is required", status_code=400)
+
+    try:
+        resolved_markdown = Path(markdown_path).resolve()
+    except Exception as exc:
+        raise OCRError(f"Invalid markdown path: {exc}", status_code=400) from exc
+
+    if resolved_markdown.suffix.lower() != ".md" or resolved_markdown.name.endswith(".meta.md"):
+        raise OCRError("Invalid OCR markdown file", status_code=400)
+    if output_root not in resolved_markdown.parents:
+        raise OCRError("markdown_path is outside OCR output directory", status_code=400)
+    if not resolved_markdown.exists() or not resolved_markdown.is_file():
+        raise OCRError("OCR markdown file not found", status_code=404)
+
+    doc_dir = resolved_markdown.parent
+    deleted_ocr_files = sum(1 for item in doc_dir.rglob("*") if item.is_file())
+
+    downstream_result: dict[str, Any] = {}
+    if delete_downstream:
+        downstream_result = delete_downstream(str(resolved_markdown)) or {}
+
+    shutil.rmtree(doc_dir)
+
+    parent_dir = doc_dir.parent
+    if parent_dir != output_root:
+        try:
+            if parent_dir.exists() and not any(parent_dir.iterdir()):
+                parent_dir.rmdir()
+        except Exception:
+            pass
+
+    _ensure_default_destination(output_root)
+
+    return {
+        "markdown_path": str(resolved_markdown),
+        "deleted_ocr_documents": 1,
+        "deleted_ocr_files": int(deleted_ocr_files),
+        **downstream_result,
+    }
 
 
 def submit_ocr_job(
@@ -921,6 +1058,8 @@ def submit_ocr_job(
                 "updated_at": created_at,
                 "files": [],
             }
+            snapshot = copy.deepcopy(_jobs[job_id])
+        _persist_job_snapshot(snapshot)
         return {
             "job_id": job_id,
             "accepted_count": 0,
@@ -938,6 +1077,8 @@ def submit_ocr_job(
             "updated_at": created_at,
             "files": file_entries,
         }
+        snapshot = copy.deepcopy(_jobs[job_id])
+    _persist_job_snapshot(snapshot)
 
     for item in file_entries:
         tmp_file = Path(item["tmp_file"])
@@ -993,20 +1134,29 @@ def submit_ocr_job_from_source(source: str, destination: str, recursive: bool = 
 def get_job_status(job_id: str) -> dict | None:
     with _jobs_lock:
         job = _jobs.get(job_id)
-        if not job:
+    if not job:
+        persisted = _load_persisted_job(job_id)
+        if not persisted:
             return None
+        recovered = _recover_interrupted_job(persisted)
+        with _jobs_lock:
+            _jobs[job_id] = recovered
+        _persist_job_snapshot(recovered)
+        job = recovered
+    if not job:
+        return None
         # Hide tmp_file paths from UI.
-        safe_files = []
-        for f in job.get("files", []):
-            item = dict(f)
-            item.pop("tmp_file", None)
-            safe_files.append(item)
-        return {
-            "job_id": job["job_id"],
-            "created_at": job["created_at"],
-            "updated_at": job["updated_at"],
-            "files": safe_files,
-        }
+    safe_files = []
+    for f in job.get("files", []):
+        item = dict(f)
+        item.pop("tmp_file", None)
+        safe_files.append(item)
+    return {
+        "job_id": job["job_id"],
+        "created_at": job["created_at"],
+        "updated_at": job["updated_at"],
+        "files": safe_files,
+    }
 
 
 def get_summary() -> dict:

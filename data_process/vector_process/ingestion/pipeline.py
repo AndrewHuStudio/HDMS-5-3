@@ -161,6 +161,44 @@ class IngestionPipeline:
             "deleted_versions": int(deleted_versions),
         }
 
+    def delete_documents_by_markdown_path(
+        self,
+        markdown_path: str,
+        delete_versions: bool = True,
+    ) -> Dict[str, Any]:
+        """Delete all ingested documents that reference one OCR markdown path."""
+        documents = self.mongodb.find_by_query(
+            self.DOCUMENTS_COLLECTION,
+            {"markdown_path": markdown_path},
+            limit=None,
+            projection={"_id": 1},
+        )
+
+        deleted_doc_ids: List[str] = []
+        totals = {
+            "deleted_documents": 0,
+            "deleted_chunks": 0,
+            "deleted_vectors": 0,
+            "deleted_graph_docs": 0,
+            "deleted_graph_entities": 0,
+            "deleted_versions": 0,
+        }
+
+        for item in documents:
+            doc_id = str(item.get("_id") or "").strip()
+            if not doc_id:
+                continue
+            deleted_doc_ids.append(doc_id)
+            result = self.delete_document(doc_id=doc_id, delete_versions=delete_versions)
+            for key in totals:
+                totals[key] += int(result.get(key, 0) or 0)
+
+        return {
+            "matched_documents": len(deleted_doc_ids),
+            **totals,
+            "deleted_doc_ids": deleted_doc_ids,
+        }
+
     def clear_all_documents(self, delete_versions: bool = True) -> Dict[str, Any]:
         """Clear all vector-ingestion data from MongoDB and Milvus."""
         deleted_vectors = 0
@@ -468,6 +506,9 @@ class IngestionPipeline:
             "ingest_status": "in_progress",
             "ingest_error": "",
             "chunks_count": 0,
+            "processed_chunks": 0,
+            "total_chunks": 0,
+            "ingest_progress": 0,
             "images_processed": 0,
             "version": version,
         }
@@ -510,6 +551,17 @@ class IngestionPipeline:
                 image_descriptions=image_descriptions,
                 version=version,
             )
+            total_chunks = len(prepared_chunks)
+            self.mongodb.update_document(
+                self.DOCUMENTS_COLLECTION,
+                doc_id,
+                {
+                    "processed_chunks": 0,
+                    "total_chunks": total_chunks,
+                    "ingest_progress": 5 if total_chunks > 0 else 0,
+                    "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                },
+            )
 
             existing_chunks = self.mongodb.find_by_query(
                 self.CHUNKS_COLLECTION,
@@ -541,7 +593,9 @@ class IngestionPipeline:
             if chunks_to_upsert:
                 milvus_data = []
                 chunk_records = []
-                for chunk, embedding in zip(chunks_to_upsert, embeddings):
+                progress_update_interval = 10
+                upsert_total = max(len(chunks_to_upsert), 1)
+                for index, (chunk, embedding) in enumerate(zip(chunks_to_upsert, embeddings), start=1):
                     chunk_id = str(chunk["_id"])
                     milvus_meta = {
                         "section_title": chunk["section_title"],
@@ -570,6 +624,20 @@ class IngestionPipeline:
                     chunk_record["embedding_dimension"] = len(embedding)
                     chunk_records.append(chunk_record)
 
+                    if index == upsert_total or index % progress_update_interval == 0:
+                        processed_chunks = min(total_chunks, int(diff["unchanged"]) + index)
+                        progress = min(95, max(5, int(round((processed_chunks / max(total_chunks, 1)) * 100))))
+                        self.mongodb.update_document(
+                            self.DOCUMENTS_COLLECTION,
+                            doc_id,
+                            {
+                                "processed_chunks": processed_chunks,
+                                "total_chunks": total_chunks,
+                                "ingest_progress": progress,
+                                "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            },
+                        )
+
                 self.milvus.insert_vectors(config.MILVUS_COLLECTION_TEXT, milvus_data)
                 try:
                     self.mongodb.insert_many(self.CHUNKS_COLLECTION, chunk_records)
@@ -586,6 +654,17 @@ class IngestionPipeline:
                             f"Failed to rollback Milvus vectors for {doc_id}: {rollback_err}"
                         )
                     raise mongo_err
+            else:
+                self.mongodb.update_document(
+                    self.DOCUMENTS_COLLECTION,
+                    doc_id,
+                    {
+                        "processed_chunks": int(diff["unchanged"]),
+                        "total_chunks": total_chunks,
+                        "ingest_progress": 95 if total_chunks > 0 else 100,
+                        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    },
+                )
 
             operation = "created"
             if existing_doc:
@@ -598,6 +677,9 @@ class IngestionPipeline:
                 doc_id,
                 {
                     "chunks_count": len(prepared_chunks),
+                    "processed_chunks": len(prepared_chunks),
+                    "total_chunks": len(prepared_chunks),
+                    "ingest_progress": 100,
                     "images_processed": images_processed,
                     "ingest_status": "complete",
                     "ingest_error": "",
@@ -841,6 +923,9 @@ class IngestionPipeline:
                             "ingest_status": "failed",
                             "ingest_error": mark_failed_reason,
                             "chunks_count": 0,
+                            "processed_chunks": 0,
+                            "total_chunks": 0,
+                            "ingest_progress": 0,
                             "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                         }
                     )

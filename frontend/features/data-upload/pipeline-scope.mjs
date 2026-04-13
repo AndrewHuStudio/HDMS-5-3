@@ -8,40 +8,49 @@ function normalizeKey(value) {
 
 /**
  * 向量化候选文档：
- * - 若当前 OCR 任务存在，则仅取当前任务中 status=done 的文件
- * - 否则回退到 OCR summary（历史已完成文档）
+ * - 保留当前 OCR 任务中 status=done 的文件
+ * - 同时补齐 OCR summary 中其余历史已完成文档，避免新任务遮蔽旧数据
  */
 export function buildVectorSourceDocs({ currentJob, summary }) {
   const summaryDocs = summary?.documents ?? [];
   const summaryByName = new Map(summaryDocs.map((doc) => [normalizeKey(doc.name), doc]));
 
   const currentFiles = currentJob?.files ?? [];
-  if (currentFiles.length > 0) {
-    const doneDocs = [];
-    for (const file of currentFiles) {
-      if (file?.status !== "done" || !file?.markdown_path) {
-        continue;
-      }
-      const key = normalizeKey(file.file_name);
-      const summaryDoc = summaryByName.get(key);
-      doneDocs.push({
-        name: summaryDoc?.name || normalizeDocName(file.file_name),
-        category: summaryDoc?.category || file.category || "",
-        markdown_path: file.markdown_path,
-        pages: Number(file.pages ?? file.total_pages ?? summaryDoc?.pages ?? 0),
-        images: Number(summaryDoc?.images ?? 0),
-      });
+  const docs = [];
+  const seen = new Set();
+
+  for (const file of currentFiles) {
+    if (file?.status !== "done" || !file?.markdown_path) {
+      continue;
     }
-    return doneDocs;
+    const key = normalizeKey(file.file_name);
+    const summaryDoc = summaryByName.get(key);
+    docs.push({
+      name: summaryDoc?.name || normalizeDocName(file.file_name),
+      category: summaryDoc?.category || file.category || "",
+      markdown_path: file.markdown_path,
+      pages: Number(file.pages ?? file.total_pages ?? summaryDoc?.pages ?? 0),
+      images: Number(summaryDoc?.images ?? 0),
+    });
+    seen.add(key);
   }
 
-  return summaryDocs.map((doc) => ({
-    name: doc.name,
-    category: doc.category,
-    markdown_path: doc.markdown_path,
-    pages: Number(doc.pages ?? 0),
-    images: Number(doc.images ?? 0),
-  }));
+  for (const doc of summaryDocs) {
+    const key = normalizeKey(doc.name);
+    if (seen.has(key)) {
+      continue;
+    }
+    docs.push({
+      name: doc.name,
+      category: doc.category,
+      markdown_path: doc.markdown_path,
+      pages: Number(doc.pages ?? 0),
+      images: Number(doc.images ?? 0),
+    });
+    seen.add(key);
+  }
+
+  return docs;
 }
 
 /**

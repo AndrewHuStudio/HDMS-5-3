@@ -52,6 +52,10 @@ class BatchGraphBuildRequest(BaseModel):
 
     use_llm: bool = Field(True, description="Whether to use LLM for entity extraction")
     max_docs: Optional[int] = Field(None, description="Maximum documents to process")
+    doc_ids: Optional[List[str]] = Field(
+        None,
+        description="Specific document IDs to process incrementally",
+    )
     skip_built: bool = Field(False, description="Skip documents already marked as built")
     force_rebuild: bool = Field(False, description="Force rebuild even if already built")
     async_mode: bool = Field(

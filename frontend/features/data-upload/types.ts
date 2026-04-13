@@ -63,6 +63,20 @@ export interface OCRDestinations {
   destinations: string[];
 }
 
+export interface OCRDeleteResponse {
+  markdown_path: string;
+  deleted_ocr_documents: number;
+  deleted_ocr_files: number;
+  matched_documents?: number;
+  deleted_documents?: number;
+  deleted_chunks?: number;
+  deleted_vectors?: number;
+  deleted_graph_docs?: number;
+  deleted_graph_entities?: number;
+  deleted_versions?: number;
+  deleted_doc_ids?: string[];
+}
+
 export type OCRStatus = "idle" | "uploading" | "processing" | "completed" | "error";
 
 // ---- 向量化处理 ----
@@ -73,6 +87,9 @@ export interface IngestionDocState {
   status: "not_started" | "in_progress" | "complete" | "failed";
   doc_id?: string;
   chunks_count: number;
+  processed_chunks?: number;
+  total_chunks?: number;
+  progress?: number;
   images_processed: number;
   version?: number;
   ingested_at?: string;

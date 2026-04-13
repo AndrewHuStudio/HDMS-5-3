@@ -25,7 +25,6 @@ import {
   getIngestionReport,
   getIngestionStatus,
   getOCRSummary,
-  getOCRJobStatus,
   clearIngestionData,
 } from "./api";
 import type { IngestionDocState, IngestionReportResponse } from "./types";
@@ -33,7 +32,6 @@ import {
   buildIngestionScopeDirs,
   isIngestionReportComplete,
   mergeIngestionReports,
-  normalizeIngestionReportForRefresh,
 } from "./ingestion-report-utils.mjs";
 import { buildVectorSourceDocs } from "./pipeline-scope.mjs";
 
@@ -60,8 +58,26 @@ interface MergedVectorRow {
 
 function getVectorProgressValue(ingestion: IngestionDocState | null): number {
   if (!ingestion || ingestion.status === "not_started") return 0;
-  if (ingestion.status === "in_progress") return 60;
+  if (typeof ingestion.progress === "number") return ingestion.progress;
+  if (ingestion.status === "in_progress") return 1;
   return 100;
+}
+
+function sameOcrDocList(
+  left: Array<{ name: string; category: string; markdown_path: string; pages: number; images: number }>,
+  right: Array<{ name: string; category: string; markdown_path: string; pages: number; images: number }>,
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((doc, index) => {
+    const other = right[index];
+    return (
+      doc.name === other?.name &&
+      doc.category === other?.category &&
+      doc.markdown_path === other?.markdown_path &&
+      doc.pages === other?.pages &&
+      doc.images === other?.images
+    );
+  });
 }
 
 export function VectorUploadPanel() {
@@ -91,12 +107,19 @@ export function VectorUploadPanel() {
     reset,
   } = useVectorStore();
 
-  const {
-    currentJob,
-    setCurrentJob,
-    summary: ocrSummary,
-    setSummary: setOcrSummary,
-  } = useOCRStore();
+  const summaryFingerprint = useOCRStore((state) => {
+    const summary = state.summary;
+    if (!summary) return "";
+    return `${summary.total_files}:${summary.total_pages}:${summary.total_images}:${summary.documents.length}`;
+  });
+  const setOcrSummary = useOCRStore((state) => state.setSummary);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
 
   // 计时器
   useEffect(() => {
@@ -113,41 +136,19 @@ export function VectorUploadPanel() {
     };
   }, [startTime, status]);
 
-  // 加载“当前流程可向量化”的 OCR 文档：
-  // 若当前 OCR 任务存在，仅取当前任务 done 文档；否则回退到 summary。
-  const loadOcrDocs = useCallback(async (refresh = false) => {
-    let latestJob = currentJob;
-    let latestSummary = ocrSummary;
-
-    if (refresh && latestJob?.job_id) {
-      try {
-        latestJob = await getOCRJobStatus(latestJob.job_id);
-        setCurrentJob(latestJob);
-      } catch {
-        // 任务可能已过期，保留现有状态
-      }
-    }
-
-    if (refresh || !latestSummary) {
-      try {
-        latestSummary = await getOCRSummary();
-        setOcrSummary(latestSummary);
-      } catch {
-        // OCR 服务不可用时静默回退
-      }
-    }
-
+  const syncOcrDocsFromStore = useCallback(() => {
+    const latestSummary = useOCRStore.getState().summary;
     const docs = buildVectorSourceDocs({
-      currentJob: latestJob,
+      currentJob: null,
       summary: latestSummary,
     }) as Array<{ name: string; category: string; markdown_path: string; pages: number; images: number }>;
-    setOcrDocs(docs);
+    setOcrDocs((prev) => (sameOcrDocList(prev, docs) ? prev : docs));
     return docs;
-  }, [currentJob, ocrSummary, setCurrentJob, setOcrSummary]);
+  }, []);
 
   useEffect(() => {
-    loadOcrDocs(false);
-  }, [loadOcrDocs]);
+    syncOcrDocsFromStore();
+  }, [summaryFingerprint, syncOcrDocsFromStore]);
 
   // 加载系统状态
   const loadSysStatus = useCallback(async () => {
@@ -165,10 +166,7 @@ export function VectorUploadPanel() {
 
   // 加载入库报告
   const loadReport = useCallback(
-    async (
-      docs: Array<{ markdown_path: string }> = ocrDocs,
-      options: { normalizeFailedForRefresh?: boolean } = {}
-    ): Promise<IngestionReportResponse | null> => {
+    async (docs: Array<{ markdown_path: string }> = ocrDocs): Promise<IngestionReportResponse | null> => {
       const reportDirs = buildIngestionScopeDirs(docs);
       if (reportDirs.length === 0) {
         setReport(null);
@@ -186,29 +184,19 @@ export function VectorUploadPanel() {
           })
         );
         const merged = mergeIngestionReports(reports);
-        const finalReport = options.normalizeFailedForRefresh
-          ? normalizeIngestionReportForRefresh(merged)
-          : merged;
-        setReport(finalReport as IngestionReportResponse);
+        setReport(merged as IngestionReportResponse);
         setError(null);
-        const allDone = isIngestionReportComplete(finalReport);
+        const allDone = isIngestionReportComplete(merged);
         if (allDone) {
           setStatus("completed");
         }
-        return finalReport as IngestionReportResponse;
+        return merged as IngestionReportResponse;
       } catch {
         return null;
       }
     },
     [ocrDocs, setError, setReport, setStatus]
   );
-
-  // 初始加载报告（如果有 OCR 文档）
-  useEffect(() => {
-    if (ocrDocs.length > 0) {
-      loadReport(ocrDocs);
-    }
-  }, [ocrDocs, loadReport]);
 
   const handleSelectAll = () => {
     selectAll(ocrDocs.map((d) => d.markdown_path));
@@ -237,23 +225,6 @@ export function VectorUploadPanel() {
         await submitBatchIngestion(dir);
       }
 
-      // 开始轮询报告
-      pollingRef.current = setInterval(async () => {
-        const rpt = await loadReport(ocrDocs);
-        if (rpt) {
-          const allDone = rpt.documents.every(
-            (d: IngestionDocState) => d.status === "complete" || d.status === "failed"
-          );
-          if (allDone && rpt.in_progress === 0) {
-            setStatus("completed");
-            await loadSysStatus();
-            if (pollingRef.current) {
-              clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
-          }
-        }
-      }, 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "向量化提交失败");
       setStatus("error");
@@ -268,13 +239,10 @@ export function VectorUploadPanel() {
       await clearIngestionData(true);
       reset();
       setElapsed(0);
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
+      stopPolling();
       await loadSysStatus();
       if (ocrDocs.length > 0) {
-        await loadReport(ocrDocs);
+        await loadReport([...ocrDocs]);
       } else {
         setReport(null);
       }
@@ -287,10 +255,16 @@ export function VectorUploadPanel() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      const docs = await loadOcrDocs(true);
+      try {
+        const latestSummary = await getOCRSummary();
+        setOcrSummary(latestSummary);
+      } catch {
+        // OCR 服务不可用时静默回退
+      }
+      const docs = syncOcrDocsFromStore();
       await loadSysStatus();
       if (docs.length > 0) {
-        await loadReport(docs, { normalizeFailedForRefresh: true });
+        await loadReport(docs);
       }
       setError(null);
     } finally {
@@ -298,16 +272,15 @@ export function VectorUploadPanel() {
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, []);
+  useEffect(() => stopPolling, [stopPolling]);
 
   // ocrDocs 加载完后，自动查一次 report（显示已入库状态）
-  // 如果任务仍在进行中，额外恢复轮询
+  // 轮询统一由本 effect 管理，避免重复创建多个 interval。
   useEffect(() => {
-    if (ocrDocs.length === 0) return;
+    if (ocrDocs.length === 0) {
+      stopPolling();
+      return;
+    }
     loadReport(ocrDocs);
 
     if (status === "ingesting" && !pollingRef.current) {
@@ -320,18 +293,20 @@ export function VectorUploadPanel() {
           if (allDone && rpt.in_progress === 0) {
             setStatus("completed");
             await loadSysStatus();
-            if (pollingRef.current) {
-              clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
+            stopPolling();
           }
         }
       }, 3000);
+    } else if (status !== "ingesting") {
+      stopPolling();
     }
-  }, [ocrDocs]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadReport, loadSysStatus, ocrDocs, status, stopPolling]);
 
   // 构建合并行
-  const reportMap = new Map(
+  const reportByMarkdownPath = new Map(
+    (report?.documents ?? []).map((d: IngestionDocState) => [d.markdown_path, d])
+  );
+  const reportByFileName = new Map(
     (report?.documents ?? []).map((d: IngestionDocState) => [d.file_name, d])
   );
 
@@ -341,7 +316,7 @@ export function VectorUploadPanel() {
     markdownPath: doc.markdown_path,
     pages: doc.pages,
     images: doc.images ?? 0,
-    ingestion: reportMap.get(doc.name) ?? null,
+    ingestion: reportByMarkdownPath.get(doc.markdown_path) ?? reportByFileName.get(doc.name) ?? null,
   }));
 
   const completeCount = mergedRows.filter(

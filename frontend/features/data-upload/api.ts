@@ -5,6 +5,7 @@ import type {
   OCRSubmitResponse,
   OCRSummary,
   OCRDestinations,
+  OCRDeleteResponse,
   BatchIngestionResponse,
   IngestionReportResponse,
   IngestionStatus,
@@ -145,6 +146,21 @@ export async function clearOCROutputs(): Promise<{ deleted: number }> {
   return response.json();
 }
 
+export async function deleteOCRDocument(markdownPath: string): Promise<OCRDeleteResponse> {
+  const response = await fetch(`${DATA_PROCESS_BASE}/api/document`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ markdown_path: markdownPath }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: "删除失败" }));
+    throw new Error(error.detail || "删除失败");
+  }
+
+  return response.json();
+}
+
 // ---- 向量化处理 API ----
 
 /**
@@ -218,7 +234,8 @@ export async function getIngestionStatus(): Promise<IngestionStatus> {
  */
 export async function submitBatchGraphBuild(
   useLlm: boolean = true,
-  maxDocs?: number
+  maxDocs?: number,
+  docIds?: string[],
 ): Promise<BatchGraphBuildResponse> {
   const response = await fetch(`${DATA_PROCESS_BASE}/graph/build/batch`, {
     method: "POST",
@@ -226,6 +243,8 @@ export async function submitBatchGraphBuild(
     body: JSON.stringify({
       use_llm: useLlm,
       max_docs: maxDocs ?? null,
+      doc_ids: docIds?.length ? docIds : null,
+      skip_built: true,
       async_mode: true,
     }),
   });

@@ -30,6 +30,46 @@ class GraphBuilder:
         self.mongodb = mongodb_client
         self.graph_store = graph_store
 
+    @staticmethod
+    def _build_source_document(doc_meta: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "version": int(doc_meta.get("version") or 0) or None,
+            "content_hash": str(doc_meta.get("content_hash") or ""),
+            "updated_at": doc_meta.get("updated_at"),
+            "chunks_count": int(doc_meta.get("chunks_count") or 0),
+        }
+
+    def _should_skip_document_build(self, doc_id: str, source_document: Dict[str, Any]) -> bool:
+        try:
+            build_info = self.graph_store.neo4j.get_document_build_info(doc_id)
+        except Exception as e:
+            logger.warning(f"Failed to check document build info for {doc_id}: {e}")
+            return False
+
+        if not build_info:
+            return False
+        if build_info.get("kg_status") != "success":
+            return False
+
+        source_version = source_document.get("version")
+        tracked_version = build_info.get("source_version")
+        if source_version and not tracked_version:
+            return False
+        if source_version and tracked_version and int(source_version) != int(tracked_version):
+            return False
+
+        source_hash = str(source_document.get("content_hash") or "")
+        tracked_hash = str(build_info.get("source_content_hash") or "")
+        if source_hash and not tracked_hash:
+            return False
+        if source_hash and tracked_hash and source_hash != tracked_hash:
+            return False
+
+        if source_version or source_hash:
+            return True
+
+        return True
+
     def build_from_document(
         self,
         doc_id: str,
@@ -51,33 +91,38 @@ class GraphBuilder:
         """
         logger.info(f"Building graph for document {doc_id}")
 
-        if skip_if_built and not force_rebuild:
-            try:
-                if self.graph_store.neo4j.is_document_built(doc_id):
-                    logger.info(f"Skipping document {doc_id}: already built")
-                    return {
-                        "doc_id": doc_id,
-                        "entities_count": 0,
-                        "relationships_count": 0,
-                        "status": "skipped",
-                        "reason": "already built",
-                    }
-            except Exception as e:
-                # If tracking isn't available, fall through to a normal build.
-                logger.warning(f"Failed to check document status for {doc_id}: {e}")
-
         # Retrieve document metadata for file_name and file_path
         doc_meta = self.mongodb.find_by_query(
             "documents",
             {"_id": doc_id},
             limit=1,
-            projection={"file_name": 1, "file_path": 1}
+            projection={
+                "file_name": 1,
+                "file_path": 1,
+                "version": 1,
+                "content_hash": 1,
+                "updated_at": 1,
+                "chunks_count": 1,
+            },
         )
         file_name = ""
         file_path = ""
+        source_document: Dict[str, Any] = {}
         if doc_meta:
             file_name = doc_meta[0].get("file_name", "")
             file_path = doc_meta[0].get("file_path", "")
+            source_document = self._build_source_document(doc_meta[0])
+
+        if skip_if_built and not force_rebuild and self._should_skip_document_build(doc_id, source_document):
+            logger.info(f"Skipping document {doc_id}: graph is up to date")
+            return {
+                "doc_id": doc_id,
+                "file_name": file_name,
+                "entities_count": 0,
+                "relationships_count": 0,
+                "status": "skipped",
+                "reason": "already built",
+            }
 
         # Retrieve document chunks from MongoDB
         chunks = self.mongodb.find_by_query(
@@ -101,6 +146,7 @@ class GraphBuilder:
             use_llm=use_llm,
             file_name=file_name,
             file_path=file_path,
+            source_document=source_document,
         )
 
         return result
@@ -124,13 +170,67 @@ class GraphBuilder:
         """
         logger.info("Building graph from all documents")
 
-        # Get all document IDs
         documents = self.mongodb.find_by_query(
             "documents",
-            {},
+            {"ingest_status": "complete"},
             limit=max_docs or 1000,
             projection={"_id": 1, "file_name": 1}
         )
+
+        return self._build_from_document_records(
+            documents,
+            use_llm=use_llm,
+            skip_built=skip_built,
+            force_rebuild=force_rebuild,
+        )
+
+    def build_from_documents(
+        self,
+        doc_ids: List[str],
+        use_llm: bool = True,
+        skip_built: bool = False,
+        force_rebuild: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Build graph from a selected set of documents.
+
+        Args:
+            doc_ids: Document IDs to process
+            use_llm: Whether to use LLM for entity extraction
+
+        Returns:
+            Dictionary with batch build results
+        """
+        normalized_doc_ids = [str(doc_id).strip() for doc_id in doc_ids if str(doc_id).strip()]
+        if not normalized_doc_ids:
+            return {"total": 0, "success": 0, "failed": 0, "documents": []}
+
+        logger.info("Building graph for %s selected documents", len(normalized_doc_ids))
+
+        documents = self.mongodb.find_by_query(
+            "documents",
+            {"ingest_status": "complete"},
+            limit=None,
+            projection={"_id": 1, "file_name": 1}
+        )
+        allowed_doc_ids = set(normalized_doc_ids)
+        selected_documents = [doc for doc in documents if str(doc.get("_id") or "") in allowed_doc_ids]
+
+        return self._build_from_document_records(
+            selected_documents,
+            use_llm=use_llm,
+            skip_built=skip_built,
+            force_rebuild=force_rebuild,
+        )
+
+    def _build_from_document_records(
+        self,
+        documents: List[Dict[str, Any]],
+        use_llm: bool = True,
+        skip_built: bool = False,
+        force_rebuild: bool = False,
+    ) -> Dict[str, Any]:
+        """Shared batch-build loop for a prepared document record list."""
 
         results = {
             "total": len(documents),

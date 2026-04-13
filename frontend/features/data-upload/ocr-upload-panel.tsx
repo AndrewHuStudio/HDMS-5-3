@@ -18,6 +18,7 @@ import {
   X,
   Plus,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { useOCRStore } from "./store";
 import {
@@ -25,9 +26,13 @@ import {
   getOCRJobStatus,
   getOCRSummary,
   clearOCROutputs,
+  deleteOCRDocument,
 } from "./api";
+import { useVectorStore } from "./vector-store";
+import { useGraphStore } from "./graph-store";
 import type { OCRJobFile } from "./types";
 import { buildMergedOcrRows } from "./ocr-rows.mjs";
+import { recoverCompletedOcrJob } from "./ocr-job-state.mjs";
 
 function formatDuration(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -60,6 +65,7 @@ export function OCRUploadPanel() {
   const [elapsed, setElapsed] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [deletingRowKey, setDeletingRowKey] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -78,6 +84,17 @@ export function OCRUploadPanel() {
     setStartTime,
     reset,
   } = useOCRStore();
+  const resetVectorStore = useVectorStore((state) => state.reset);
+  const setVectorSysStatus = useVectorStore((state) => state.setSysStatus);
+  const resetGraphStore = useGraphStore((state) => state.reset);
+  const setGraphStatistics = useGraphStore((state) => state.setStatistics);
+
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (startTime && (status === "uploading" || status === "processing")) {
@@ -97,8 +114,10 @@ export function OCRUploadPanel() {
     try {
       const data = await getOCRSummary();
       setSummary(data);
+      return data;
     } catch (err) {
       console.error("[OCR] 加载摘要失败:", err);
+      return null;
     }
   }, [setSummary]);
 
@@ -126,12 +145,46 @@ export function OCRUploadPanel() {
   };
 
   const handleRemoveRow = (fileName: string) => {
+    const normalizeDocName = (value: string) => value.replace(/\.pdf$/i, "").trim().toLowerCase();
     // 从已选文件中移除
-    setSelectedFiles((prev) => prev.filter((f) => f.name !== fileName));
+    setSelectedFiles((prev) => prev.filter((f) => normalizeDocName(f.name) !== normalizeDocName(fileName)));
     // 从 OCR 结果中移除
     if (currentJob) {
-      const updatedFiles = currentJob.files.filter((f) => f.file_name !== fileName);
+      const updatedFiles = currentJob.files.filter(
+        (f) => normalizeDocName(f.file_name) !== normalizeDocName(fileName)
+      );
       setCurrentJob({ ...currentJob, files: updatedFiles });
+    }
+  };
+
+  const handleDeleteRow = async (row: MergedRow) => {
+    const markdownPath = row.ocrFile?.markdown_path;
+    if (!markdownPath) {
+      setError("缺少 OCR 文档路径，无法删除");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `警告：这将删除“${row.fileName}”的 OCR 结果，并同时删除对应的向量数据和知识图谱数据；原始 PDF 会保留，且不可恢复。确认继续吗？`
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeletingRowKey(row.key);
+      setError(null);
+      setNotice(null);
+      await deleteOCRDocument(markdownPath);
+      handleRemoveRow(row.fileName);
+      resetVectorStore();
+      setVectorSysStatus(null);
+      resetGraphStore();
+      setGraphStatistics(null);
+      await loadSummary();
+      setNotice(`已删除 ${row.fileName} 的 OCR、向量和图谱数据`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除资料失败");
+    } finally {
+      setDeletingRowKey(null);
     }
   };
 
@@ -146,21 +199,26 @@ export function OCRUploadPanel() {
         if (allDone) {
           setStatus("completed");
           await loadSummary();
-          if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-          }
+          stopPolling();
         }
       } catch (err) {
         console.error("[OCR] 轮询任务状态失败:", err);
-        setError(err instanceof Error ? err.message : "轮询失败");
-        if (pollingIntervalRef.current) {
-          clearInterval(pollingIntervalRef.current);
-          pollingIntervalRef.current = null;
+        const summaryData = await loadSummary();
+        const recoveredJob = recoverCompletedOcrJob({
+          currentJob,
+          summaryDocuments: summaryData?.documents ?? [],
+        });
+        if (recoveredJob) {
+          setCurrentJob(recoveredJob);
+          setStatus("completed");
+          setError(null);
+        } else {
+          setError(err instanceof Error ? err.message : "轮询失败");
         }
+        stopPolling();
       }
     },
-    [setCurrentJob, setStatus, setError, loadSummary]
+    [currentJob, loadSummary, setCurrentJob, setError, setStatus, stopPolling]
   );
 
   const handleSubmit = async () => {
@@ -198,9 +256,6 @@ export function OCRUploadPanel() {
 
       setStatus("processing");
       await pollJobStatus(result.job_id);
-      pollingIntervalRef.current = setInterval(() => {
-        pollJobStatus(result.job_id);
-      }, 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "提交失败");
       setStatus("error");
@@ -217,10 +272,7 @@ export function OCRUploadPanel() {
       setSelectedFiles([]);
       setElapsed(0);
       setNotice(null);
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
+      stopPolling();
       await loadSummary();
     })().catch((err) => {
       setError(err instanceof Error ? err.message : "重置 OCR 数据失败");
@@ -236,25 +288,25 @@ export function OCRUploadPanel() {
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-    };
-  }, []);
+  useEffect(() => stopPolling, [stopPolling]);
 
-  // 组件重挂载时，如果任务仍在进行中，恢复轮询
+  // OCR 轮询统一由本 effect 管理，避免重复创建多个 interval。
   useEffect(() => {
     if (
       (status === "uploading" || status === "processing") &&
       currentJob?.job_id &&
       !pollingIntervalRef.current
     ) {
-      pollJobStatus(currentJob.job_id);
+      void pollJobStatus(currentJob.job_id);
       pollingIntervalRef.current = setInterval(() => {
-        pollJobStatus(currentJob.job_id);
+        void pollJobStatus(currentJob.job_id);
       }, 2000);
+      return;
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (status !== "uploading" && status !== "processing") {
+      stopPolling();
+    }
+  }, [currentJob?.job_id, pollJobStatus, status, stopPolling]);
 
   // 构建合并行
   const jobFiles = currentJob?.files ?? [];
@@ -396,8 +448,12 @@ export function OCRUploadPanel() {
                       ocr?.status === "downloading";
                     const isQueued = ocr?.status === "queued";
                     const isPending = !ocr;
+                    const isDeleting = deletingRowKey === row.key;
+                    const canDeleteCascade = !isRunning && !isDeleting && isDone && !!ocr?.markdown_path;
                     const canRemove =
-                      row.source !== "summary" && (!isRunning || isDone || isFailed);
+                      !isDeleting &&
+                      row.source !== "summary" &&
+                      (!isRunning || isFailed || isQueued || isPending);
 
                     return (
                       <tr
@@ -460,6 +516,16 @@ export function OCRUploadPanel() {
                           {isDone ? (summaryImageMap.get(row.fileName.replace(/\.pdf$/i, "")) ?? "--") : "--"}
                         </td>
                         <td className="px-2 py-1.5 text-center">
+                          {canDeleteCascade && (
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteRow(row)}
+                              className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+                              aria-label={`删除 ${row.fileName}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                           {canRemove && (
                             <button
                               type="button"

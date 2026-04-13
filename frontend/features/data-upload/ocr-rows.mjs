@@ -19,15 +19,31 @@
  */
 export function buildMergedOcrRows(params) {
   const { selectedFiles, jobFiles, summaryDocuments } = params;
+  const normalizeName = (value) => value.replace(/\.pdf$/i, "").trim().toLowerCase();
 
-  const jobFileMap = new Map(jobFiles.map((file) => [file.file_name, file]));
+  const jobFileMap = new Map(jobFiles.map((file) => [normalizeName(file.file_name), file]));
+  const summaryDocMap = new Map(summaryDocuments.map((doc) => [normalizeName(doc.name), doc]));
 
   /** @type {MergedOcrRow[]} */
   const mergedRows = selectedFiles.map((file) => ({
     key: file.name,
     fileName: file.name,
     fileSize: file.size,
-    ocrFile: jobFileMap.get(file.name) ?? null,
+    ocrFile:
+      jobFileMap.get(normalizeName(file.name)) ??
+      (() => {
+        const summaryDoc = summaryDocMap.get(normalizeName(file.name));
+        if (!summaryDoc) return null;
+        return {
+          id: `summary-${summaryDoc.name}`,
+          file_name: file.name,
+          status: "done",
+          pages: summaryDoc.pages ?? 0,
+          total_pages: summaryDoc.pages ?? 0,
+          progress: 100,
+          markdown_path: summaryDoc.markdown_path,
+        };
+      })(),
     source: "selected",
   }));
 
@@ -44,7 +60,6 @@ export function buildMergedOcrRows(params) {
   }
 
   // 新增文件时也保留历史 summary；按文档名去重（忽略 .pdf 后缀）
-  const normalizeName = (value) => value.replace(/\.pdf$/i, "").trim().toLowerCase();
   const shownNameSet = new Set(mergedRows.map((row) => normalizeName(row.fileName)));
 
   for (const doc of summaryDocuments) {

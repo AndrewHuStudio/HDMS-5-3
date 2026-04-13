@@ -234,6 +234,9 @@ class Neo4jClient:
                     d.file_path = $file_path,
                     d.kg_status = $kg_status,
                     d.kg_updated_at = datetime()
+                FOREACH (_ IN CASE WHEN $kg_status <> 'failed' THEN [1] ELSE [] END |
+                  REMOVE d.kg_error
+                )
                 FOREACH (_ IN CASE WHEN $kg_status = 'success' THEN [1] ELSE [] END |
                   SET d.kg_completed_at = datetime()
                 )
@@ -264,6 +267,33 @@ class Neo4jClient:
         status = rows[0].get("status")
         return str(status) if status is not None else None
 
+    def get_document_build_info(self, doc_id: str) -> Optional[Dict[str, Any]]:
+        """Return build tracking fields for one :Document node."""
+        if not doc_id:
+            return None
+        rows = self.query(
+            "MATCH (d:Document {doc_id: $doc_id}) "
+            "WITH properties(d) AS props "
+            "RETURN "
+            "coalesce(props['kg_status'], 'unknown') as kg_status, "
+            "props['source_version'] as source_version, "
+            "props['source_content_hash'] as source_content_hash, "
+            "props['source_updated_at'] as source_updated_at, "
+            "props['source_chunks_count'] as source_chunks_count "
+            "LIMIT 1",
+            {"doc_id": doc_id},
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return {
+            "kg_status": str(row.get("kg_status") or "unknown"),
+            "source_version": row.get("source_version"),
+            "source_content_hash": row.get("source_content_hash"),
+            "source_updated_at": row.get("source_updated_at"),
+            "source_chunks_count": row.get("source_chunks_count"),
+        }
+
     def is_document_built(self, doc_id: str) -> bool:
         """True if the document is marked as successfully built."""
         return self.get_document_status(doc_id) == "success"
@@ -288,17 +318,21 @@ class Neo4jClient:
     def list_document_statuses(self) -> List[Dict[str, Any]]:
         """Return kg build status for all :Document nodes."""
         rows = self.query(
-            "MATCH (d:Document) WHERE d.doc_id IS NOT NULL "
-            "RETURN d.doc_id as doc_id, d.file_name as file_name, "
-            "d.kg_status as kg_status, "
-            "d.kg_entities_count as entities_count, "
-            "d.kg_relationships_count as relationships_count, "
-            "d.kg_phase as phase, "
-            "d.kg_progress as progress, "
-            "d.kg_processed_chunks as processed_chunks, "
-            "d.kg_total_chunks as total_chunks, "
-            "d.kg_error as error "
-            "ORDER BY d.kg_updated_at DESC"
+            "MATCH (d:Document) "
+            "WHERE d.doc_id IS NOT NULL "
+            "WITH d, properties(d) AS props "
+            "RETURN props['doc_id'] as doc_id, "
+            "props['file_name'] as file_name, "
+            "coalesce(props['kg_status'], 'unknown') as kg_status, "
+            "coalesce(props['kg_entities_count'], 0) as entities_count, "
+            "coalesce(props['kg_relationships_count'], 0) as relationships_count, "
+            "coalesce(props['kg_phase'], '') as phase, "
+            "props['kg_progress'] as progress, "
+            "props['kg_processed_chunks'] as processed_chunks, "
+            "props['kg_total_chunks'] as total_chunks, "
+            "props['kg_error'] as error, "
+            "coalesce(props['kg_updated_at'], datetime({epochMillis: 0})) as sort_updated_at "
+            "ORDER BY sort_updated_at DESC"
         )
         results: List[Dict[str, Any]] = []
         for row in rows:

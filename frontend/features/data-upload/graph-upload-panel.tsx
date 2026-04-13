@@ -28,8 +28,6 @@ import {
   submitBatchGraphBuild,
   getBatchGraphBuildState,
   getGraphStatistics,
-  getOCRSummary,
-  getOCRJobStatus,
   getIngestionReport,
   getGraphDocumentStatuses,
   getGraphVisualization,
@@ -67,10 +65,30 @@ export function getDisplayEntityTypes(entityTypes: string[]): string[] {
   return entityTypes.filter((type) => CHINESE_GRAPH_ENTITY_TYPES.has(type));
 }
 
+function getSummaryFingerprint(summary: {
+  total_files: number;
+  total_pages: number;
+  total_images: number;
+  documents: Array<unknown>;
+} | null | undefined): string {
+  if (!summary) return "";
+  return `${summary.total_files}:${summary.total_pages}:${summary.total_images}:${summary.documents.length}`;
+}
+
 export function GraphUploadPanel() {
   const [elapsed, setElapsed] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [progressRows, setProgressRows] = useState<GraphProgressRow[]>([]);
+  const [activeBuildDocIds, setActiveBuildDocIds] = useState<string[]>([]);
+  const activeBuildDocIdsRef = useRef<string[]>([]);
+  const [reportDocs, setReportDocs] = useState<
+    Array<{
+      file_name: string;
+      markdown_path: string;
+      status: "not_started" | "in_progress" | "complete" | "failed";
+      doc_id?: string;
+    }>
+  >([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -96,12 +114,7 @@ export function GraphUploadPanel() {
     setShowGraphDialog,
     reset,
   } = useGraphStore();
-  const {
-    currentJob,
-    setCurrentJob,
-    summary: ocrSummary,
-    setSummary: setOcrSummary,
-  } = useOCRStore();
+  const summaryFingerprint = useOCRStore((state) => getSummaryFingerprint(state.summary));
 
   const isRunning = status === "building";
 
@@ -138,43 +151,107 @@ export function GraphUploadPanel() {
     try {
       const data = await getGraphStatistics();
       setStatistics(data);
+      setError(null);
     } catch {
       // 静默
     }
-  }, [setStatistics]);
+  }, [setError, setStatistics]);
 
   useEffect(() => {
     loadStatistics();
   }, [loadStatistics]);
 
+  const loadBuiltDocs = useCallback(async (freshBuildResult?: typeof buildResult) => {
+    const effectiveBuildResult = freshBuildResult ?? buildResult;
+    const mergedDocs = new Map<string, {
+      doc_id: string;
+      file_name?: string;
+      status: string;
+      progress?: number | null;
+      entities_count: number;
+      relationships_count: number;
+      error?: string;
+    }>();
+
+    for (const doc of effectiveBuildResult?.documents ?? []) {
+      mergedDocs.set(String(doc.doc_id), {
+        doc_id: doc.doc_id,
+        file_name: doc.file_name,
+        status: doc.status,
+        progress: null,
+        entities_count: doc.entities_count,
+        relationships_count: doc.relationships_count,
+        error: doc.error,
+      });
+    }
+
+    try {
+      const neo4jStatus = await getGraphDocumentStatuses();
+      for (const doc of neo4jStatus.documents ?? []) {
+        const existing = mergedDocs.get(String(doc.doc_id));
+        mergedDocs.set(String(doc.doc_id), {
+          doc_id: doc.doc_id,
+          file_name: existing?.file_name || doc.file_name,
+          status: existing?.status || doc.kg_status,
+          progress: existing?.progress ?? doc.progress,
+          entities_count: existing?.entities_count ?? doc.entities_count,
+          relationships_count: existing?.relationships_count ?? doc.relationships_count,
+          error: existing?.error ?? doc.error,
+        });
+      }
+    } catch {
+      // Keep build result fallback.
+    }
+
+    return Array.from(mergedDocs.values());
+  }, [buildResult]);
+
+  const sanitizeProgressRows = useCallback((rows: GraphProgressRow[]): GraphProgressRow[] => {
+    if (activeBuildDocIdsRef.current.length === 0) return rows;
+    const activeDocIdSet = new Set(activeBuildDocIdsRef.current);
+
+    return rows.map((row) => {
+      if (row.status !== "in_progress") return row;
+      if (row.docId && activeDocIdSet.has(row.docId)) return row;
+      if ((row.entitiesCount ?? 0) > 0 || (row.relationshipsCount ?? 0) > 0) {
+        return { ...row, status: "success", progress: 100 };
+      }
+      return { ...row, status: "pending", progress: 0 };
+    });
+  }, []);
+
+  const refreshBuildRows = useCallback(async (freshBuildResult?: typeof buildResult): Promise<GraphProgressRow[]> => {
+    if (reportDocs.length === 0) {
+      setProgressRows([]);
+      return [];
+    }
+
+    try {
+      const builtDocs = await loadBuiltDocs(freshBuildResult);
+      const rows = sanitizeProgressRows(buildGraphProgressRows(reportDocs, builtDocs));
+      setProgressRows(rows);
+      setError(null);
+      return rows;
+    } catch {
+      return [];
+    }
+  }, [loadBuiltDocs, reportDocs, setError]);
+
   const loadProgressRows = useCallback(async (freshBuildResult?: typeof buildResult): Promise<GraphProgressRow[]> => {
     try {
-      let latestJob = currentJob;
-      let latestSummary = ocrSummary;
-
-      if (latestJob?.job_id) {
-        try {
-          latestJob = await getOCRJobStatus(latestJob.job_id);
-          setCurrentJob(latestJob);
-        } catch {
-          // 任务可能已过期，继续用当前缓存
-        }
-      }
-
-      try {
-        latestSummary = await getOCRSummary();
-        setOcrSummary(latestSummary);
-      } catch {
-        // 回退到 store 中的 summary
-      }
+      const latestSummary = useOCRStore.getState().summary;
 
       const vectorSourceDocs = buildVectorSourceDocs({
-        currentJob: latestJob,
+        currentJob: null,
         summary: latestSummary,
       });
       if (vectorSourceDocs.length === 0) {
-        setProgressRows([]);
-        return [];
+        let preservedRows: GraphProgressRow[] = [];
+        setProgressRows((currentRows) => {
+          preservedRows = currentRows.length > 0 ? currentRows : [];
+          return currentRows.length > 0 ? currentRows : [];
+        });
+        return preservedRows;
       }
 
       const reportDirs = buildIngestionScopeDirs(vectorSourceDocs);
@@ -188,61 +265,34 @@ export function GraphUploadPanel() {
         })
       );
       const mergedReport = mergeIngestionReports(reports);
-      const reportDocs = pickGraphEligibleDocs(vectorSourceDocs, mergedReport.documents ?? []) as Array<{
+      const nextReportDocs = pickGraphEligibleDocs(vectorSourceDocs, mergedReport.documents ?? []) as Array<{
         file_name: string;
         markdown_path: string;
         status: "not_started" | "in_progress" | "complete" | "failed";
         doc_id?: string;
       }>;
-
-      // 优先使用传入的最新结果，避免 React 状态异步更新导致闭包读到旧值
-      const effectiveBuildResult = freshBuildResult ?? buildResult;
-
-      // 构建 buildMap：先从内存中的 buildResult 取，若为空则从 Neo4j 持久化状态取
-      let buildMap: Map<string, { doc_id: string; file_name?: string; status: string; progress?: number | null; entities_count: number; relationships_count: number; error?: string }>;
-
-      if ((effectiveBuildResult?.documents ?? []).length > 0) {
-        buildMap = new Map(
-          effectiveBuildResult!.documents.map((doc) => [
-            doc.file_name ?? doc.doc_id,
-            doc,
-          ])
-        );
-      } else {
-        // 内存无结果（页面刷新/切换后），从 Neo4j 查询持久化状态
-        try {
-          const neo4jStatus = await getGraphDocumentStatuses();
-          buildMap = new Map(
-            (neo4jStatus.documents ?? []).map((doc) => [
-              doc.file_name || doc.doc_id,
-              {
-                doc_id: doc.doc_id,
-                file_name: doc.file_name,
-                status: doc.kg_status,
-                progress: doc.progress,
-                entities_count: doc.entities_count,
-                relationships_count: doc.relationships_count,
-                error: doc.error,
-              },
-            ])
-          );
-        } catch {
-          buildMap = new Map();
-        }
+      if (nextReportDocs.length === 0) {
+        let preservedRows: GraphProgressRow[] = [];
+        setProgressRows((currentRows) => {
+          preservedRows = currentRows.length > 0 ? currentRows : [];
+          return currentRows.length > 0 ? currentRows : [];
+        });
+        return preservedRows;
       }
-
-      const rows = buildGraphProgressRows(reportDocs, Array.from(buildMap.values()));
+      setReportDocs(nextReportDocs);
+      const builtDocs = await loadBuiltDocs(freshBuildResult);
+      const rows = sanitizeProgressRows(buildGraphProgressRows(nextReportDocs, builtDocs));
       setProgressRows(rows);
+      setError(null);
       return rows;
     } catch {
-      setProgressRows([]);
       return [];
     }
-  }, [buildResult, currentJob, ocrSummary, setCurrentJob, setOcrSummary]);
+  }, [loadBuiltDocs, sanitizeProgressRows, setError]);
 
   useEffect(() => {
-    loadProgressRows();
-  }, [loadProgressRows]);
+    void loadProgressRows();
+  }, [loadProgressRows, summaryFingerprint]);
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
@@ -251,8 +301,13 @@ export function GraphUploadPanel() {
     }
   }, []);
 
+  const updateActiveBuildDocIds = useCallback((docIds: string[]) => {
+    activeBuildDocIdsRef.current = docIds;
+    setActiveBuildDocIds(docIds);
+  }, []);
+
   const pollBatchBuildState = useCallback(async (freshRows?: GraphProgressRow[]) => {
-    const rows = freshRows ?? (await loadProgressRows());
+    const rows = freshRows ?? (await refreshBuildRows());
 
     try {
       const state = await getBatchGraphBuildState();
@@ -262,6 +317,7 @@ export function GraphUploadPanel() {
 
       if (state.status === "failed") {
         stopPolling();
+        updateActiveBuildDocIds([]);
         setError(state.error || "图谱构建失败");
         setStatus("error");
         return;
@@ -269,13 +325,14 @@ export function GraphUploadPanel() {
 
       if (state.status === "completed" && !hasActiveGraphBuildRows(rows)) {
         stopPolling();
+        updateActiveBuildDocIds([]);
         setStatus("completed");
         await loadStatistics();
       }
     } catch {
       // 状态接口偶发失败时由下一次轮询兜底
     }
-  }, [loadProgressRows, loadStatistics, setBuildResult, setError, setStatus, stopPolling]);
+  }, [loadStatistics, refreshBuildRows, setBuildResult, setError, setStatus, stopPolling, updateActiveBuildDocIds]);
 
   // 开始构建
   const handleBuild = async () => {
@@ -286,18 +343,30 @@ export function GraphUploadPanel() {
       setStartTime(Date.now());
       setElapsed(0);
 
-      await loadProgressRows();
+      const initialRows = await loadProgressRows();
+      let targetDocIds = progressRows
+        .filter((row) => row.status === "pending")
+        .map((row) => row.docId)
+        .filter((docId): docId is string => Boolean(docId));
+      if (targetDocIds.length === 0) {
+        targetDocIds = initialRows
+          .filter((row) => row.status === "pending")
+          .map((row) => row.docId)
+          .filter((docId): docId is string => Boolean(docId));
+      }
+      updateActiveBuildDocIds(targetDocIds);
       stopPolling();
       pollingRef.current = setInterval(() => {
         void pollBatchBuildState();
       }, 2000);
 
-      const result = await submitBatchGraphBuild(true);
+      const result = await submitBatchGraphBuild(true, undefined, targetDocIds);
       setBuildResult(result);
       const rows = await loadProgressRows(result);
       await pollBatchBuildState(rows);
     } catch (err) {
       stopPolling();
+      updateActiveBuildDocIds([]);
       setError(err instanceof Error ? err.message : "图谱构建失败");
       setStatus("error");
     }
@@ -310,6 +379,7 @@ export function GraphUploadPanel() {
 
       await clearGraphData();
       stopPolling();
+      updateActiveBuildDocIds([]);
       reset();
       setElapsed(0);
       await Promise.all([loadStatistics(), loadProgressRows()]);

@@ -6,6 +6,7 @@ pypdf>=4.0.0
 pydantic>=2.8.0
 pydantic-settings>=2.4.0
 orjson>=3.10.0
+requests>=2.32.0
 rhino3dm>=8.4.0
 numpy>=2.0.0
 trimesh>=4.4.0
