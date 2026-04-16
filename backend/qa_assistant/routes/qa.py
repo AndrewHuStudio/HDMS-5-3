@@ -22,6 +22,7 @@ from typing import List, Optional
 
 from core.database.manager import db_manager
 from core import config
+from data_process.ocr_process import core as ocr_core
 from rag.retriever import MultiSourceRetriever
 from rag.service import create_rag_service
 from rag.embedder import create_embedding_service
@@ -45,6 +46,25 @@ def _find_project_root() -> Path:
         if (parent / ".env").exists():
             return parent
     return Path(__file__).resolve().parent
+
+
+def _ocr_output_roots(project_root: Path) -> List[Path]:
+    roots: List[Path] = []
+    configured_root = ocr_core._resolve_ocr_output_root()
+    roots.append(configured_root)
+
+    documents_root = project_root / "data" / "documents"
+    roots.append(documents_root)
+
+    seen: set[str] = set()
+    unique_roots: List[Path] = []
+    for root in roots:
+        key = str(root.resolve()) if root.exists() else str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_roots.append(root)
+    return unique_roots
 
 
 _PDF_KEY_RE = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff]+")
@@ -448,7 +468,7 @@ def _resolve_image_path(document: Optional[dict], image_ref: str) -> Optional[Pa
     3. markdown_path parent / images / filename
     4. images_dir / ref
     5. images_dir / filename
-    6. Scan common OCR output roots: data/ocr_output/*/{doc_name}/images/
+    6. Scan configured OCR output roots and documents dir: */{doc_name}/images/
     """
     if not document or not image_ref:
         return None
@@ -504,12 +524,13 @@ def _resolve_image_path(document: Optional[dict], image_ref: str) -> Optional[Pa
     # Fallback: scan common OCR output directories
     if file_name:
         doc_stem = Path(file_name).stem
-        for ocr_root in [
-            project_root / "data" / "ocr_output",
-            project_root / "data" / "documents",
-        ]:
+        for ocr_root in _ocr_output_roots(project_root):
             if ocr_root.is_dir():
-                # Try data/ocr_output/*/{doc_stem}/images/{filename}
+                flat_doc_img_dir = ocr_root / doc_stem / "images"
+                if flat_doc_img_dir.is_dir():
+                    candidates.append(flat_doc_img_dir / ref_path.name)
+
+                # Try */{doc_stem}/images/{filename}
                 for category_dir in ocr_root.iterdir():
                     if not category_dir.is_dir():
                         continue

@@ -80,6 +80,10 @@ def _resolve_path(value: str, default_rel: str) -> Path:
     return (root / p).resolve()
 
 
+def _resolve_ocr_output_root() -> Path:
+    return _resolve_path(_load_setting("OCR_OUTPUT_DIR"), "data/ocr_output")
+
+
 def _read_env_file(env_path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     try:
@@ -626,7 +630,7 @@ def _process_one_file(
         api_key = _load_setting("MINERU_API_KEY")
         base_url = _load_setting("MINERU_BASE_URL", "https://mineru.net/api/v4")
         model_version = _load_setting("MINERU_MODEL_VERSION", "vlm")
-        output_root = str(_resolve_path(_load_setting("OCR_OUTPUT_DIR"), "data/ocr_output"))
+        output_root = str(_resolve_ocr_output_root())
 
         if not api_key:
             logger.error(f"[Job {job_id[:8]}] MINERU_API_KEY is not set")
@@ -880,7 +884,7 @@ def get_sources() -> dict:
 
 
 def get_destinations() -> dict:
-    root = _resolve_path(_load_setting("OCR_OUTPUT_DIR"), "data/ocr_output")
+    root = _resolve_ocr_output_root()
     root.mkdir(parents=True, exist_ok=True)
     _ensure_default_destination(root)
     destinations = [p.name for p in root.iterdir() if p.is_dir()]
@@ -889,7 +893,7 @@ def get_destinations() -> dict:
 
 
 def clear_output_dir() -> dict:
-    root = _resolve_path(_load_setting("OCR_OUTPUT_DIR"), "data/ocr_output")
+    root = _resolve_ocr_output_root()
     if not root.exists():
         root.mkdir(parents=True, exist_ok=True)
         _ensure_default_destination(root)
@@ -930,7 +934,7 @@ def delete_ocr_document(
     delete_downstream: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Delete one OCR output directory and optionally cascade downstream cleanup."""
-    output_root = _resolve_path(_load_setting("OCR_OUTPUT_DIR"), "data/ocr_output")
+    output_root = _resolve_ocr_output_root()
     if not markdown_path:
         raise OCRError("markdown_path is required", status_code=400)
 
@@ -987,7 +991,7 @@ def submit_ocr_job(
     if len(file_paths) != len(original_names):
         raise OCRError("Invalid file list", status_code=400)
 
-    output_root = _resolve_path(_load_setting("OCR_OUTPUT_DIR"), "data/ocr_output")
+    output_root = _resolve_ocr_output_root()
     output_root.mkdir(parents=True, exist_ok=True)
     category = (category or "").strip()
     if category:
@@ -1111,7 +1115,7 @@ def submit_ocr_job(
 def submit_ocr_job_from_source(source: str, destination: str, recursive: bool = True) -> dict:
     src_root = _resolve_path(_load_setting("OCR_INPUT_DIR"), "data/documents")
     src_root.mkdir(parents=True, exist_ok=True)
-    out_root = _resolve_path(_load_setting("OCR_OUTPUT_DIR"), "data/ocr_output")
+    out_root = _resolve_ocr_output_root()
     out_root.mkdir(parents=True, exist_ok=True)
 
     source_key = (source or "").strip()
@@ -1160,7 +1164,7 @@ def get_job_status(job_id: str) -> dict | None:
 
 
 def get_summary() -> dict:
-    output_root = _resolve_path(_load_setting("OCR_OUTPUT_DIR"), "data/ocr_output")
+    output_root = _resolve_ocr_output_root()
     documents: list[dict[str, Any]] = []
     total_pages = 0
     total_images = 0

@@ -31,6 +31,7 @@ from ..vision_service import create_vision_service
 from .pipeline import IngestionPipeline
 from ...core.database.manager import db_manager
 from ...core import config
+from ...ocr_process import core as ocr_core
 
 logger = logging.getLogger(__name__)
 
@@ -423,8 +424,8 @@ async def test_ingestion() -> Dict[str, Any]:
         import os
         from pathlib import Path
 
-        # Find first document in OCR output
-        ocr_dir = Path(config.PROJECT_ROOT) / "data" / "ocr_output"
+        # Find first document in configured OCR output
+        ocr_dir = ocr_core._resolve_ocr_output_root()
 
         if not ocr_dir.exists():
             raise HTTPException(
