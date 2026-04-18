@@ -124,6 +124,22 @@ export function collapseFigureMentions(text: string): string {
       return `（图${normalized}）`;
     });
 
+    const listMatch = deduped.match(/^(\s*)(?:[-*+]\s+|\d+[.)]\s+)/);
+    if (listMatch) {
+      const indent = listMatch[1] ?? "";
+      const rest = deduped.slice(indent.length);
+      const markerMatch = rest.match(/^((?:[-*+]\s+|\d+[.)]\s+))/);
+      if (markerMatch) {
+        const marker = markerMatch[1] ?? "";
+        const body = rest.slice(marker.length);
+        return `${indent}${marker}${body}`
+          .replace(/[（(]\s*[)）]/g, "")
+          .replace(/([^\s])[ \t]{2,}/g, "$1 ")
+          .replace(/([，、；;。！？.!?])\s*([，、；;。！？.!?])/g, "$1")
+          .trimEnd();
+      }
+    }
+
     return deduped
       .replace(/[（(]\s*[)）]/g, "")
       .replace(/\s{2,}/g, " ")

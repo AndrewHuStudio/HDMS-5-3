@@ -214,6 +214,111 @@ function useFeatureStatus(id: FeatureId): { checked: boolean; summary: string; i
   }
 }
 
+function getFeatureStatusSnapshot(id: FeatureId): { checked: boolean; summary: string; isPass: boolean } {
+  switch (id) {
+    case "height-check": {
+      const heightResults = useHeightCheckStore.getState().results;
+      if (!heightResults.length) return { checked: false, summary: "未检测", isPass: false };
+      const exceeded = heightResults.filter((r) => r.is_exceeded).length;
+      return {
+        checked: true,
+        summary: exceeded > 0 ? `${exceeded} 项超高` : `全部通过 (${heightResults.length})`,
+        isPass: exceeded === 0,
+      };
+    }
+    case "setback-check": {
+      const setbackResult = useSetbackCheckStore.getState().result;
+      if (!setbackResult) return { checked: false, summary: "未检测", isPass: false };
+      const { exceeded_count, total_buildings } = setbackResult.summary;
+      return {
+        checked: true,
+        summary: exceeded_count > 0 ? `${exceeded_count} 项违规` : `全部通过 (${total_buildings})`,
+        isPass: exceeded_count === 0,
+      };
+    }
+    case "sight-corridor": {
+      const corridorResult = useSightCorridorStore.getState().collisionResult;
+      if (!corridorResult) return { checked: false, summary: "未检测", isPass: false };
+      const blocking = corridorResult.blocked_buildings?.length ?? 0;
+      return {
+        checked: true,
+        summary: blocking > 0 ? `${blocking} 栋遮挡` : "通廊畅通",
+        isPass: blocking === 0,
+      };
+    }
+    case "fire-ladder": {
+      const fireLadderResults = useFireLadderStore.getState().results;
+      if (!fireLadderResults.length) return { checked: false, summary: "未检测", isPass: false };
+      const failed = fireLadderResults.filter((r) => r.status === "fail").length;
+      return {
+        checked: true,
+        summary: failed > 0 ? `${failed} 项不合格` : `全部通过 (${fireLadderResults.length})`,
+        isPass: failed === 0,
+      };
+    }
+    case "sky-bridge": {
+      const skyBridgeResults = useSkyBridgeStore.getState().results;
+      if (!skyBridgeResults.length) return { checked: false, summary: "未检测", isPass: false };
+      const failed = skyBridgeResults.filter((r) => r.status === "fail").length;
+      return {
+        checked: true,
+        summary: failed > 0 ? `${failed} 项不合格` : `全部通过 (${skyBridgeResults.length})`,
+        isPass: failed === 0,
+      };
+    }
+    case "vehicle-entrance-check": {
+      const vehicleResult = useVehicleEntranceStore.getState().result;
+      if (!vehicleResult) return { checked: false, summary: "未检测", isPass: false };
+      const violations = vehicleResult.results?.filter((r) => r.status === "fail").length ?? 0;
+      return {
+        checked: true,
+        summary: violations > 0 ? `${violations} 项违规` : "全部通过",
+        isPass: violations === 0,
+      };
+    }
+    case "pedestrian-entrance-check": {
+      const pedestrianResult = usePedestrianEntranceStore.getState().result;
+      if (!pedestrianResult) return { checked: false, summary: "未检测", isPass: false };
+      const violations = getPedestrianEntranceViolationCount(pedestrianResult);
+      return {
+        checked: true,
+        summary: violations > 0 ? `${violations} 项违规` : "全部通过",
+        isPass: violations === 0,
+      };
+    }
+    case "green-setback-check": {
+      const greenResult = useGreenSetbackStore.getState().result;
+      if (!greenResult) return { checked: false, summary: "未检测", isPass: false };
+      const violations = greenResult.summary?.violations ?? 0;
+      return {
+        checked: true,
+        summary: violations > 0 ? `${violations} 项违规` : "全部通过",
+        isPass: violations === 0,
+      };
+    }
+    case "plaza-setback-check": {
+      const plazaResult = usePlazaSetbackStore.getState().result;
+      if (!plazaResult) return { checked: false, summary: "未检测", isPass: false };
+      const violations = plazaResult.summary?.violations ?? 0;
+      return {
+        checked: true,
+        summary: violations > 0 ? `${violations} 项违规` : "全部通过",
+        isPass: violations === 0,
+      };
+    }
+    case "setback-rate-check": {
+      const setbackRateResult = useSetbackRateCheckStore.getState().result;
+      if (!setbackRateResult) return { checked: false, summary: "未检测", isPass: false };
+      const failed = setbackRateResult.plots?.filter((p) => p.is_compliant === false).length ?? 0;
+      return {
+        checked: true,
+        summary: failed > 0 ? `${failed} 个地块不达标` : "全部通过",
+        isPass: failed === 0,
+      };
+    }
+  }
+}
+
 // ---- per-feature run functions ----
 
 async function runCheck(id: FeatureId, modelPath: string): Promise<void> {
@@ -630,7 +735,7 @@ export function ApprovalChecklistPanel() {
         onOpenChange={setExportDialogOpen}
         features={FEATURES.map((f) => {
           const state = getFeatureRawState(f.id);
-          const { checked, summary, isPass } = useFeatureStatus(f.id);
+          const { checked, summary, isPass } = getFeatureStatusSnapshot(f.id);
           return {
             id: f.id,
             name: f.name,

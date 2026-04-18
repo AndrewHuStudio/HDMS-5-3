@@ -113,6 +113,14 @@ function normalizeListContent(content: string): string {
       // Bullet lines (including unicode bullets •·) should not reset the counter.
       const bulletMatch = line.match(/^(\s*)[-*+•·]\s*/);
       if (bulletMatch) {
+        if (orderedCounter > 0) {
+          const bulletIndent = bulletMatch[1] ?? "";
+          if (bulletIndent.length <= activeIndent.length) {
+            const bulletBody = line.replace(/^(\s*)[-*+•·]\s*/, "");
+            changed = true;
+            return `${activeIndent}    - ${bulletBody}`;
+          }
+        }
         return line;
       }
 

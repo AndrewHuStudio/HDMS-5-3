@@ -50,7 +50,7 @@ export const unicodeBullets = {
   id: "unicode-bullets",
   order: 1300,
   apply(text: string, _ctx: NormalizeContext): string {
-    return text.replace(/^[ \t]*[•·]\s+/gm, "- ");
+    return text.replace(/^([ \t]*)[•·]\s+/gm, "$1- ");
   },
 };
 

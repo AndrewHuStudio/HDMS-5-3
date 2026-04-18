@@ -22,7 +22,7 @@ function splitRunOnNumberedItems(text: string): string {
           return line.replace(/^([ \t]*\d{1,2}[.\uFF0E])(?=[^\s\d])/, "$1 ");
         }
 
-        let normalized = line.replace(/^([ \t]*\d{1,2}[.\uFF0E])(?=[^\s\d])/, "$1 ");
+        const normalized = line.replace(/^([ \t]*\d{1,2}[.\uFF0E])(?=[^\s\d])/, "$1 ");
         const markerRe = /\d{1,2}[.\uFF0E](?=\s*[^\s\d])/g;
         const matches = Array.from(normalized.matchAll(markerRe)).filter((m) => {
           const pos = m.index ?? 0;

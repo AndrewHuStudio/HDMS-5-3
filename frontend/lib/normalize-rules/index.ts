@@ -29,6 +29,7 @@ import "./rules/block-parser";
 import "./rules/list-splitting";
 import "./rules/table-normalization";
 import "./rules/list-numbering";
+import "./rules/list-nesting";
 import "./rules/figure-refs";
 
 // -- Batch 4: heading / structure rules --

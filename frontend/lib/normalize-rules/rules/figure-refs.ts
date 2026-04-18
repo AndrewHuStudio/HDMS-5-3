@@ -95,14 +95,31 @@ function stripSectionNumberArtifacts(text: string): string {
     /[（(]\s*\d+(?:\.\d+){1,4}(?:\s*(?:说明|详见|详述))?\s*[)）]/g;
   const LEGAL_CONTEXT_RE =
     /(GB\/T|GB\s*\/\s*T|CJJ|JGJ|规范|标准|条文|第\s*\d+\s*[条款节项]|见第\s*\d+\s*[条款节项])/i;
+  const LIST_LINE_RE = /^(\s*)(?:[-*+]\s+|\d+[.)]\s+)/;
 
   const shouldPreserveArtifact = (segment: string, start: number, end: number): boolean => {
     const context = segment.slice(Math.max(0, start - 20), Math.min(segment.length, end + 20));
     return LEGAL_CONTEXT_RE.test(context);
   };
 
+  const collapseIntraLineSpaces = (segment: string): string =>
+    segment
+      .split("\n")
+      .map((line) => {
+        if (!line.trim()) return line;
+        const listMatch = line.match(LIST_LINE_RE);
+        if (listMatch) {
+          const indent = listMatch[1] ?? "";
+          const rest = line.slice(indent.length);
+          return indent + rest.replace(/[ \t]{2,}/g, " ");
+        }
+        return line.replace(/[ \t]{2,}/g, " ");
+      })
+      .join("\n");
+
   return transformUnprotected(text, (seg) =>
-    seg
+    collapseIntraLineSpaces(
+      seg
       .replace(SECTION_ARTIFACT_RE, (match, offset: number) => {
         const start = Number(offset || 0);
         const end = start + match.length;
@@ -110,7 +127,7 @@ function stripSectionNumberArtifacts(text: string): string {
         return "";
       })
       .replace(/[（(]\s*[，,、；;:：。.\-]*\s*[)）]/g, "")
-      .replace(/[ \t]{2,}/g, " "),
+    ),
   );
 }
 

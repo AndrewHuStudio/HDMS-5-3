@@ -44,6 +44,7 @@ export const PHASE_MATRIX: Record<string, Set<NormalizePhase>> = {
   // ── Finalizing + final — medium-weight rewrite rules ──
   "chinese-headings":           FINALIZING_UP,
   "heading-hierarchy":          FINALIZING_UP,
+  "list-nesting":               FINALIZING_UP,
   "list-numbering":             FINALIZING_UP,
   "heading-sequence":           FINALIZING_UP,
   "retrieval-overview-cleanup": FINALIZING_UP,

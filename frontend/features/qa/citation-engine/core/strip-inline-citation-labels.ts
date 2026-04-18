@@ -9,6 +9,7 @@ export function stripInlineCitationLabels(text: string): string {
   const lines = text.split("\n");
   const outLines: string[] = [];
   let inFence = false;
+  const LIST_LINE_RE = /^(\s*)(?:[-*+]\s+|\d+[.)]\s+)/;
 
   for (const line of lines) {
     const trimmed = line.trimStart();
@@ -61,9 +62,16 @@ export function stripInlineCitationLabels(text: string): string {
       .replace(/（\s*）/g, "")
       .replace(/\(\s*\)/g, "")
       .replace(/\s+([，。！？；：,.!?;:）)])/g, "$1")
-      .replace(/([（(])\s+/g, "$1")
-      .replace(/[ \t]{2,}/g, " ")
-      .trimEnd();
+      .replace(/([（(])\s+/g, "$1");
+
+    const listMatch = out.match(LIST_LINE_RE);
+    if (listMatch) {
+      const indent = listMatch[1] ?? "";
+      const rest = out.slice(indent.length).replace(/[ \t]{2,}/g, " ");
+      out = `${indent}${rest}`.trimEnd();
+    } else {
+      out = out.replace(/[ \t]{2,}/g, " ").trimEnd();
+    }
 
     outLines.push(out);
   }

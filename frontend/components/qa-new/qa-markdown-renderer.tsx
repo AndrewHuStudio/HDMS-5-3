@@ -150,10 +150,6 @@ export function QAMarkdownRenderer({
       const content = (isRetrievalReason || isRetrievalList)
         ? highlightRetrievalDocNames(children, "retrieval-doc")
         : children;
-      const ordinalNode = renderOrdinalParagraph(content);
-      if (ordinalNode) {
-        return <li className="qa-ordinal-list-item mb-1.5 last:mb-0">{ordinalNode}</li>;
-      }
       return <li className="mb-1.5 last:mb-0">{content}</li>;
     },
     strong: ({ children }: { children?: ReactNode }) => <strong className="font-semibold">{children}</strong>,

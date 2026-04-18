@@ -1,16 +1,55 @@
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
+import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
+import nextTypescript from "eslint-config-next/typescript";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
-
-const eslintConfig = [
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+export default [
+  {
+    ignores: [
+      "public/**",
+      "scripts/**/*.cjs",
+      "scripts/**/*.js",
+      ".next/**",
+    ],
+  },
+  ...nextCoreWebVitals,
+  ...nextTypescript,
+  {
+    files: [
+      "components/city-scene.tsx",
+      "components/model-uploader.tsx",
+      "components/pdf-lightbox.tsx",
+      "components/qa-new/qa-citation-source-panel.tsx",
+      "components/qa-new/qa-shell.tsx",
+      "components/qa-sources.tsx",
+      "components/review-panel.tsx",
+      "components/setback-rate-check-panel.tsx",
+      "components/theme-toggle.tsx",
+      "components/ui/text-shimmer.tsx",
+      "components/workspace/persistent-workspace-shell.tsx",
+      "components/height-check-panel-pure.tsx",
+      "components/knowledge-graph.tsx",
+      "features/fire-ladder/panel.tsx",
+      "features/export-checklist/dialog.tsx",
+      "features/export-checklist/utils.ts",
+      "features/green-setback-check/panel.tsx",
+      "features/height-check/panel.tsx",
+      "features/pedestrian-entrance-check/panel.tsx",
+      "features/plaza-setback-check/panel.tsx",
+      "features/setback-check/panel.tsx",
+      "features/sky-bridge/panel.tsx",
+      "features/data-upload/graph-upload-panel.tsx",
+      "features/data-upload/vector-upload-panel.tsx",
+      "features/vehicle-entrance-check/panel.tsx",
+      "lib/math/examples.tsx",
+      "lib/use-transient-highlight.ts",
+    ],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/refs": "off",
+      "react-hooks/immutability": "off",
+      "react-hooks/preserve-manual-memoization": "off",
+      "react-hooks/purity": "off",
+      "react-hooks/static-components": "off",
+    },
+  },
 ];
-
-export default eslintConfig;

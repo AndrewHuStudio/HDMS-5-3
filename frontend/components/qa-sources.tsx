@@ -135,10 +135,10 @@ export function QASources({
   // If parent provides a cache, parent is responsible for prefetching.
   const prefetchingKeysRef = useRef<Set<string>>(new Set());
   const prefetchedImageUrlsRef = useRef<Set<string>>(new Set());
-
-  if (!sourcesNormalized || sourcesNormalized.length === 0) return null;
+  const hasSources = sourcesNormalized.length > 0;
 
   useEffect(() => {
+    if (!hasSources) return;
     if (externalPreviewCache && setExternalPreviewCache) return;
     const PREFETCH_LIMIT = 12;
     const missing = sourcesNormalized
@@ -175,11 +175,12 @@ export function QASources({
           prefetchingKeysRef.current.delete(key);
         });
     });
-  }, [externalPreviewCache, previewCache, query, setExternalPreviewCache, sourcesNormalized]);
+  }, [externalPreviewCache, hasSources, previewCache, query, setExternalPreviewCache, sourcesNormalized]);
 
   // Prefetch image binaries as soon as source metadata/preview metadata is available.
   // This reduces the delay between answer render and first visible image.
   useEffect(() => {
+    if (!hasSources) return;
     const urls: string[] = [];
 
     for (const source of sourcesNormalized) {
@@ -211,7 +212,9 @@ export function QASources({
 
       if (prefetchedImageUrlsRef.current.size >= MAX_PREFETCH_IMAGES) break;
     }
-  }, [previewCache, sourcesNormalized]);
+  }, [hasSources, previewCache, sourcesNormalized]);
+
+  if (!hasSources) return null;
 
   return (
     <div

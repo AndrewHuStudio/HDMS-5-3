@@ -140,7 +140,7 @@ export function fixUnpairedDelimiters(text: string): string {
   }
 
   // 修复行内公式（$），但要排除已经被块级公式包含的部分
-  let cleanText = result;
+  const cleanText = result;
   const blockRegex = /\$\$[\s\S]*?\$\$/g;
   const blocks: Array<{ start: number; end: number }> = [];
 

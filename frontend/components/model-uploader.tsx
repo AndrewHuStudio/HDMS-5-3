@@ -80,8 +80,8 @@ export function ModelUploader({ onModelLoad, currentModel, currentModelName, onC
       // 只做本地加载，不进行预上传
       onModelLoad(url, file.name, fileType, undefined, undefined, file);
       setIsOpen(false);
-    } catch (err: any) {
-      setError(err.message || "文件处理失败");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "文件处理失败");
     }
   }, [onModelLoad]);
 

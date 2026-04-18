@@ -337,6 +337,22 @@ interface InjectSourceImagesOptions {
   allowCitationLineInjection?: boolean;
 }
 
+function collapseExtraSpacesPreservingListIndent(text: string): string {
+  return String(text || "")
+    .split("\n")
+    .map((line) => {
+      if (!line.trim()) return line;
+      const listMatch = line.match(/^(\s*)(?:[-*+]\s+|\d+[.)]\s+)/);
+      if (listMatch) {
+        const indent = listMatch[1] ?? "";
+        const rest = line.slice(indent.length).replace(/[ \t]{2,}/g, " ");
+        return `${indent}${rest}`.trimEnd();
+      }
+      return line.replace(/[ \t]{2,}/g, " ").trimEnd();
+    })
+    .join("\n");
+}
+
 function buildFigureCaptionLine(
   figLabel: string,
   image: CandidateImage,
@@ -437,11 +453,12 @@ export function injectSourceImages(
   if (!sources || sources.length === 0) {
     // Never leak structured IMG protocol markers to users when source payload
     // is missing (or filtered out). Keep plain text readable.
-    return text
-      .replace(STRUCTURED_IMG_ANCHOR_RE, "")
-      .replace(/[ \t]{2,}/g, " ")
-      .replace(/([（(])\s+([)）])/g, "$1$2")
-      .replace(/\n{3,}/g, "\n\n");
+    return collapseExtraSpacesPreservingListIndent(
+      text
+        .replace(STRUCTURED_IMG_ANCHOR_RE, "")
+        .replace(/([（(])\s+([)）])/g, "$1$2")
+        .replace(/\n{3,}/g, "\n\n"),
+    );
   }
   const streaming = Boolean(options.streaming);
   const allowAppendixFallback = options.allowAppendixFallback ?? !streaming;
@@ -581,10 +598,10 @@ export function injectSourceImages(
     }
 
     const cleanupPattern = new RegExp(STRUCTURED_IMG_ANCHOR_RE.source, STRUCTURED_IMG_ANCHOR_RE.flags);
-    nextLine = nextLine
+    nextLine = collapseExtraSpacesPreservingListIndent(
+      nextLine
       .replace(cleanupPattern, "")
-      .replace(/[ \t]{2,}/g, " ")
-      .trimEnd();
+    );
 
     if (injectedBlocks.length === 0) {
       lines[i] = nextLine;
