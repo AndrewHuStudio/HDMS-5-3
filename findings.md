@@ -1,5 +1,21 @@
 # Findings & Decisions
 
+## QA前端流程跑通（2026-04-19）
+- 当前前端 external 模式运行在 `http://localhost:8021`，并通过 Next 代理处理 `/qa/chat/stream`。
+- `scripts/start-frontend.ps1` 在 external 模式下默认把 `HDMS_QA_BASE_URL` 设为 `http://localhost:8022`，但本机 `8022` 没有服务。
+- 实际在线的 QA 后端是 `http://localhost:8032`，其 OpenAPI 标题为 `HDMS QA Assistant API`，并且包含 `/qa/chat/stream`、`/rag/*` 等路径。
+- 实际在线的审查系统在 `8023`，审批清单在 `8024`，数据处理在 `8125`；之前把 8023/8024 误当 QA 端口会导致 `/qa/chat/stream` 返回 404。
+- 直接请求 `http://localhost:8032/qa/chat/stream` 可收到 `status`、`sources`、`retrieval_stats`、`thinking`、`answer` 等 SSE 事件。
+- 修正前端启动脚本后，直接请求 `http://localhost:8021/qa/chat/stream` 也能收到与 8032 一致的 SSE 事件，说明前端代理链路已打通。
+
+## QA流式Markdown稳定性（2026-04-19）
+- `frontend/features/qa/render/streaming-markdown-stability.ts` 当前 `splitTailBlock()` 仅按“最后一个空行”切 tail，会把没有空行分隔的完整段落、表格、列表整体移出 parser。
+- 同文件 `isRiskyMarkdownTail()` 使用 `/[*_`[]$/` 判定 risky tail，等同于只要尾部出现这些字符就容易误报，导致正常中文技术文本在 streaming 阶段被隐藏。
+- `frontend/components/qa-new/qa-markdown-renderer.tsx` 当前 pending 渲染只有二态：显示或隐藏，缺少对“有真实文本但 markdown 未闭合”的纯文本兜底。
+- `qa-markdown-renderer.tsx` 在 `!isMathComplete(streamingPrepared.markdownForParser)` 时会把整个 stable prefix 纯文本降级，导致已完整的标题/列表/表格格式丢失。
+- `frontend/features/qa/qa-view.tsx` 的 answer token flush 仍基于 `setTimeout(48ms)`，更新节奏不与渲染帧对齐。
+- `frontend/lib/normalize-rules/phase-matrix.ts` 目前让 `block-parser` 在 `streaming` 阶段运行，这与“流式阶段避免结构重写”的目标冲突。
+
 ## OCR任务持久化（2026-04-09）
 - OCR job 当前仅存在 `data_process/ocr_process/core.py` 的进程内 `_jobs` 字典。
 - `get_job_status()` 只读内存；`get_summary()` 则直接扫描 OCR 输出目录，因此两者天然会失配。

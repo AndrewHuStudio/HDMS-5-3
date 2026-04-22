@@ -250,8 +250,12 @@ def _safe_positive_int(value: object, default: int, *, minimum: int = 1, maximum
 
 
 def _normalize_history(history: List) -> List[dict]:
-    window = _safe_positive_int(getattr(config, "QA_HISTORY_WINDOW", 8), 8, minimum=1, maximum=100)
-    return [{"role": h.role, "content": h.content} for h in history[-window:]]
+    window = _safe_positive_int(getattr(config, "QA_HISTORY_WINDOW", 4), 4, minimum=1, maximum=8)
+    MAX_CONTENT_PER_MSG = 500
+    return [
+        {"role": h.role, "content": h.content[:MAX_CONTENT_PER_MSG]}
+        for h in history[-window:]
+    ]
 
 
 def _get_pdf_page_texts(pdf_path: Path) -> Optional[List[str]]:

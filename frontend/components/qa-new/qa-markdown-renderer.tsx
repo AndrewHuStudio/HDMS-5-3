@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { isMathComplete, fixUnpairedDelimiters, extractMathBlocks, fixMathInText, ensureBlockMathSpacing } from "@/lib/math";
 import { QA_HEADING_COMPONENTS } from "@/features/qa/render/heading-components";
 import { renderOrdinalParagraph } from "@/features/qa/render/ordinal-rendering";
+import { prepareStreamingMarkdown } from "@/features/qa/render/streaming-markdown-stability";
 import { QA_TABLE_COMPONENTS } from "./md-table-components";
 import { buildImageComponent } from "./md-image-components";
 import {
@@ -54,18 +55,25 @@ export function QAMarkdownRenderer({
   isStreaming = false,
 }: QAMarkdownRendererProps) {
   const markdownRef = useRef<HTMLDivElement>(null);
+  const streamingPrepared = useMemo(
+    () => isStreaming
+      ? prepareStreamingMarkdown(markdown)
+      : { markdownForParser: markdown, pendingText: "", pendingRenderMode: "hidden" as const, showPendingText: false },
+    [markdown, isStreaming],
+  );
 
   // 处理公式：流式时如果公式不完整则不渲染，完成后自动修复格式
   const processedMarkdown = useMemo(() => {
-    if (!markdown) return '';
+    const source = streamingPrepared.markdownForParser;
+    if (!source) return '';
 
-    // 流式显示时，如果公式不完整，直接返回原始文本
-    if (isStreaming && !isMathComplete(markdown)) {
-      return markdown;
+    // 流式阶段优先依赖 prepareStreamingMarkdown 将未闭合公式切到 pending tail。
+    if (isStreaming && !isMathComplete(source)) {
+      return source;
     }
 
     // 完成后，修复公式格式
-    let processed = markdown;
+    let processed = source;
 
     // 1. 修复不配对的分隔符
     processed = fixUnpairedDelimiters(processed);
@@ -78,7 +86,7 @@ export function QAMarkdownRenderer({
     processed = ensureBlockMathSpacing(processed);
 
     return processed;
-  }, [markdown, isStreaming]);
+  }, [streamingPrepared.markdownForParser, isStreaming]);
 
   // Detect overflowing KaTeX display formulas and add scroll-hint class.
   useEffect(() => {
@@ -177,19 +185,25 @@ export function QAMarkdownRenderer({
     [defaultComponents, componentOverrides],
   );
 
-  // 流式显示时，如果公式不完整，显示原始文本（不渲染公式）
-  if (isStreaming && !isMathComplete(markdown)) {
-    return (
-      <div ref={markdownRef} className={cn("qa-markdown prose prose-sm max-w-none break-words dark:prose-invert", className)}>
-        <div className="whitespace-pre-wrap break-words">
-          {processedMarkdown}
-        </div>
-        {showStreamingCursor && (
-          <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-foreground" />
-        )}
-      </div>
-    );
-  }
+  const pendingNode = isStreaming && streamingPrepared.pendingText
+    ? streamingPrepared.pendingRenderMode === "markdown"
+      ? (
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins ?? [[rehypeKatex, { strict: false, throwOnError: false }]]}
+          components={mergedComponents}
+        >
+          {streamingPrepared.pendingText}
+        </ReactMarkdown>
+      )
+      : streamingPrepared.pendingRenderMode === "plaintext"
+        ? (
+          <div className="whitespace-pre-wrap break-words text-muted-foreground/80">
+            {streamingPrepared.pendingText}
+          </div>
+        )
+        : null
+    : null;
 
   return (
     <div ref={markdownRef} className={cn("qa-markdown prose prose-sm max-w-none break-words dark:prose-invert", className)}>
@@ -200,6 +214,7 @@ export function QAMarkdownRenderer({
       >
         {processedMarkdown}
       </ReactMarkdown>
+      {pendingNode}
       {showStreamingCursor && (
         <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-foreground" />
       )}

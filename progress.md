@@ -1,5 +1,92 @@
 # Progress Log
 
+## Session: 2026-04-19 QA前端输出流程跑通
+
+### Phase 1: 现状确认与根因调查
+- **Status:** complete
+- Actions taken:
+  - 读取并应用 `using-superpowers`、`systematic-debugging`、`planning-with-files`、`verification-before-completion`。
+  - 检查 `frontend/features/qa/api.ts`、`frontend/app/qa/chat/stream/route.ts`、`scripts/start-frontend.ps1`。
+  - 核对本机进程与端口，确认前端在 `8021`，QA 后端实际在 `8032`，而 external 模式默认指向了不存在的 `8022`。
+- Files created/modified:
+  - `task_plan.md` (updated)
+  - `findings.md` (updated)
+  - `progress.md` (updated)
+
+### Phase 2: 真实复现
+- **Status:** complete
+- Actions taken:
+  - 直接请求 `http://localhost:8032/qa/chat/stream`，确认 QA 后端可返回 SSE。
+  - 直接请求 `http://localhost:8021/qa/chat/stream`，定位到前端代理链路因错误上游配置表现异常。
+  - 用 OpenAPI/health 检查排除 8023、8024、8125 为 QA 服务的可能。
+- Files created/modified:
+  - `findings.md` (updated)
+
+### Phase 3: 最小修复
+- **Status:** complete
+- Actions taken:
+  - 修改 `scripts/start-frontend.ps1`，将 external 模式默认 `HDMS_QA_BASE_URL` 从 `http://localhost:8022` 改为 `http://localhost:8032`。
+  - 重启前端开发服务到 `8021`。
+- Files created/modified:
+  - `scripts/start-frontend.ps1` (updated)
+
+### Phase 4: 验证与交付
+- **Status:** complete
+- Actions taken:
+  - 验证 `http://localhost:8021/assistant` 可访问。
+  - 使用 Node 读取 `http://localhost:8021/qa/chat/stream` 实际收到 `status`、`sources`、`retrieval_stats`、`thinking`、`answer` 等 SSE 事件。
+  - 确认前端 `/qa/chat/stream` 已与真实 QA 后端 `8032` 打通。
+- Files created/modified:
+  - `task_plan.md` (updated)
+  - `progress.md` (updated)
+
+## Session: 2026-04-19 QA流式Markdown稳定性修复
+
+### Phase 1: 现状确认与根因对齐
+- **Status:** complete
+- Actions taken:
+  - 读取并应用 `using-superpowers`、`brainstorming`、`systematic-debugging`、`test-driven-development`、`planning-with-files`、`verification-before-completion`。
+  - 检查 `streaming-markdown-stability.ts`、`qa-markdown-renderer.tsx`、`qa-view.tsx`、`phase-matrix.ts`。
+  - 对照用户提供分析，确认主要根因是 tail 切分粗糙、risky 误报、pending 渲染能力不足和流式阶段结构性重写。
+- Files created/modified:
+  - `task_plan.md` (updated)
+  - `findings.md` (updated)
+  - `progress.md` (updated)
+
+### Phase 2: 测试先行
+- **Status:** complete
+- Actions taken:
+  - 扩展 `frontend/scripts/qa-streaming-stable-prefix-regression.tsx`，覆盖完整段落、完整表格、不完整表格、不完整列表、未闭合公式和纯语法碎片。
+  - 新增 `frontend/scripts/qa-streaming-normalization-regression.ts`，锁定 `block-parser` 不得进入 `streaming` 阶段。
+  - 使用 `jiti` 执行回归脚本，确认旧实现先在不完整表格与 math tail 场景失败。
+- Files created/modified:
+  - `frontend/scripts/qa-streaming-stable-prefix-regression.tsx` (updated)
+  - `frontend/scripts/qa-streaming-normalization-regression.ts` (created)
+
+### Phase 3: 最小实现
+- **Status:** complete
+- Actions taken:
+  - 重写 `frontend/features/qa/render/streaming-markdown-stability.ts`，实现 block-aware stable/tail 切分、未闭合 inline markup 判定、pending 三态渲染决策，以及未闭合公式回收到 tail。
+  - 更新 `frontend/components/qa-new/qa-markdown-renderer.tsx`，移除整段 math fallback 纯文本降级，改为稳定前缀 markdown 渲染 + pending 三态显示。
+  - 更新 `frontend/features/qa/qa-view.tsx`，将 answer token flush 从 `setTimeout(48ms)` 改为 `requestAnimationFrame`。
+  - 更新 `frontend/lib/normalize-rules/phase-matrix.ts`，将 `block-parser` 从 `streaming` 阶段移除。
+- Files created/modified:
+  - `frontend/features/qa/render/streaming-markdown-stability.ts` (rewritten)
+  - `frontend/components/qa-new/qa-markdown-renderer.tsx` (updated)
+  - `frontend/features/qa/qa-view.tsx` (updated)
+  - `frontend/lib/normalize-rules/phase-matrix.ts` (updated)
+
+### Phase 4: 验证与交付
+- **Status:** complete
+- Actions taken:
+  - 运行 `frontend\\node_modules\\.bin\\jiti frontend/scripts/qa-streaming-stable-prefix-regression.tsx`，通过。
+  - 运行 `frontend\\node_modules\\.bin\\jiti frontend/scripts/qa-streaming-normalization-regression.ts`，通过。
+  - 运行 `node frontend/node_modules/typescript/bin/tsc --noEmit -p frontend/tsconfig.json`，通过。
+  - 运行 `npm run lint`，结果为 0 error / 110 warning，均为仓库现存 warning，未引入新的 lint error。
+- Files created/modified:
+  - `task_plan.md` (updated)
+  - `progress.md` (updated)
+
 ## Session: 2026-04-09 OCR任务状态持久化
 
 ### Phase 1: 现状确认与方案收敛

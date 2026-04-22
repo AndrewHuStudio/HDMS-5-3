@@ -16,12 +16,12 @@ import { QAExportButton } from "@/components/qa-export-button";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import type { ChatMessage } from "@/features/qa/types";
 import { cn } from "@/lib/utils";
-import { buildAnswerMarkdown } from "@/features/qa/render/answer-markdown-pipeline";
 import {
   buildAssistantRenderModel,
   deriveAssistantRenderState,
   resolveAnswerRenderPhase,
 } from "@/features/qa/render/assistant-render-state-machine";
+import { resolveAssistantAnswerMarkdown } from "@/features/qa/render/resolve-answer-markdown";
 import { QAMarkdownRenderer } from "./qa-markdown-renderer";
 import { useCitationState, QACitationSourcePanel } from "./qa-citation-source-panel";
 
@@ -563,6 +563,7 @@ function AssistantContent({
 }) {
   const {
     content,
+    stableMarkdown,
     thinking,
     sources,
     retrievalStats,
@@ -592,15 +593,16 @@ function AssistantContent({
   );
 
   const answerMarkdown = useMemo(() => {
-    return buildAnswerMarkdown({
+    return resolveAssistantAnswerMarkdown({
       content: cleanContent,
+      stableMarkdown,
       sources: sourcesNormalized,
       isStreaming: Boolean(isStreaming),
       renderPhase: answerRenderPhase,
       precedingQuestion,
       finalizedByServer,
     });
-  }, [cleanContent, sourcesNormalized, isStreaming, answerRenderPhase, precedingQuestion, finalizedByServer]);
+  }, [stableMarkdown, cleanContent, sourcesNormalized, isStreaming, answerRenderPhase, precedingQuestion, finalizedByServer]);
 
   const hasThinkingTokens = Boolean((thinking || "").trim());
   const renderModel = buildAssistantRenderModel({

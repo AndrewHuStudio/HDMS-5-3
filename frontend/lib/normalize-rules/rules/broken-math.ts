@@ -122,9 +122,11 @@ export const brokenInlineMath = {
       idx = found + 1;
     }
 
-    out = out.replace(/([^\n#])\s*(#{2,6}\s*[\u4E00-\u4E5D\u5341\u767E0-9]+[、.．])/g, "$1\n$2");
-    out = out.replace(/^[ \t]*#{2,6}[ \t]*$/gm, "");
-    out = out.replace(/\n{3,}/g, "\n\n");
+    if (out !== text) {
+      out = out.replace(/([^\n#])\s*(#{2,6}\s*[\u4E00-\u4E5D\u5341\u767E0-9]+[、.．])/g, "$1\n$2");
+      out = out.replace(/^[ \t]*#{2,6}[ \t]*$/gm, "");
+      out = out.replace(/\n{3,}/g, "\n\n");
+    }
 
     return out;
   },

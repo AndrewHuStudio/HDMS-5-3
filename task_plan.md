@@ -1,52 +1,52 @@
-# Task Plan: OCR任务状态持久化
+# Task Plan: QA前端输出流程跑通
 
 ## Goal
-为 `data_process/ocr_process` 增加 OCR job 状态持久化，保证服务重启后任务状态不会直接丢失；已完成任务可恢复查询，中断中的任务应明确标记为中断失败。
+确认 HDMS 前端“管控问答助手”为什么看起来输出不了结果，并将从页面发起请求到 Next 代理再到 QA 后端 SSE 返回的整条链路实际跑通。
 
 ## Current Phase
 Phase 4
 
 ## Phases
-### Phase 1: 现状确认与持久化方案
-- [x] 确认 OCR job 当前内存存储点与读写路径
-- [x] 确认重启后恢复语义（完成保留，中途任务失败）
+### Phase 1: 现状确认与根因调查
+- [x] 核对前端 QA 请求入口、Next 代理路由和后端 QA 服务端口
+- [x] 确认当前运行中的前端与各后端进程
 - [x] 记录关键发现到 `findings.md`
 - **Status:** complete
 
-### Phase 2: 测试先行
-- [x] 编写 job 落盘与恢复失败测试
-- [x] 编写中断任务恢复语义测试
-- [x] 验证测试先失败
+### Phase 2: 真实复现
+- [x] 直接请求前端 `/qa/chat/stream` 复现问题
+- [x] 直接请求 QA 后端 `/qa/chat/stream` 对比行为
+- [x] 确认失败发生在前端代理配置而不是后端服务本身
 - **Status:** complete
 
-### Phase 3: 最小实现
-- [x] 增加文件型 OCR job store
-- [x] 接入 submit/update/status/clear 链路
-- [x] 保持现有 API 返回结构不变
+### Phase 3: 最小修复
+- [x] 修正 external 模式前端默认 QA 代理端口
+- [x] 重启前端并确认代理目标切换到真实 QA 服务
 - **Status:** complete
 
 ### Phase 4: 验证与交付
-- [x] 跑目标 pytest 用例
-- [x] 复核前端现有 OCR 恢复逻辑是否仍兼容
+- [x] 验证 `/assistant` 页面可访问
+- [x] 验证前端 `/qa/chat/stream` 可以收到真实 SSE 事件
 - [x] 汇报变更、验证结果与残余风险
 - **Status:** complete
 
 ## Key Questions
-1. OCR job 应该存到哪里，才不会被 OCR 输出清理误伤？
-2. 服务重启后，非终态任务应该恢复成什么状态？
-3. 哪些 API 和测试需要保持完全兼容？
+1. 当前前端实际跑在哪个端口？
+2. Next 代理把 QA 请求发到了哪个上游地址？
+3. 实际在线的 QA 后端端口是多少？
+4. 问题是在渲染层、代理层，还是后端 SSE 层？
 
 ## Decisions Made
 | Decision | Rationale |
 |----------|-----------|
-| 优先做文件型持久化而不是引入新数据库 | 与当前架构最贴近，变更面最小 |
-| 重启恢复时仅保留终态；非终态统一标记为中断失败 | 后台线程已丢失，不能伪装继续执行 |
+| 先不猜测渲染器问题，先跑真实 `/qa/chat/stream` 链路 | 这是最短的根因定位路径 |
+| 优先修 `scripts/start-frontend.ps1` 的 external 模式默认 QA 端口 | 当前启动方式就是通过该脚本注入环境变量 |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-|       | 1       |            |
+| external 模式默认 `HDMS_QA_BASE_URL=http://localhost:8022`，但 8022 无服务 | 1 | 改为指向实际在线的 QA 服务 `http://localhost:8032` |
 
 ## Notes
-- 目标目录暂定为独立 job store，而不是 `data/ocr_output`
-- 需要与现有前端 `OCRUploadPanel` 的轮询恢复逻辑兼容
+- 当前前端在 `8021`，审查系统在 `8023`，审批清单在 `8024`，数据处理在 `8125`，QA 服务在 `8032`。
+- 这次问题的核心不是 markdown renderer，而是 external 模式启动参数配置错误。

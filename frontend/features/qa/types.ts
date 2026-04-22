@@ -75,6 +75,7 @@ export interface ChatMessage {
   role: ChatRole;
   content: string;
   createdAt: string;
+  stableMarkdown?: string;
   thinking?: string;
   sources?: SourceInfo[];
   retrievalStats?: RetrievalStats;

@@ -17,6 +17,7 @@ import {
   initialAssistantRenderState,
   transitionAssistantRenderState,
 } from "@/features/qa/render/assistant-render-state-machine";
+import { captureVisibleAnswerMarkdown } from "@/features/qa/render/resolve-answer-markdown";
 
 const quickQuestions: string[] = [];
 
@@ -36,10 +37,14 @@ const createMessage = (
 });
 
 const buildHistory = (messages: ChatMessage[]): ChatHistoryMessage[] => {
+  const MAX_CONTENT_LENGTH = 500;
   return messages
     .filter((message) => message.id !== "welcome")
-    .slice(-8)
-    .map((message) => ({ role: message.role, content: message.content }));
+    .slice(-4)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.slice(0, MAX_CONTENT_LENGTH),
+    }));
 };
 
 type MarkdownShapeMetrics = {
@@ -196,6 +201,40 @@ export function QAView({
     const assistantId = assistantMsg.id;
     appendMessage(assistantMsg);
 
+    let answerTokenBuffer = "";
+    let answerRafId: number | null = null;
+
+    const flushAnswerTokenBuffer = () => {
+      answerRafId = null;
+      if (!answerTokenBuffer) return;
+      const chunk = answerTokenBuffer;
+      answerTokenBuffer = "";
+      updateMessage(assistantId, (msg) => ({
+        ...msg,
+        // Keep answer hidden only when there is real, unfinished thinking text.
+        // If the model streams answer directly (no thinking_done event), we should
+        // still enter answering state to avoid "nothing shows until done".
+        renderState: transitionAssistantRenderState(msg.renderState, {
+          type: "answer",
+          holdDuringReasoning: Boolean((msg.thinking || "").trim()) && !msg.thinkingDone,
+        }),
+        content: msg.content + chunk,
+      }));
+    };
+
+    const scheduleAnswerTokenFlush = () => {
+      if (answerRafId !== null) return;
+      answerRafId = requestAnimationFrame(flushAnswerTokenBuffer);
+    };
+
+    const clearAnswerFlush = () => {
+      if (answerRafId !== null) {
+        cancelAnimationFrame(answerRafId);
+        answerRafId = null;
+      }
+      flushAnswerTokenBuffer();
+    };
+
     try {
       await sendQuestionStream(question, history, {
         onSources: (sources) => {
@@ -234,37 +273,51 @@ export function QAView({
           }));
         },
         onAnswer: (token) => {
-          updateMessage(assistantId, (msg) => ({
-            ...msg,
-            // Keep answer hidden only when there is real, unfinished thinking text.
-            // If the model streams answer directly (no thinking_done event), we should
-            // still enter answering state to avoid "nothing shows until done".
-            renderState: transitionAssistantRenderState(msg.renderState, {
-              type: "answer",
-              holdDuringReasoning: Boolean((msg.thinking || "").trim()) && !msg.thinkingDone,
-            }),
-            content: msg.content + token,
-          }));
+          answerTokenBuffer += token;
+          scheduleAnswerTokenFlush();
         },
         onAnswerReplaced: (fullAnswer, replacedSources) => {
-          updateMessage(assistantId, (msg) => ({
-            ...msg,
-            content: shouldAcceptAnswerReplacement(msg.content, fullAnswer)
+          clearAnswerFlush();
+          updateMessage(assistantId, (msg) => {
+            const acceptedContent = shouldAcceptAnswerReplacement(msg.content, fullAnswer)
               ? fullAnswer
-              : msg.content,
-            // Keep streaming UI state until `done` so finalizing and done share
-            // one stable final-content pipeline instead of two style jumps.
-            isStreaming: true,
-            finalizedByServer: true,
-            renderState: transitionAssistantRenderState(msg.renderState, { type: "answer_replaced" }),
-            ...(replacedSources
-              ? { sources: mergeStreamingSources(msg.sources, replacedSources) }
-              : {}),
-          }));
+              : msg.content;
+            const mergedSources = mergeStreamingSources(msg.sources, replacedSources);
+            const nextRenderState = transitionAssistantRenderState(msg.renderState, { type: "answer_replaced" });
+
+            return {
+              ...msg,
+              content: acceptedContent,
+              // Keep streaming UI state until `done` so finalizing and done share
+              // one stable final-content pipeline instead of two style jumps.
+              isStreaming: true,
+              finalizedByServer: true,
+              stableMarkdown: captureVisibleAnswerMarkdown({
+                content: acceptedContent,
+                sources: mergedSources,
+                isStreaming: true,
+                renderState: nextRenderState,
+                finalizedByServer: true,
+              }),
+              renderState: nextRenderState,
+              ...(replacedSources ? { sources: mergedSources } : {}),
+            };
+          });
         },
         onDone: () => {
+          clearAnswerFlush();
           updateMessage(assistantId, (msg) => ({
             ...msg,
+            stableMarkdown:
+              msg.stableMarkdown ||
+              captureVisibleAnswerMarkdown({
+                content: msg.content,
+                sources: msg.sources || [],
+                isStreaming: Boolean(msg.isStreaming),
+                renderState: msg.renderState,
+                precedingQuestion: question,
+                finalizedByServer: msg.finalizedByServer,
+              }),
             isStreaming: false,
             statusStage: undefined,
             statusMessage: undefined,
@@ -272,9 +325,22 @@ export function QAView({
           }));
         },
         onError: (detail) => {
+          clearAnswerFlush();
           updateMessage(assistantId, (msg) => ({
             ...msg,
             content: msg.content || `Error: ${detail}`,
+            stableMarkdown:
+              msg.stableMarkdown ||
+              (msg.content
+                ? captureVisibleAnswerMarkdown({
+                    content: msg.content,
+                    sources: msg.sources || [],
+                    isStreaming: Boolean(msg.isStreaming),
+                    renderState: msg.renderState,
+                    precedingQuestion: question,
+                    finalizedByServer: msg.finalizedByServer,
+                  })
+                : undefined),
             isStreaming: false,
             statusStage: undefined,
             statusMessage: undefined,
@@ -287,8 +353,21 @@ export function QAView({
         (error instanceof DOMException && error.name === "AbortError") ||
         (error instanceof Error && error.name === "AbortError");
       if (aborted) {
+        clearAnswerFlush();
         updateMessage(assistantId, (msg) => ({
           ...msg,
+          stableMarkdown:
+            msg.stableMarkdown ||
+            (msg.content
+              ? captureVisibleAnswerMarkdown({
+                  content: msg.content,
+                  sources: msg.sources || [],
+                  isStreaming: Boolean(msg.isStreaming),
+                  renderState: msg.renderState,
+                  precedingQuestion: question,
+                  finalizedByServer: msg.finalizedByServer,
+                })
+              : undefined),
           isStreaming: false,
           thinkingDone: true,
           statusStage: undefined,
@@ -299,6 +378,7 @@ export function QAView({
       }
 
       // SSE stream failed (non-abort)
+      clearAnswerFlush();
       const detail =
         error instanceof Error ? error.message : "请求失败";
       updateMessage(assistantId, (msg) => ({
@@ -308,6 +388,7 @@ export function QAView({
         renderState: transitionAssistantRenderState(msg.renderState, { type: "error" }),
       }));
     } finally {
+      clearAnswerFlush();
       if (activeAbortControllerRef.current === streamAbortController) {
         activeAbortControllerRef.current = null;
       }

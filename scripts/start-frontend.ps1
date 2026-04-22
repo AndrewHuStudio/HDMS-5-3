@@ -29,7 +29,7 @@ if (-not $QaBase) {
 }
 
 if (-not $QaServerBase) {
-  $QaServerBase = if ($Mode -eq 'external') { 'http://localhost:8022' } else { $QaBase }
+  $QaServerBase = if ($Mode -eq 'external') { 'http://localhost:8032' } else { $QaBase }
 }
 
 if (-not $DataProcessBase) {

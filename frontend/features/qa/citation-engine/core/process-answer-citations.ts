@@ -1,7 +1,7 @@
 ﻿/**
  * 答案引用处理入口
  * 按顺序执行：规范化引用位置 → 转换为锚点 → 圆圈引用回退 → 剥离内联标签。
- * 流式阶段跳过重写步骤，仅执行剥离，避免视觉抖动。
+ * 所有阶段统一处理，保证"输出过程即结果"。
  */
 import type { SourceInfo } from "../../types";
 import { collectValidCitationLabels } from "./citation-utils";
@@ -29,21 +29,18 @@ function collectCitationLabelsFromText(text: string): Set<string> {
  * Keep answer-body citation processing in one place so renderers can stay thin.
  */
 export function processAnswerCitations(args: ProcessAnswerCitationsArgs): string {
-  const { text, sources, isStreaming } = args;
+  const { text, sources } = args;
   if (!text) return text;
 
-  const streaming = Boolean(isStreaming);
-  const normalized = streaming ? text : normalizeCitations(text, sources);
+  // All phases use identical citation processing to guarantee
+  // streaming output === final output (no structure jumping).
+  const normalized = normalizeCitations(text, sources);
   const validLabels = collectValidCitationLabels(sources);
   const fallbackLabels = validLabels.size > 0
     ? validLabels
     : collectCitationLabelsFromText(normalized);
-  const withAnchors = streaming
-    ? normalized
-    : convertCitationsToAnchors(normalized, fallbackLabels);
-  const withCircledFallback = streaming
-    ? withAnchors
-    : convertCircledCitationsToAnchors(withAnchors, sources);
+  const withAnchors = convertCitationsToAnchors(normalized, fallbackLabels);
+  const withCircledFallback = convertCircledCitationsToAnchors(withAnchors, sources);
 
   return stripInlineCitationLabels(withCircledFallback);
 }
