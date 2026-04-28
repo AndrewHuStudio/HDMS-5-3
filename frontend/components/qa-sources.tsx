@@ -219,15 +219,17 @@ export function QASources({
   return (
     <div
       className={cn(
-        "space-y-2",
-        layout === "sidebar" && "rounded-lg border border-border/60 bg-card/70 p-3"
+        "space-y-2.5",
+        layout === "sidebar" && "rounded-2xl border border-slate-200/85 bg-gradient-to-b from-slate-50 to-white p-3 shadow-[0_12px_32px_rgba(15,23,42,0.06)]"
       )}
     >
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-muted-foreground">
+      <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+        <p className="text-xs font-semibold tracking-[0.02em] text-slate-700">
           {layout === "sidebar" ? "证据来源" : "引用来源"}
         </p>
-        <span className="text-[11px] text-muted-foreground">{sourcesNormalized.length} 条</span>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+          {sourcesNormalized.length} 条
+        </span>
       </div>
       <div className="space-y-1.5">
         {sourcesNormalized.map((source, index) => {
@@ -420,9 +422,9 @@ function SourceCard({
             role="button"
             tabIndex={0}
             className={cn(
-              "flex w-full items-start gap-2 rounded-md border border-border/50 bg-card px-3 py-2 text-left text-xs transition-colors",
-              "cursor-pointer hover:bg-amber-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-amber-500/10",
-              isOpen && "rounded-b-none border-b-0"
+              "flex w-full items-start gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2.5 text-left text-xs shadow-sm transition-[border-color,box-shadow,background-color]",
+              "cursor-pointer hover:border-sky-200 hover:bg-sky-50/40 hover:shadow-[0_10px_24px_rgba(14,165,233,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-amber-500/10",
+              isOpen && "rounded-b-none border-b-0 border-sky-200 bg-sky-50/35 shadow-[0_12px_28px_rgba(14,165,233,0.10)]"
             )}
             onFocus={() => onHover?.(label)}
             onBlur={() => onHover?.(null)}
@@ -435,24 +437,24 @@ function SourceCard({
           >
             <ChevronRight
               className={cn(
-                "mt-0.5 h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-200",
+                "mt-0.5 h-3 w-3 shrink-0 text-slate-400 transition-transform duration-200",
                 isOpen && "rotate-90"
               )}
             />
             <span
-              className="inline-flex shrink-0 items-center justify-center rounded bg-primary/10 px-1 text-[10px] font-semibold text-primary"
+              className="inline-flex shrink-0 items-center justify-center rounded-full bg-sky-100 px-1.5 text-[10px] font-semibold text-sky-700"
             >
               {label}
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span className="truncate font-medium text-foreground">
+                <span className="truncate font-medium text-slate-900">
                   {source.name || "未知来源"}
                 </span>
               </div>
               <div
-                className="mt-1 -ml-0.5 grid items-center gap-x-1 text-[10px] text-muted-foreground"
+                className="mt-1 -ml-0.5 grid items-center gap-x-1 text-[10px] text-slate-500"
                 style={{
                   gridTemplateColumns: `minmax(0, ${SOURCE_META_TITLE_WIDTH_CH}ch) minmax(0, ${SOURCE_META_PAGE_WIDTH_CH}ch) minmax(0, ${SOURCE_META_VISUAL_WIDTH_CH}ch) minmax(0,1fr) auto`,
                 }}
@@ -460,17 +462,17 @@ function SourceCard({
                 {meta.title ? (
                   <span
                     title={meta.title}
-                    className="inline-flex h-5 min-w-0 items-center truncate rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary/90"
+                    className="inline-flex h-5 min-w-0 items-center truncate rounded-full bg-sky-100 px-1.5 py-0.5 font-medium text-sky-700"
                   >
                     {meta.title}
                   </span>
                 ) : (
-                  <span className="inline-flex h-5 min-w-0 items-center truncate rounded bg-muted px-1.5 py-0.5">{typeLabel}</span>
+                  <span className="inline-flex h-5 min-w-0 items-center truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-slate-600">{typeLabel}</span>
                 )}
                 {meta.pageLabel ? (
                   <span
                     title={meta.pageLabel}
-                    className="inline-flex h-5 min-w-0 items-center truncate rounded bg-blue-500/10 px-1.5 py-0.5 text-blue-600"
+                    className="inline-flex h-5 min-w-0 items-center truncate rounded-full bg-blue-50 px-1.5 py-0.5 text-blue-700"
                   >
                     {meta.pageLabel}
                   </span>
@@ -478,7 +480,7 @@ function SourceCard({
                   <span aria-hidden className="inline-flex h-5" />
                 )}
                 {hasVisualAsset ? (
-                  <span className="inline-flex h-5 min-w-0 items-center truncate rounded bg-purple-500/10 px-1.5 py-0.5 text-purple-600">
+                  <span className="inline-flex h-5 min-w-0 items-center truncate rounded-full bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
                     含图表
                   </span>
                 ) : (
@@ -488,7 +490,7 @@ function SourceCard({
                 {hasDocumentLink && (
                   <button
                     type="button"
-                    className="ml-auto inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-primary/70 transition-colors hover:bg-primary/10 hover:text-primary"
+                    className="ml-auto inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600 transition-colors hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -506,8 +508,8 @@ function SourceCard({
       </div>
       {allChunkIds.length > 0 && (
         <CollapsibleContent>
-          <div className="rounded-b-md border border-t-0 border-border/50 bg-white/80 dark:bg-background/70">
-            <div className="py-2 space-y-0">
+          <div className="rounded-b-xl border border-t-0 border-slate-200/80 bg-white/95 dark:bg-background/70">
+            <div className="space-y-0 py-2">
               {loading ? (
                 <div className="space-y-2 py-2">
                   <div className="h-3 w-1/3 animate-pulse rounded bg-muted" />

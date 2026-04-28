@@ -125,6 +125,66 @@
 - Files created/modified:
   - `progress.md` (updated)
 
+## Session: 2026-04-27 QA最终答案层级跳变修复
+
+### Phase 1: 真实根因收敛
+- **Status:** complete
+- Actions taken:
+  - 确认真实在线链路为 `8021 -> 8032`，聚焦 `E:\MyPrograms\HDMS`。
+  - 对比 `answer_question_stream()` 的 streamed answer 与 `answer_replaced` 路径，确认跳变发生在最终替换阶段。
+  - 函数级复现发现 `backend/qa_assistant/rag/postprocess/citations.py` 的全局空格压缩会破坏 Markdown 列表前导缩进。
+  - 确认 `_should_emit_answer_replacement()` 与前端 `shouldAcceptAnswerReplacement()` 都缺少“嵌套列表深度丢失”的检测。
+- Files created/modified:
+  - `findings.md` (updated)
+  - `progress.md` (updated)
+
+### Phase 2: 测试先行
+- **Status:** complete
+- Actions taken:
+  - 扩展 `backend/qa_assistant/tests/test_answer_replacement_shape_guard.py`，新增“嵌套有序列表被压平成顶级列表”失败用例。
+  - 新增 `backend/qa_assistant/tests/test_citation_normalization_preserves_list_indent.py`，锁定“引用归一化不得破坏列表缩进”失败用例。
+  - 运行 pytest，确认两条新用例均先失败。
+- Files created/modified:
+  - `backend/qa_assistant/tests/test_answer_replacement_shape_guard.py` (updated)
+  - `backend/qa_assistant/tests/test_citation_normalization_preserves_list_indent.py` (created)
+
+### Phase 3: 最小实现
+- **Status:** complete
+- Actions taken:
+  - 修改 `backend/qa_assistant/rag/postprocess/citations.py`，将全局空格压缩替换为“保留 leading indent 的行内空格压缩”。
+  - 修改 `backend/qa_assistant/rag/service.py`，为 answer replacement guard 增加 `nested_ordered_list_lines` / `nested_bullet_list_lines` 检测。
+  - 同步修改 `frontend/features/qa/qa-view.tsx` 本地守卫，防止前端接受同类嵌套层级退化替换。
+  - 更新 `frontend/scripts/qa-answer-replacement-list-shape-guard-regression.ts`，使其覆盖真实的“二级编号被压平成一级编号”场景。
+- Files created/modified:
+  - `backend/qa_assistant/rag/postprocess/citations.py` (updated)
+  - `backend/qa_assistant/rag/service.py` (updated)
+  - `frontend/features/qa/qa-view.tsx` (updated)
+  - `frontend/scripts/qa-answer-replacement-list-shape-guard-regression.ts` (updated)
+
+### Phase 4: 验证
+- **Status:** in_progress
+- Actions taken:
+  - 运行 `pytest backend/qa_assistant/tests/test_citation_normalization_preserves_list_indent.py backend/qa_assistant/tests/test_answer_replacement_shape_guard.py -q`，通过。
+  - 运行 `pytest backend/qa_assistant/tests/test_stream_answer_stability.py backend/qa_assistant/tests/test_answer_replacement_shape_guard.py backend/qa_assistant/tests/test_citation_normalization_preserves_list_indent.py -q`，通过。
+  - 运行 `node frontend/node_modules/typescript/bin/tsc --noEmit -p frontend/tsconfig.json`，通过。
+  - 额外函数级复核 `normalize_citations()` 输出，确认 4 空格与 8 空格列表缩进已保持。
+  - 继续定位到前端次级根因：`answer_replaced` 会提前改写可见正文，导致 finalizing 阶段过早接管页面。
+  - 新增 `frontend/features/qa/answer-replacement-state.ts`，将最终替换内容延迟到 `done` 才正式接管。
+  - 更新 `frontend/features/qa/qa-view.tsx` 与 `frontend/features/qa/types.ts`，引入 `pendingFinalContent / pendingFinalSources` 状态流。
+  - 运行 `npx --yes tsx scripts/qa-answer-replaced-deferred-until-done-regression.ts`，通过。
+  - 运行 `npx --yes tsx scripts/qa-mixed-list-preservation-regression.tsx`，通过。
+  - 运行 `npx --yes tsx scripts/qa-done-uses-stable-markdown-regression.tsx`，通过。
+  - 运行 `npx --yes tsx scripts/qa-done-freezes-streaming-frame-regression.tsx`，通过。
+  - 运行 `npx --yes tsx scripts/qa-streaming-equals-final-regression.tsx`，通过。
+  - 运行 `npx --yes tsx scripts/qa-list-structure-regression.tsx`，通过。
+  - 运行 `npx --yes tsx scripts/qa-final-structure-regression.tsx`，通过。
+  - 运行 `npx --yes tsx scripts/qa-answer-replacement-list-shape-guard-regression.ts`，通过。
+  - 重新执行前端生产构建 `npm run build`，通过。
+  - 重新以 `8032` 为 QA 上游重启 `8021`，确认 `POST http://127.0.0.1:8021/qa/chat/stream` 已恢复为 `200 text/event-stream`。
+  - 运行 `python -m pytest backend/qa_assistant/tests/test_stream_answer_stability.py backend/qa_assistant/tests/test_answer_replacement_shape_guard.py backend/qa_assistant/tests/test_citation_normalization_preserves_list_indent.py -q`，通过。
+- Files created/modified:
+  - `progress.md` (updated)
+
 ## Session: 2026-03-21
 
 ### Phase 1: 代码结构识别

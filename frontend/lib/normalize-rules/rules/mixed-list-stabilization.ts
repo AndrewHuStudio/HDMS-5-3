@@ -16,6 +16,7 @@ const ORDERED_RE = /^(\s{0,3})\d+[.)]\s+(.+)$/;
 const HEADING_RE = /^\s*#{1,6}\s+\S/;
 const TABLE_ROW_RE = /^\s*\|.+\|\s*$/;
 const FENCE_RE = /^\s*(```|~~~)/;
+const NESTED_CONTENT_RE = /^\s{4,}\S/;
 
 function isBoundary(line: string): boolean {
   const trimmed = (line || "").trim();
@@ -57,12 +58,28 @@ function normalizeMixedListClusters(text: string): string {
 
     const bulletCount = cluster.filter((entry) => BULLET_RE.test(entry)).length;
     const orderedCount = cluster.filter((entry) => ORDERED_RE.test(entry)).length;
+    const nestedContentCount = cluster.filter((entry) => NESTED_CONTENT_RE.test(entry)).length;
+    const leadingOrderedCount = cluster.filter((entry) => {
+      const ordered = entry.match(ORDERED_RE);
+      if (!ordered) return false;
+      const indent = ordered[1] ?? "";
+      return indent.length === 0;
+    }).length;
+
     if (cluster.length === 0 || bulletCount === 0 || orderedCount === 0) {
       if (cluster.length > 0) out.push(...cluster);
       else {
         out.push(line);
         i = start + 1;
       }
+      continue;
+    }
+
+    // Preserve legitimate ordered parents with nested children. These are the
+    // exact structures produced by list-numbering/list-nesting and should not
+    // be flattened back into bullets during final stabilization.
+    if (nestedContentCount > 0 || leadingOrderedCount >= 2) {
+      out.push(...cluster);
       continue;
     }
 

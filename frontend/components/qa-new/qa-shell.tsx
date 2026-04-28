@@ -22,6 +22,7 @@ import {
   resolveAnswerRenderPhase,
 } from "@/features/qa/render/assistant-render-state-machine";
 import { resolveAssistantAnswerMarkdown } from "@/features/qa/render/resolve-answer-markdown";
+import { splitAnswerSupplements } from "@/features/qa/render/answer-supplements";
 import { QAMarkdownRenderer } from "./qa-markdown-renderer";
 import { useCitationState, QACitationSourcePanel } from "./qa-citation-source-panel";
 
@@ -604,6 +605,11 @@ function AssistantContent({
     });
   }, [stableMarkdown, cleanContent, sourcesNormalized, isStreaming, answerRenderPhase, precedingQuestion, finalizedByServer]);
 
+  const { markdown: mainAnswerMarkdown, supplements } = useMemo(
+    () => splitAnswerSupplements(answerMarkdown),
+    [answerMarkdown],
+  );
+
   const hasThinkingTokens = Boolean((thinking || "").trim());
   const renderModel = buildAssistantRenderModel({
     state: renderState,
@@ -650,13 +656,41 @@ function AssistantContent({
           )}
         >
           {/* Markdown rendering (isolated module) */}
-          <QAMarkdownRenderer
-            markdown={answerMarkdown}
-            componentOverrides={{ a: citationAnchorComponent }}
-            showStreamingCursor={renderModel.showStreamingCursor}
-            onImageClick={onImageClick}
-            isStreaming={isStreaming}
-          />
+          <div className="min-w-0">
+            <QAMarkdownRenderer
+              markdown={mainAnswerMarkdown}
+              componentOverrides={{ a: citationAnchorComponent }}
+              showStreamingCursor={renderModel.showStreamingCursor}
+              onImageClick={onImageClick}
+              isStreaming={isStreaming}
+            />
+
+            {supplements.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {supplements.map((supplement) => (
+                  <section
+                    key={supplement.id}
+                    className="rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50 to-white px-4 py-3 shadow-[0_10px_24px_rgba(245,158,11,0.08)]"
+                  >
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="inline-flex h-6 items-center rounded-full bg-amber-100 px-2.5 text-[11px] font-semibold tracking-[0.02em] text-amber-800">
+                        {supplement.title}
+                      </span>
+                      <span className="text-[11px] text-amber-700/80">
+                        基于当前检索材料的边界提醒
+                      </span>
+                    </div>
+                    <QAMarkdownRenderer
+                      markdown={supplement.markdown}
+                      componentOverrides={{ a: citationAnchorComponent }}
+                      onImageClick={onImageClick}
+                      className="prose-sm prose-p:mb-0 prose-p:text-[13px] prose-p:leading-6"
+                    />
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Citation source panel (isolated module) */}
           {hasSourcePanel && (

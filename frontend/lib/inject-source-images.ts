@@ -27,6 +27,7 @@ const MARKDOWN_IMAGE_DEST_RE = /!\[[^\]]*\]\(([^)\n]+)\)/g;
 const CITATION_ANCHOR_RE = /\[\d{1,2}-\d{1,2}\]\(#source-\d{1,2}-\d{1,2}\)/g;
 const FIGURE_CONTEXT_PREFIX_RE = /^\s*[（(]?\s*(?:图示|图注|图例|示意图|附图)\s*[：:]/u;
 const STRUCTURED_IMG_ANCHOR_RE = /\[\[\s*IMG\s*:\s*(\d{1,2}-\d{1,2})(?:#(\d{1,2}))?\s*\]\]/giu;
+const H2_SECTION_HEADING_RE = /^##\s+(.+?)\s*$/u;
 
 function normalizeCaptionText(text: string): string {
   const t = String(text || "").trim();
@@ -226,6 +227,24 @@ function appendFigureRefToLine(line: string, figLabel: string): string {
 
 function normalizeFigureToken(raw: string): string {
   return raw.replace(/\s+/g, "").replace(/^图/i, "").replace(/-/g, ".");
+}
+
+function normalizeSectionTitle(raw: string): string {
+  return String(raw || "")
+    .replace(/[*_`]/g, "")
+    .replace(/\u3000/g, " ")
+    .trim();
+}
+
+function isInsideRetrievalOverview(lines: string[], index: number): boolean {
+  let currentSection = "";
+  for (let i = 0; i <= index; i++) {
+    const line = String(lines[i] || "").trim();
+    const match = line.match(H2_SECTION_HEADING_RE);
+    if (!match) continue;
+    currentSection = normalizeSectionTitle(match[1] || "");
+  }
+  return currentSection.startsWith("检索综述");
 }
 
 function parseFigureTokens(text: string): string[] {
@@ -484,6 +503,7 @@ export function injectSourceImages(
   //    with a best-effort real image from the retrieved sources.
   if (allowPlaceholderReplacement) {
     for (let i = 0; i < lines.length; i++) {
+      if (isInsideRetrievalOverview(lines, i)) continue;
       const line = lines[i];
       const placeholder = line.match(IMAGE_PLACEHOLDER_RE);
       if (!placeholder) continue;
@@ -542,6 +562,7 @@ export function injectSourceImages(
   // 1.5) Consume structured image anchors emitted by backend prompt/postprocess:
   // [[IMG:3-1#2]] -> use source 3-1, image index 2 (1-based).
   for (let i = 0; i < lines.length; i++) {
+    if (isInsideRetrievalOverview(lines, i)) continue;
     const line = lines[i];
     const anchorPattern = new RegExp(STRUCTURED_IMG_ANCHOR_RE.source, STRUCTURED_IMG_ANCHOR_RE.flags);
     const anchors = Array.from(line.matchAll(anchorPattern));
@@ -622,6 +643,7 @@ export function injectSourceImages(
 
   if (allowCitationLineInjection) {
     for (let i = 0; i < lines.length; i++) {
+      if (isInsideRetrievalOverview(lines, i)) continue;
       const line = lines[i];
       if (/^\s*FIGCAPTION\b/.test(line)) continue;
       const labelMatches = Array.from(line.matchAll(/\[(\d{1,2}-\d{1,2})\]\(#source-\1\)/g));

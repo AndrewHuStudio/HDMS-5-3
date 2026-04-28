@@ -69,6 +69,8 @@ def _inspect_markdown_shape(markdown: str) -> Dict[str, int]:
     lines = text.split("\n")
     gfm_table_blocks = 0
     pipe_heavy_lines = 0
+    nested_ordered_list_lines = 0
+    nested_bullet_list_lines = 0
 
     for i, line in enumerate(lines):
         if line.count("|") >= 2:
@@ -80,12 +82,21 @@ def _inspect_markdown_shape(markdown: str) -> Dict[str, int]:
         if header_like and sep_like:
             gfm_table_blocks += 1
 
+        if re.match(r"^\s{4,}\d+[.)]\s+\S+", line):
+            nested_ordered_list_lines += 1
+        if re.match(r"^\s{4,}[-*+]\s+\S+", line):
+            nested_bullet_list_lines += 1
+
     return {
         "gfm_table_blocks": gfm_table_blocks,
         "pipe_heavy_lines": pipe_heavy_lines,
         "markdown_image_count": len(_MARKDOWN_IMAGE_RE.findall(text)),
         "structured_img_marker_count": len(_STRUCTURED_IMG_MARKER_RE.findall(text)),
         "length": len(text.strip()),
+        "ordered_list_lines": len(re.findall(r"^\s{0,3}\d+[.)]\s+\S+", text, flags=re.MULTILINE)),
+        "bullet_list_lines": len(re.findall(r"^\s{0,3}[-*+]\s+\S+", text, flags=re.MULTILINE)),
+        "nested_ordered_list_lines": nested_ordered_list_lines,
+        "nested_bullet_list_lines": nested_bullet_list_lines,
     }
 
 
@@ -110,6 +121,28 @@ def _should_emit_answer_replacement(current: str, replacement: str) -> Tuple[boo
     nxt_image_like = nxt["markdown_image_count"] + nxt["structured_img_marker_count"]
     if cur_image_like > 0 and nxt_image_like == 0:
         return False, "image-lost"
+
+    # Preserve visible ordered-list structure from streaming/finalized answer.
+    if (
+        cur["ordered_list_lines"] > 0
+        and nxt["ordered_list_lines"] < cur["ordered_list_lines"]
+        and nxt["bullet_list_lines"] > cur["bullet_list_lines"]
+    ):
+        return False, "ordered-list-lost"
+
+    # Preserve nested list depth visible during streaming. Flattening nested
+    # ordered/bullet children into top-level siblings causes the exact
+    # "序号跳变 / 级别错乱 / 平级消融" behavior seen online.
+    if (
+        cur["nested_ordered_list_lines"] > 0
+        and nxt["nested_ordered_list_lines"] < cur["nested_ordered_list_lines"]
+    ):
+        return False, "ordered-list-nesting-lost"
+    if (
+        cur["nested_bullet_list_lines"] > 0
+        and nxt["nested_bullet_list_lines"] < cur["nested_bullet_list_lines"]
+    ):
+        return False, "bullet-list-nesting-lost"
 
     # Guard accidental truncation caused by downstream cleanup.
     if cur["length"] > 120 and nxt["length"] < int(cur["length"] * 0.55):

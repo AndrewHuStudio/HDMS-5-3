@@ -48,6 +48,8 @@ export const dedupeRetrievalOverview = {
 const RETRIEVAL_OVERVIEW_HEADING_RE = /^##\s+检索综述\s*[:：]?\s*$/;
 const RETRIEVAL_STATUS_LINE_RE = /^已检索\s*\d+\s*条候选\s*[，,]\s*融合\s*\d+\s*条结果[。.]?\s*$/;
 const H2_HEADING_RE = /^##\s+\S/;
+const RETRIEVAL_OVERVIEW_ALLOWED_QUOTE_RE =
+  /^\s*>\s*(?:检索资料清单与引用分析[:：]|检索资料清单[:：]|引用定位[:：]|上述资料共同构成了本次回答的依据链条)/u;
 
 function trimBlankEdges(lines: string[]): string[] {
   let start = 0;
@@ -101,10 +103,18 @@ export const retrievalOverviewCleanup = {
         }
       } else {
         const detailRemainder: string[] = [];
+        let seenOverviewQuoteBlock = false;
         for (const entry of sectionLines) {
           const entryTrimmed = entry.trim();
           if (!entryTrimmed) {
-            if (out.length > 0 && out[out.length - 1].trim()) out.push(entry);
+            const previous = out[out.length - 1]?.trim() || "";
+            if (/^\s*>/.test(previous)) {
+              out.push(entry);
+              continue;
+            }
+            if (detailRemainder.length > 0 && detailRemainder[detailRemainder.length - 1]?.trim()) {
+              detailRemainder.push(entry);
+            }
             continue;
           }
           if (RETRIEVAL_STATUS_LINE_RE.test(entryTrimmed)) {
@@ -112,7 +122,13 @@ export const retrievalOverviewCleanup = {
             continue;
           }
           if (/^\s*>/.test(entry)) {
-            out.push(entry);
+            if (!seenOverviewQuoteBlock && RETRIEVAL_OVERVIEW_ALLOWED_QUOTE_RE.test(entry)) {
+              out.push(entry);
+              seenOverviewQuoteBlock = true;
+              continue;
+            }
+            detailRemainder.push(entry.replace(/^\s*>\s?/, ""));
+            changed = true;
             continue;
           }
           detailRemainder.push(entry);

@@ -45,7 +45,14 @@ export async function POST(request: NextRequest) {
         Connection: "keep-alive",
       },
     });
-  } catch {
+  } catch (error) {
+    console.error("[qa/chat/stream proxy] upstream fetch failed", {
+      backendUrl,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message, stack: error.stack }
+          : String(error),
+    });
     return new Response(JSON.stringify({ detail: "Backend unavailable." }), {
       status: 502,
       headers: { "Content-Type": "application/json" },

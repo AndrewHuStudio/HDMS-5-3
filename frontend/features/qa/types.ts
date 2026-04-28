@@ -76,8 +76,10 @@ export interface ChatMessage {
   content: string;
   createdAt: string;
   stableMarkdown?: string;
+  pendingFinalContent?: string;
   thinking?: string;
   sources?: SourceInfo[];
+  pendingFinalSources?: SourceInfo[];
   retrievalStats?: RetrievalStats;
   renderState?: AssistantRenderState;
   subgraph?: SubgraphData;

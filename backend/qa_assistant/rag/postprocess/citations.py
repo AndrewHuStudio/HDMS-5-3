@@ -13,6 +13,26 @@ _STANDALONE_CITE_RE = re.compile(
 )
 
 
+def _collapse_extra_spaces_preserving_indent(text: str) -> str:
+    """Collapse repeated intra-line spaces without stripping leading indent."""
+    if not text:
+        return text
+
+    normalized_lines: List[str] = []
+    for line in text.splitlines():
+        indent_match = re.match(r"^([ \t]*)(.*)$", line)
+        if not indent_match:
+            normalized_lines.append(line)
+            continue
+
+        indent = indent_match.group(1) or ""
+        rest = indent_match.group(2) or ""
+        rest = re.sub(r"[ \t]{2,}", " ", rest).rstrip()
+        normalized_lines.append(f"{indent}{rest}")
+
+    return "\n".join(normalized_lines)
+
+
 def _normalize_loose_citation_labels(text: str, valid_labels: Optional[set]) -> str:
     """
     Normalize loose citation labels into canonical [N-M] markers.
@@ -113,8 +133,9 @@ def normalize_citations(text: str, valid_labels: Optional[set] = None) -> Tuple[
     # Collapse immediate duplicates like "[1-1][1-1]" or "[1-1] [1-1]".
     result = re.sub(r"(\[\d+-\d+\])(?:\s*\1)+", r"\1", result)
 
-    # Clean up whitespace left by removed citations.
-    result = re.sub(r"[ \t]{2,}", " ", result)
+    # Clean up whitespace left by removed citations while preserving leading
+    # indentation, which is structurally significant for nested markdown lists.
+    result = _collapse_extra_spaces_preserving_indent(result)
     # Strip trailing horizontal whitespace before newlines, but preserve blank
     # lines (consecutive \n) which are structurally significant in markdown.
     result = re.sub(r"[ \t]+\n", "\n", result)

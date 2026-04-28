@@ -18,6 +18,10 @@ import {
   transitionAssistantRenderState,
 } from "@/features/qa/render/assistant-render-state-machine";
 import { captureVisibleAnswerMarkdown } from "@/features/qa/render/resolve-answer-markdown";
+import {
+  finalizeStreamingAssistantMessage,
+  stageServerAnswerReplacement,
+} from "@/features/qa/answer-replacement-state";
 
 const quickQuestions: string[] = [];
 
@@ -53,6 +57,10 @@ type MarkdownShapeMetrics = {
   markdownImageCount: number;
   structuredImageMarkerCount: number;
   length: number;
+  orderedListLines: number;
+  bulletListLines: number;
+  nestedOrderedListLines: number;
+  nestedBulletListLines: number;
 };
 
 function inspectMarkdownShape(markdown: string): MarkdownShapeMetrics {
@@ -79,6 +87,10 @@ function inspectMarkdownShape(markdown: string): MarkdownShapeMetrics {
   const structuredImageMarkerCount = (
     text.match(/\[\[\s*IMG\s*:\s*\d{1,2}-\d{1,2}(?:#\d{1,2})?\s*\]\]/gi) || []
   ).length;
+  const orderedListLines = (text.match(/^\s{0,3}\d+[.)]\s+\S+/gm) || []).length;
+  const bulletListLines = (text.match(/^\s{0,3}[-*+]\s+\S+/gm) || []).length;
+  const nestedOrderedListLines = (text.match(/^\s{4,}\d+[.)]\s+\S+/gm) || []).length;
+  const nestedBulletListLines = (text.match(/^\s{4,}[-*+]\s+\S+/gm) || []).length;
 
   return {
     gfmTableBlocks,
@@ -86,6 +98,10 @@ function inspectMarkdownShape(markdown: string): MarkdownShapeMetrics {
     markdownImageCount,
     structuredImageMarkerCount,
     length: text.trim().length,
+    orderedListLines,
+    bulletListLines,
+    nestedOrderedListLines,
+    nestedBulletListLines,
   };
 }
 
@@ -109,6 +125,29 @@ function shouldAcceptAnswerReplacement(current: string, replacement: string): bo
   const curImageLike = cur.markdownImageCount + cur.structuredImageMarkerCount;
   const nextImageLike = next.markdownImageCount + next.structuredImageMarkerCount;
   if (curImageLike > 0 && nextImageLike === 0) return false;
+
+  // Reject replacement that downgrades visible ordered structure into bullets.
+  if (
+    cur.orderedListLines > 0 &&
+    next.orderedListLines < cur.orderedListLines &&
+    next.bulletListLines > cur.bulletListLines
+  ) {
+    return false;
+  }
+
+  if (
+    cur.nestedOrderedListLines > 0 &&
+    next.nestedOrderedListLines < cur.nestedOrderedListLines
+  ) {
+    return false;
+  }
+
+  if (
+    cur.nestedBulletListLines > 0 &&
+    next.nestedBulletListLines < cur.nestedBulletListLines
+  ) {
+    return false;
+  }
 
   // Guard against accidental severe truncation.
   if (cur.length > 120 && next.length < cur.length * 0.55) return false;
@@ -279,50 +318,22 @@ export function QAView({
         onAnswerReplaced: (fullAnswer, replacedSources) => {
           clearAnswerFlush();
           updateMessage(assistantId, (msg) => {
-            const acceptedContent = shouldAcceptAnswerReplacement(msg.content, fullAnswer)
-              ? fullAnswer
-              : msg.content;
-            const mergedSources = mergeStreamingSources(msg.sources, replacedSources);
-            const nextRenderState = transitionAssistantRenderState(msg.renderState, { type: "answer_replaced" });
-
-            return {
-              ...msg,
-              content: acceptedContent,
-              // Keep streaming UI state until `done` so finalizing and done share
-              // one stable final-content pipeline instead of two style jumps.
-              isStreaming: true,
-              finalizedByServer: true,
-              stableMarkdown: captureVisibleAnswerMarkdown({
-                content: acceptedContent,
-                sources: mergedSources,
-                isStreaming: true,
-                renderState: nextRenderState,
-                finalizedByServer: true,
-              }),
-              renderState: nextRenderState,
-              ...(replacedSources ? { sources: mergedSources } : {}),
-            };
+            return stageServerAnswerReplacement({
+              message: msg,
+              fullAnswer,
+              replacedSources,
+              accepted: shouldAcceptAnswerReplacement(msg.content, fullAnswer),
+            });
           });
         },
         onDone: () => {
           clearAnswerFlush();
-          updateMessage(assistantId, (msg) => ({
-            ...msg,
-            stableMarkdown:
-              msg.stableMarkdown ||
-              captureVisibleAnswerMarkdown({
-                content: msg.content,
-                sources: msg.sources || [],
-                isStreaming: Boolean(msg.isStreaming),
-                renderState: msg.renderState,
-                precedingQuestion: question,
-                finalizedByServer: msg.finalizedByServer,
-              }),
-            isStreaming: false,
-            statusStage: undefined,
-            statusMessage: undefined,
-            renderState: transitionAssistantRenderState(msg.renderState, { type: "done" }),
-          }));
+          updateMessage(assistantId, (msg) =>
+            finalizeStreamingAssistantMessage({
+              message: msg,
+              precedingQuestion: question,
+            })
+          );
         },
         onError: (detail) => {
           clearAnswerFlush();

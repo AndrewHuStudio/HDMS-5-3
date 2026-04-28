@@ -16,6 +16,34 @@
 - `frontend/features/qa/qa-view.tsx` 的 answer token flush 仍基于 `setTimeout(48ms)`，更新节奏不与渲染帧对齐。
 - `frontend/lib/normalize-rules/phase-matrix.ts` 目前让 `block-parser` 在 `streaming` 阶段运行，这与“流式阶段避免结构重写”的目标冲突。
 
+## QA最终答案层级跳变根因（2026-04-27）
+- 真实线上 QA 链路是 `frontend:8021 -> backend/qa_assistant:8032`，不是 `MediArch_System` 的前端路径。
+- 本次“输出过程中层级正确，但输出结果序号跳变/级别错乱/平级消融”的主根因在后端 `answer_replaced` 链路，而不是首要发生在前端渲染器。
+- `backend/qa_assistant/rag/postprocess/citations.py` 里的 `normalize_citations()` 使用了全局 `re.sub(r"[ \t]{2,}", " ", result)`。
+- 这条全局空格压缩会把 Markdown 列表的前导缩进一起压掉，例如二级有序项前的 4 空格会被压成 1 空格，直接把嵌套列表压平成同级列表。
+- 因为流式过程展示的是未经过这一步最终后处理的文本，所以流式阶段层级看起来正确；`answer_replaced` 一旦替换为后处理结果，最终答案就会出现层级跳变。
+- 现有 `_should_emit_answer_replacement()` 只统计顶层有序/无序列表行数，忽略 `^\s{4,}` 的嵌套列表项，所以无法识别“二级序号被压平成一级序号”的退化。
+- 直接函数级复现证据：
+  - 输入：`1. 一级 -> (4空格)1. 二级 -> (8空格)- 细项`
+  - 旧 `normalize_citations()` 输出会变成：`1. 一级 -> (1空格)1. 二级 -> (1空格)- 细项`
+  - 旧 `_should_emit_answer_replacement()` 仍返回接受。
+- 修复方向：
+  - 后端引用归一化只压缩行内多余空格，不再破坏 leading indent。
+  - 前后端的 answer replacement guard 都增加对嵌套有序/无序列表数量的检测，拒绝“nested list flattening”。
+
+## QA最终答案跳变的前端次级根因（2026-04-27）
+- 在后端缩进问题修复后，前端仍存在第二个会制造“过程对、结果跳”的问题：`frontend/features/qa/qa-view.tsx` 在收到 `answer_replaced` 事件时，会立刻把可见 `content` 改成最终替换内容。
+- 这意味着用户看到的并不是“流式内容持续到 done，再一次性切到最终内容”，而是中途提前切到 finalizing/final 管线；如果最终替换文本触发了更强的标题/列表规范化，界面会在输出尚未完成前发生结构跳变。
+- 该问题与后端缩进问题不同：即使后端最终文本本身合法，只要前端提前接管正文，仍会出现“输出过程中层级正常，结果阶段突然变样”的感知问题。
+- 修复方向：
+  - `answer_replaced` 阶段只暂存 `pendingFinalContent / pendingFinalSources`，不提前改写可见正文。
+  - 等到 `done` 事件到达，再一次性接管最终正文并生成最终稳定 Markdown。
+
+## QA代理运行时状态（2026-04-27）
+- 之前 `8021` 返回 `502 {"detail":"Backend unavailable."}`，不是 QA 文本层级问题，而是 Next 生产进程未跑在最新构建上的独立运行时问题。
+- 重新构建前端并以正确的 `HDMS_QA_BASE_URL=http://127.0.0.1:8032` 环境重启 `8021` 后，`POST http://127.0.0.1:8021/qa/chat/stream` 已返回 `200 text/event-stream`。
+- 当前 `8021 -> 8032` 代理链路已恢复，可用于继续验证真实 QA 问答页面。
+
 ## OCR任务持久化（2026-04-09）
 - OCR job 当前仅存在 `data_process/ocr_process/core.py` 的进程内 `_jobs` 字典。
 - `get_job_status()` 只读内存；`get_summary()` 则直接扫描 OCR 输出目录，因此两者天然会失配。
