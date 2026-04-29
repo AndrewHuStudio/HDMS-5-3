@@ -122,7 +122,7 @@ export function QAMarkdownRenderer({
           ? shown
           : stripLeadingFigcaptionPrefix(children);
         return (
-          <p className="mt-1 mb-5 text-[11px] leading-snug text-center text-muted-foreground/75 italic">
+          <p className="qa-figure-caption mt-1 mb-5 rounded-lg bg-slate-50/80 px-3 py-2 text-[11px] leading-snug text-center text-slate-500 italic dark:bg-muted/25 dark:text-muted-foreground/80">
             {strippedChildren}
           </p>
         );
@@ -131,7 +131,7 @@ export function QAMarkdownRenderer({
       // Table boundary notes: "注：...", "说明：...", "备注：..." etc.
       if (TABLE_NOTE_TEXT_RE.test(flattened)) {
         return (
-          <p className="qa-table-note -mt-1 mb-3 rounded-b-md border border-t-0 border-border/60 bg-amber-50/60 px-3 py-1.5 text-[11px] leading-relaxed text-muted-foreground dark:bg-amber-500/5">
+          <p className="qa-table-note -mt-1 mb-3 rounded-b-xl border border-t-0 border-amber-200/80 bg-amber-50/80 px-3 py-2 text-[11px] leading-relaxed text-amber-900/80 dark:border-amber-400/20 dark:bg-amber-500/5 dark:text-amber-100/80">
             {children}
           </p>
         );
@@ -139,13 +139,21 @@ export function QAMarkdownRenderer({
 
       const ordinalNode = renderOrdinalParagraph(children);
       if (ordinalNode) {
-        return <p className="qa-ordinal-paragraph mb-3 last:mb-0">{ordinalNode}</p>;
+        return <p className="qa-paragraph qa-ordinal-paragraph mb-3 last:mb-0">{ordinalNode}</p>;
       }
 
-      return <p className="mb-3 last:mb-0">{children}</p>;
+      return <p className="qa-paragraph mb-3 text-[14px] leading-7 text-slate-700 last:mb-0 dark:text-foreground/90">{children}</p>;
     },
-    ul: ({ children }: { children?: ReactNode }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
-    ol: ({ children }: { children?: ReactNode }) => <ol className="mb-2 list-decimal pl-5">{children}</ol>,
+    ul: ({ children }: { children?: ReactNode }) => (
+      <ul className="qa-list qa-list--unordered mb-3 list-disc space-y-1.5 pl-5 text-[14px] text-slate-700 marker:text-sky-600 dark:text-foreground/90 dark:marker:text-sky-400">
+        {children}
+      </ul>
+    ),
+    ol: ({ children }: { children?: ReactNode }) => (
+      <ol className="qa-list qa-list--ordered mb-3 list-decimal space-y-1.5 pl-5 text-[14px] text-slate-700 marker:font-semibold marker:text-slate-500 dark:text-foreground/90 dark:marker:text-muted-foreground">
+        {children}
+      </ol>
+    ),
     li: ({ children }: { children?: ReactNode }) => {
       const plainText =
         typeof children === "string"
@@ -158,23 +166,31 @@ export function QAMarkdownRenderer({
       const content = (isRetrievalReason || isRetrievalList)
         ? highlightRetrievalDocNames(children, "retrieval-doc")
         : children;
-      return <li className="mb-1.5 last:mb-0">{content}</li>;
+      return <li className="qa-list-item mb-1.5 last:mb-0">{content}</li>;
     },
-    strong: ({ children }: { children?: ReactNode }) => <strong className="font-semibold">{children}</strong>,
-    em: ({ children }: { children?: ReactNode }) => <em className="italic text-sky-700/80">{children}</em>,
+    strong: ({ children }: { children?: ReactNode }) => (
+      <strong className="qa-strong rounded-sm bg-amber-100/70 px-1 py-0.5 font-semibold text-slate-900 dark:bg-amber-400/15 dark:text-foreground">
+        {children}
+      </strong>
+    ),
+    em: ({ children }: { children?: ReactNode }) => <em className="qa-em italic text-sky-700/80 dark:text-sky-300">{children}</em>,
     code: ({ children, className: codeClassName }: { children?: ReactNode; className?: string }) => {
       const isBlock = codeClassName?.includes("language-");
       return isBlock ? (
-        <code className={`${codeClassName ?? ""} block whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs`}>
+        <code className={`qa-code-block ${codeClassName ?? ""} block whitespace-pre-wrap break-words rounded-xl bg-slate-950 px-3 py-2 text-[12px] leading-6 text-slate-100 dark:bg-slate-900`}>
           {children}
         </code>
       ) : (
-        <code className="rounded bg-muted px-1 py-0.5 text-xs">{children}</code>
+        <code className="qa-inline-code rounded-md border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[12px] text-slate-800 dark:border-border dark:bg-muted dark:text-foreground">{children}</code>
       );
     },
-    pre: ({ children }: { children?: ReactNode }) => <pre className="mb-2 whitespace-pre-wrap break-words">{children}</pre>,
+    pre: ({ children }: { children?: ReactNode }) => (
+      <pre className="qa-pre-block mb-3 overflow-x-auto whitespace-pre-wrap break-words rounded-xl border border-slate-200/90 bg-slate-950/98 p-0 shadow-[0_12px_28px_rgba(15,23,42,0.12)] dark:border-border dark:shadow-none">
+        {children}
+      </pre>
+    ),
     blockquote: ({ children }: { children?: ReactNode }) => (
-      <blockquote className="rounded-md border border-border/55 bg-background/85 px-3 py-2 text-xs leading-relaxed text-muted-foreground shadow-sm">
+      <blockquote className="qa-callout my-4 rounded-xl border border-sky-200/80 bg-gradient-to-r from-sky-50 via-white to-white px-4 py-3 text-[13px] leading-6 text-slate-700 shadow-[0_10px_24px_rgba(14,165,233,0.08)] dark:border-sky-400/20 dark:from-sky-500/5 dark:via-background dark:to-background dark:text-foreground/85 dark:shadow-none">
         {children}
       </blockquote>
     ),

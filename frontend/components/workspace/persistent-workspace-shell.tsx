@@ -42,6 +42,8 @@ import {
 
 export function PersistentWorkspaceShell() {
   const ASSISTANT_BASE_PANEL_WIDTH = 420;
+  const ASSISTANT_MIN_PANEL_WIDTH = 360;
+  const ASSISTANT_MAX_PANEL_WIDTH = 720;
   const ASSISTANT_HISTORY_PANEL_WIDTH = 280;
   const pathname = usePathname();
   const isUploadsRoute = pathname === "/uploads";
@@ -54,8 +56,10 @@ export function PersistentWorkspaceShell() {
   const [activeToolId, setActiveToolId] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("perspective");
   const [reviewPanelWidth, setReviewPanelWidth] = useState(360);
+  const [assistantPanelWidth, setAssistantPanelWidth] = useState(ASSISTANT_BASE_PANEL_WIDTH);
   const [assistantHistoryOpen, setAssistantHistoryOpen] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
+  const [isReviewResizing, setIsReviewResizing] = useState(false);
+  const [isAssistantResizing, setIsAssistantResizing] = useState(false);
 
   const {
     externalModelUrl,
@@ -164,14 +168,20 @@ export function PersistentWorkspaceShell() {
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
-      if (!isResizing) {
-        return;
+      if (isReviewResizing) {
+        const newWidth = window.innerWidth - event.clientX;
+        setReviewPanelWidth(Math.max(360, Math.min(500, newWidth)));
       }
-      const newWidth = window.innerWidth - event.clientX;
-      setReviewPanelWidth(Math.max(360, Math.min(500, newWidth)));
+      if (isAssistantResizing) {
+        const newWidth = window.innerWidth - event.clientX;
+        setAssistantPanelWidth(Math.max(ASSISTANT_MIN_PANEL_WIDTH, Math.min(ASSISTANT_MAX_PANEL_WIDTH, newWidth)));
+      }
     };
-    const handleMouseUp = () => setIsResizing(false);
-    if (isResizing) {
+    const handleMouseUp = () => {
+      setIsReviewResizing(false);
+      setIsAssistantResizing(false);
+    };
+    if (isReviewResizing || isAssistantResizing) {
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
       document.body.style.cursor = "col-resize";
@@ -183,7 +193,7 @@ export function PersistentWorkspaceShell() {
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
-  }, [isResizing]);
+  }, [isAssistantResizing, isReviewResizing]);
 
   useEffect(() => {
     if (!isAssistantRoute && assistantHistoryOpen) {
@@ -206,9 +216,9 @@ export function PersistentWorkspaceShell() {
   const sceneTitle = isApprovalsRoute
     ? "管控审批清单"
     : "";
-  const assistantPanelWidth = assistantHistoryOpen
-    ? ASSISTANT_BASE_PANEL_WIDTH + ASSISTANT_HISTORY_PANEL_WIDTH
-    : ASSISTANT_BASE_PANEL_WIDTH;
+  const assistantPanelTotalWidth = assistantHistoryOpen
+    ? assistantPanelWidth + ASSISTANT_HISTORY_PANEL_WIDTH
+    : assistantPanelWidth;
   const handleAssistantViewportPointerDown = () => {
     if (isAssistantRoute && assistantHistoryOpen) {
       setAssistantHistoryOpen(false);
@@ -392,7 +402,7 @@ export function PersistentWorkspaceShell() {
         >
           <div
             className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 transition-colors z-10"
-            onMouseDown={() => setIsResizing(true)}
+            onMouseDown={() => setIsReviewResizing(true)}
             title="拖动调整宽度"
           />
           <div className="h-12 border-b border-border flex items-center px-4 flex-shrink-0">
@@ -410,9 +420,14 @@ export function PersistentWorkspaceShell() {
         </aside>
       ) : isAssistantRoute ? (
         <aside
-          className="border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden transition-[width] duration-300 ease-out"
-          style={{ width: `${assistantPanelWidth}px` }}
+          className="border-l border-border bg-card flex flex-col flex-shrink-0 min-h-0 overflow-hidden relative transition-[width] duration-300 ease-out"
+          style={{ width: `${assistantPanelTotalWidth}px` }}
         >
+          <div
+            className="absolute left-0 top-0 bottom-0 z-10 w-1 cursor-col-resize hover:bg-primary/50 transition-colors"
+            onMouseDown={() => setIsAssistantResizing(true)}
+            title="拖动调整问答栏宽度"
+          />
           <div className="h-12 border-b border-border flex items-center px-4 flex-shrink-0">
             <QAConversationToolbar
               historyOpen={assistantHistoryOpen}

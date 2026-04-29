@@ -2,10 +2,12 @@ import { useCallback, useEffect, useId, useRef } from "react";
 import type { MouseEvent } from "react";
 import type { SourceInfo } from "../../types";
 import { cn } from "@/lib/utils";
+import { buildCitationTargetHref } from "../core/dom-targets";
 
 interface CitationPillProps {
   label: string;
   source?: SourceInfo;
+  messageId?: string;
   /** instanceId of the currently hovered pill (not label) */
   activeInstanceId: string | null;
   onHover: (instanceId: string | null) => void;
@@ -15,6 +17,7 @@ interface CitationPillProps {
 export function CitationPill({
   label,
   source,
+  messageId,
   activeInstanceId,
   onHover,
   onSelect,
@@ -62,7 +65,7 @@ export function CitationPill({
       onMouseLeave={hideCitationHover}
     >
       <a
-        href={`#source-${label}`}
+        href={buildCitationTargetHref(label, messageId)}
         title={source?.name || `引用 [${label}]`}
         className={cn(
           "inline-flex h-5 items-center justify-center rounded-full border px-1.5 text-[10px] font-medium no-underline transition-colors",

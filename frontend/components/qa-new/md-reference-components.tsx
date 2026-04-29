@@ -12,7 +12,7 @@ export const FIGURE_CAPTION_TEXT_RE =
 
 /** Detect table boundary notes like "注：...", "说明：...", "备注：..." */
 export const TABLE_NOTE_TEXT_RE =
-  /^(?:注|备注|说明|注释|提示|注意|数据来源|资料来源)\s*[：:]/u;
+  /^(?:注|备注|说明|注释|数据来源|资料来源)\s*[：:]/u;
 
 export function highlightRetrievalDocNames(node: ReactNode, keyPrefix = "doc"): ReactNode {
   if (typeof node === "string") {

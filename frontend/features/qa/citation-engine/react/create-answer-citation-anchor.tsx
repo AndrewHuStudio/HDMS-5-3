@@ -6,6 +6,7 @@ import { CitationLink } from "./citation-link";
 interface BuildAnswerCitationAnchorArgs {
   sources: SourceInfo[];
   labelIndexMap: Map<string, number>;
+  messageId?: string;
   activeInstanceId: string | null;
   onCitationHover: (instanceId: string | null) => void;
   onCitationSelect: (label: string) => void;
@@ -17,6 +18,7 @@ export function buildAnswerCitationAnchorComponent(
   const {
     sources,
     labelIndexMap,
+    messageId,
     activeInstanceId,
     onCitationHover,
     onCitationSelect,
@@ -27,6 +29,7 @@ export function buildAnswerCitationAnchorComponent(
       href={href}
       sources={sources}
       labelIndexMap={labelIndexMap}
+      messageId={messageId}
       activeInstanceId={activeInstanceId}
       onCitationHover={onCitationHover}
       onCitationSelect={onCitationSelect}
@@ -37,4 +40,3 @@ export function buildAnswerCitationAnchorComponent(
   AnchorComponent.displayName = "AnswerCitationAnchor";
   return AnchorComponent;
 }
-

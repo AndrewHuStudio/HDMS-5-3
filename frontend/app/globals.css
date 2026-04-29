@@ -458,6 +458,46 @@
   line-height: 1.75;
 }
 
+.qa-markdown {
+  color: var(--foreground);
+}
+
+.qa-markdown .qa-paragraph {
+  color: color-mix(in oklab, var(--foreground) 82%, var(--muted-foreground) 18%);
+}
+
+.qa-markdown .qa-list {
+  margin-top: 0.25rem;
+}
+
+.qa-markdown .qa-list .qa-list {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.qa-markdown .qa-list-item > p {
+  margin-bottom: 0.375rem;
+}
+
+.qa-markdown .qa-callout p:last-child,
+.qa-markdown .qa-table-note:last-child {
+  margin-bottom: 0;
+}
+
+.qa-markdown .qa-inline-code,
+.qa-markdown .qa-code-block {
+  font-variant-ligatures: none;
+}
+
+.qa-markdown .qa-pre-block {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, white 35%, transparent) transparent;
+}
+
+.qa-markdown .qa-figure-caption {
+  border: 1px solid color-mix(in oklab, var(--border) 55%, white 45%);
+}
+
 /* QA markdown images: ensure clear separation from surrounding text */
 .qa-markdown img {
   display: block;

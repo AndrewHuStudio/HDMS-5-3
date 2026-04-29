@@ -1,8 +1,12 @@
-﻿export {
+export {
   buildCitationLabelIndexMap,
   collectValidCitationLabels,
   parseCitationLabelFromHref,
 } from "./citation-utils";
+export {
+  buildCitationTargetHref,
+  buildCitationTargetId,
+} from "./dom-targets";
 export { sanitizeAnswerCitations } from "./sanitize-answer-citations";
 export { convertCitationsToAnchors } from "./convert-citations-to-anchors";
 export { convertCircledCitationsToAnchors } from "./convert-circled-citations-to-anchors";

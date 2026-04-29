@@ -30,7 +30,7 @@ export function buildImageComponent(
       <img
         src={resolved}
         alt={props.alt ?? "参考图片"}
-        className="my-4 max-h-80 cursor-zoom-in rounded border border-border object-contain transition-opacity hover:opacity-80"
+        className="qa-figure-image my-4 max-h-80 w-auto max-w-full cursor-zoom-in rounded-xl border border-slate-200/90 bg-white object-contain shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition-[opacity,transform,box-shadow] duration-200 hover:opacity-95 hover:shadow-[0_16px_32px_rgba(15,23,42,0.12)] dark:border-border dark:bg-background dark:shadow-none"
         loading="lazy"
         onClick={() => onImageClick?.(resolved)}
         onError={(e) => {
@@ -39,7 +39,7 @@ export function buildImageComponent(
           img.alt = "图片暂不可用";
           img.title = "参考图片暂不可用";
           img.style.cursor = "default";
-          img.className = "my-4 flex h-20 w-full items-center justify-center rounded border border-dashed border-border bg-muted/40 text-xs text-muted-foreground";
+          img.className = "qa-figure-image my-4 flex h-20 w-full items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 text-xs text-muted-foreground shadow-none";
         }}
       />
     );

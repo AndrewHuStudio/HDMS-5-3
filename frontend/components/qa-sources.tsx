@@ -26,6 +26,7 @@ import { resolvePdfUrlForSource } from "@/lib/resolve-pdf-url";
 import { resolvePdfSearchKeyword } from "@/lib/pdf-auto-highlight";
 import { getSourcePreviewCacheKey } from "@/lib/source-preview-cache";
 import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
+import { buildCitationTargetId } from "@/features/qa/citation-engine";
 
 interface QASourcesProps {
   sources: SourceInfo[];
@@ -418,7 +419,7 @@ function SourceCard({
           asChild
         >
           <div
-            id={messageId ? `source-${messageId}-${label}` : `source-${label}`}
+            id={buildCitationTargetId(label, messageId)}
             role="button"
             tabIndex={0}
             className={cn(

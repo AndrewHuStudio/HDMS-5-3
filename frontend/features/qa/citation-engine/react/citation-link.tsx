@@ -8,6 +8,7 @@ interface CitationLinkProps {
   children: ReactNode;
   sources: SourceInfo[];
   labelIndexMap: Map<string, number>;
+  messageId?: string;
   activeInstanceId: string | null;
   onCitationHover: (instanceId: string | null) => void;
   onCitationSelect: (label: string) => void;
@@ -18,6 +19,7 @@ export function CitationLink({
   children,
   sources,
   labelIndexMap,
+  messageId,
   activeInstanceId,
   onCitationHover,
   onCitationSelect,
@@ -30,6 +32,7 @@ export function CitationLink({
       <CitationPill
         label={citationLabel}
         source={source}
+        messageId={messageId}
         activeInstanceId={activeInstanceId}
         onHover={onCitationHover}
         onSelect={onCitationSelect}

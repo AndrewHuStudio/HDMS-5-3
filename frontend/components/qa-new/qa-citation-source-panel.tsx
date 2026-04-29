@@ -7,6 +7,7 @@ import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
 import {
   buildAnswerCitationAnchorComponent,
   buildCitationLabelIndexMap,
+  buildCitationTargetId,
 } from "@/features/qa/citation-engine";
 import { QASources } from "@/components/qa-sources";
 import { cn } from "@/lib/utils";
@@ -57,11 +58,11 @@ export function useCitationState({ sources, messageId, scrollRef, onCitationJump
     const savedScrollTop = container.scrollTop;
 
     // Try exact ID first, then fallback to doc-level label (e.g. "1-1" → "1")
-    const exactId = `source-${messageId}-${label}`;
+    const exactId = buildCitationTargetId(label, messageId);
     let target = document.getElementById(exactId);
     if (!target) {
       const docLabel = label.split("-")[0];
-      target = document.getElementById(`source-${messageId}-${docLabel}`);
+      target = document.getElementById(buildCitationTargetId(docLabel, messageId));
     }
     if (!target) return;
 
@@ -83,11 +84,12 @@ export function useCitationState({ sources, messageId, scrollRef, onCitationJump
       buildAnswerCitationAnchorComponent({
         sources: sourcesNormalized,
         labelIndexMap,
+        messageId,
         activeInstanceId,
         onCitationHover: setActiveInstanceId,
         onCitationSelect: handleCitationSelect,
       }),
-    [sourcesNormalized, labelIndexMap, activeInstanceId, handleCitationSelect],
+    [sourcesNormalized, labelIndexMap, messageId, activeInstanceId, handleCitationSelect],
   );
 
   return {
