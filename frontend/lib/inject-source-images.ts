@@ -372,6 +372,13 @@ function collapseExtraSpacesPreservingListIndent(text: string): string {
     .join("\n");
 }
 
+function trimLineTrailingWhitespace(text: string): string {
+  return String(text || "")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/g, ""))
+    .join("\n");
+}
+
 function buildFigureCaptionLine(
   figLabel: string,
   image: CandidateImage,
@@ -725,7 +732,10 @@ export function injectSourceImages(
     out = out
       .replace(new RegExp(`[（(]\\s*(?:见)?图\\s*${INLINE_FIGURE_TOKEN}\\s*[)）]`, "gu"), "")
       .replace(/[ \t]{2,}/g, " ")
-      .replace(/\s+\n/g, "\n");
+      // Preserve intentional blank lines between markdown blocks. Only trim
+      // trailing spaces at line ends so list/table boundaries stay valid.
+      .replace(/[ \t]+\n/g, "\n");
+    out = trimLineTrailingWhitespace(out);
     return out;
   }
 

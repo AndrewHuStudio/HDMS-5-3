@@ -22,6 +22,7 @@ import {
   finalizeStreamingAssistantMessage,
   stageServerAnswerReplacement,
 } from "@/features/qa/answer-replacement-state";
+import { takeStreamingFrameChunk } from "@/features/qa/streaming-output-buffer";
 
 const quickQuestions: string[] = [];
 
@@ -243,11 +244,13 @@ export function QAView({
     let answerTokenBuffer = "";
     let answerRafId: number | null = null;
 
-    const flushAnswerTokenBuffer = () => {
+    const flushAnswerTokenBuffer = (flushAll = false) => {
       answerRafId = null;
       if (!answerTokenBuffer) return;
-      const chunk = answerTokenBuffer;
-      answerTokenBuffer = "";
+      const { chunk, remaining } = flushAll
+        ? { chunk: answerTokenBuffer, remaining: "" }
+        : takeStreamingFrameChunk(answerTokenBuffer);
+      answerTokenBuffer = remaining;
       updateMessage(assistantId, (msg) => ({
         ...msg,
         // Keep answer hidden only when there is real, unfinished thinking text.
@@ -259,11 +262,15 @@ export function QAView({
         }),
         content: msg.content + chunk,
       }));
+
+      if (answerTokenBuffer) {
+        scheduleAnswerTokenFlush();
+      }
     };
 
     const scheduleAnswerTokenFlush = () => {
       if (answerRafId !== null) return;
-      answerRafId = requestAnimationFrame(flushAnswerTokenBuffer);
+      answerRafId = requestAnimationFrame(() => flushAnswerTokenBuffer());
     };
 
     const clearAnswerFlush = () => {
@@ -271,7 +278,7 @@ export function QAView({
         cancelAnimationFrame(answerRafId);
         answerRafId = null;
       }
-      flushAnswerTokenBuffer();
+      flushAnswerTokenBuffer(true);
     };
 
     try {

@@ -8,6 +8,8 @@ import type { SourceInfo } from "@/features/qa/types";
 import type { AnswerRenderPhase } from "@/features/qa/render/assistant-render-state-machine";
 import { injectSourceTables } from "@/lib/inject-source-tables";
 import { normalizeAnswerTables } from "@/lib/normalize-answer-tables";
+import { normalizeListItemBlocks } from "@/lib/normalize-list-item-blocks";
+import { pruneEmptyAnswerTableColumns } from "@/lib/prune-empty-answer-table-columns";
 import { collapseFigureMentions } from "@/lib/stream-source-utils";
 import { injectAnswerImagesByPhase } from "@/features/qa/render/image-injection-pipeline";
 import { normalizeAnswerMarkdownByPhase } from "@/features/qa/render/markdown-normalization-pipeline";
@@ -63,29 +65,32 @@ export function buildAnswerMarkdown(args: BuildAnswerMarkdownArgs): string {
   const phase: AnswerRenderPhase = renderPhase || (isStreaming ? "streaming" : "final");
   const streamLike = phase === "streaming";
 
-  // Step 1: Table normalization
-  const withTables = normalizeAnswerTables(content);
+  // Step 1: Normalize inline block boundaries inside list items first
+  const withNormalizedListBlocks = normalizeListItemBlocks(content);
 
-  // Step 2: Markdown normalization (phase-aware for safety rules only)
+  // Step 2: Table normalization
+  const withTables = normalizeAnswerTables(withNormalizedListBlocks);
+
+  // Step 3: Markdown normalization (phase-aware for safety rules only)
   const withArtifacts = normalizeAnswerMarkdownByPhase({
     content: withTables,
     renderPhase: phase,
   });
 
-  // Step 3: Citation processing (unified — no streaming/final difference)
+  // Step 4: Citation processing (unified — no streaming/final difference)
   const withoutInlineCitations = processAnswerCitations({
     text: withArtifacts,
     sources,
     isStreaming: false,
   });
 
-  // Step 4: Strip trailing incomplete table during streaming only
+  // Step 5: Strip trailing incomplete table during streaming only
   // (safe: complete content won't have incomplete trailing tables)
   const safeContent = streamLike
     ? stripTrailingIncompleteTable(withoutInlineCitations)
     : withoutInlineCitations;
 
-  // Step 5: Image injection (unified — no appendix, no placeholder replacement)
+  // Step 6: Image injection (unified — no appendix, no placeholder replacement)
   const withImages = injectAnswerImagesByPhase({
     markdown: safeContent,
     sources,
@@ -93,9 +98,12 @@ export function buildAnswerMarkdown(args: BuildAnswerMarkdownArgs): string {
     renderPhase: phase,
   });
 
-  // Step 6: Table injection from sources
+  // Step 7: Table injection from sources
   const withTablesAndImages = injectSourceTables(withImages, sources);
 
-  // Step 7: Collapse figure mentions
-  return collapseFigureMentions(withTablesAndImages);
+  // Step 8: Prune empty low-value answer columns (e.g. blank "依据")
+  const withoutEmptyBasisColumns = pruneEmptyAnswerTableColumns(withTablesAndImages);
+
+  // Step 9: Collapse figure mentions
+  return collapseFigureMentions(withoutEmptyBasisColumns);
 }

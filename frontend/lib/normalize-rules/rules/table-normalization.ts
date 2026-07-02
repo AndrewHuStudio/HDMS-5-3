@@ -13,6 +13,7 @@ import type { NormalizeContext } from "../types";
 import { bumpCounter } from "../utils";
 
 const TABLE_BOUNDARY_NOTE_RE = /^(?:注|备注|说明|注释|提示|注意)\s*[：:]/;
+const TABLE_TRAILING_META_RE = /^(?:数据来源|资料来源|来源|注|备注|说明|注释|提示|注意)\s*[：:]/;
 // OCR/LLM outputs may use visual pipe variants (丨│┃¦...) instead of ASCII '|'.
 const PIPE_VARIANT_RE = /[｜丨│┃¦￨￤]/g;
 
@@ -95,6 +96,116 @@ export const loosePipeTables = {
         .trim();
     };
 
+    const isTrailingMetaLine = (value: string): boolean => {
+      const text = stripInlineMdWrappers(value || "").trim();
+      return Boolean(text) && TABLE_TRAILING_META_RE.test(text);
+    };
+
+    const rebuildCompressedSingleLineTable = (
+      rawLine: string,
+    ): { lines: string[]; changed: boolean; detachedNotes: number } | null => {
+      const normalized = normalizePipeDelimiters(rawLine || "");
+      if (!normalized.includes("|") || !normalized.includes("---")) return null;
+
+      const rawCells = normalized
+        .split("|")
+        .map((cell) => stripInlineMdWrappers(cell).trim());
+
+      const groupedRows: string[][] = [];
+      let currentRow: string[] = [];
+      let sawBoundary = false;
+
+      for (const cell of rawCells) {
+        if (!cell) {
+          if (currentRow.length > 0) {
+            groupedRows.push(currentRow);
+            currentRow = [];
+            sawBoundary = true;
+          }
+          continue;
+        }
+        currentRow.push(cell);
+      }
+
+      if (currentRow.length > 0) groupedRows.push(currentRow);
+      if (!sawBoundary || groupedRows.length < 3) return null;
+
+      const separatorIndex = groupedRows.findIndex((row) => isSeparatorRow(row));
+      if (separatorIndex < 1) return null;
+
+      const separatorCells = groupedRows[separatorIndex] || [];
+      const colCount = separatorCells.length;
+      if (colCount < 2) return null;
+
+      const leadingLines = groupedRows
+        .slice(0, Math.max(0, separatorIndex - 1))
+        .map((row) => row.join(" | ").trim())
+        .filter(Boolean);
+
+      let headerCells = [...(groupedRows[separatorIndex - 1] || [])];
+      if (headerCells.length === colCount + 1) {
+        const leadCell = headerCells.shift()?.trim() || "";
+        if (leadCell) leadingLines.push(leadCell);
+      }
+
+      if (headerCells.length !== colCount) return null;
+
+      const bodyRows: string[][] = [];
+      const trailingLines: string[] = [];
+
+      for (const row of groupedRows.slice(separatorIndex + 1)) {
+        if (row.length === colCount) {
+          bodyRows.push(row);
+          continue;
+        }
+
+        if (row.length === 1 && isTrailingMetaLine(row[0] || "")) {
+          trailingLines.push(collapseNoteRow(row));
+          continue;
+        }
+
+        if (row.length > colCount) {
+          const rowHead = row.slice(0, colCount);
+          const rowTail = row.slice(colCount).join(" ").replace(/[ \t]{2,}/g, " ").trim();
+          if (rowHead.every((cell) => cell.trim().length > 0) && rowTail && isTrailingMetaLine(rowTail)) {
+            bodyRows.push(rowHead);
+            trailingLines.push(rowTail);
+            continue;
+          }
+        }
+
+        return null;
+      }
+
+      if (bodyRows.length === 0) return null;
+
+      const indentMatch = (leadingLines[leadingLines.length - 1] || "").match(/^(\s{0,3})(?:[-*+]|\d+[.)])\s+/);
+      const blockIndent = indentMatch ? `${indentMatch[1] || ""}   ` : "";
+      const serializeRow = (cells: string[]): string =>
+        `| ${cells.map((cell) => escapeTableCell(cell)).join(" | ")} |`;
+
+      const out: string[] = [];
+      if (leadingLines.length > 0) {
+        out.push(...leadingLines);
+        out.push("");
+      }
+
+      out.push(`${blockIndent}${serializeRow(headerCells)}`);
+      out.push(`${blockIndent}| ${Array.from({ length: colCount }, () => "---").join(" | ")} |`);
+      bodyRows.forEach((row) => out.push(`${blockIndent}${serializeRow(row)}`));
+
+      if (trailingLines.length > 0) {
+        out.push("");
+        trailingLines.forEach((line) => out.push(`${blockIndent}${line}`));
+      }
+
+      return {
+        lines: out,
+        changed: out.join("\n") !== rawLine,
+        detachedNotes: trailingLines.length,
+      };
+    };
+
     const expandInlineRunOnRows = (lines: string[]): { lines: string[]; changed: boolean } => {
       const out: string[] = [];
       let changed = false;
@@ -121,6 +232,11 @@ export const loosePipeTables = {
     const normalizeTableBlock = (
       lines: string[],
     ): { lines: string[]; changed: boolean; detachedNotes: number } => {
+      if (lines.length === 1) {
+        const rebuilt = rebuildCompressedSingleLineTable(lines[0] ?? "");
+        if (rebuilt) return rebuilt;
+      }
+
       const expanded = expandInlineRunOnRows(lines);
       const parsedRows = expanded.lines.map((line) => {
         const cells = parsePipeCells(line);
@@ -211,4 +327,33 @@ export const loosePipeTables = {
   },
 };
 
-registerRules(loosePipeTables);
+export const listTableBlankLines = {
+  id: "list-table-blank-lines",
+  order: 901,
+  apply(text: string, _ctx: NormalizeContext): string {
+    if (!text || !text.includes("|")) return text;
+
+    const lines = text.split("\n");
+    const out: string[] = [];
+    let changed = false;
+    const listItemRe = /^\s{0,3}(?:[-*+]|\d+[.)])\s+\S/;
+    const tableRowRe = /^\s*\|.+\|\s*$/;
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i] ?? "";
+      const next = lines[i + 1] ?? "";
+      out.push(line);
+
+      if (!listItemRe.test(line)) continue;
+      if (!next.trim()) continue;
+      if (!tableRowRe.test(normalizePipeDelimiters(next).trim())) continue;
+
+      out.push("");
+      changed = true;
+    }
+
+    return changed ? out.join("\n") : text;
+  },
+};
+
+registerRules(loosePipeTables, listTableBlankLines);

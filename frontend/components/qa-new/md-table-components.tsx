@@ -2,6 +2,7 @@
  * QA Markdown 表格渲染组件
  * 独立模块：表格容器、表头单元格、数据单元格的自定义渲染。
  */
+import React from "react";
 import type { ReactNode } from "react";
 import type { Components } from "react-markdown";
 

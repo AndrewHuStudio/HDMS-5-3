@@ -6,7 +6,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent } from "react";
+import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ChevronDown, ChevronUp, ImagePlus, Send, Square, X } from "lucide-react";
@@ -23,6 +23,7 @@ import {
 } from "@/features/qa/render/assistant-render-state-machine";
 import { resolveAssistantAnswerMarkdown } from "@/features/qa/render/resolve-answer-markdown";
 import { splitAnswerSupplements } from "@/features/qa/render/answer-supplements";
+import { jumpToCitationOrigin } from "@/features/qa/citation-engine";
 import { QAMarkdownRenderer } from "./qa-markdown-renderer";
 import { useCitationState, QACitationSourcePanel } from "./qa-citation-source-panel";
 
@@ -83,6 +84,16 @@ const MAX_PENDING_UPLOAD_IMAGES = 4;
 const UPLOADED_IMAGE_HINT_PREFIX = "已上传图片：";
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 
+interface CitationBackTarget {
+  savedScrollTop: number;
+  originId: string | null;
+}
+
+interface CitationClickPayload {
+  label: string;
+  originId: string | null;
+}
+
 export function QAShell({
   title = "HDMS 城市设计问答",
   subtitle = "基于课题知识库的智能问答",
@@ -110,7 +121,7 @@ export function QAShell({
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
-  const [backScrollPos, setBackScrollPos] = useState<number | null>(null);
+  const [backTarget, setBackTarget] = useState<CitationBackTarget | null>(null);
 
   // Detect if user has scrolled away from the bottom
   const syncScrollPositionState = useCallback(() => {
@@ -130,7 +141,7 @@ export function QAShell({
     syncScrollPositionState();
     // Only dismiss back-to-citation button on user-initiated scroll
     if (!programmaticScrollRef.current) {
-      setBackScrollPos(null);
+      setBackTarget(null);
     }
   }, [syncScrollPositionState]);
 
@@ -142,19 +153,26 @@ export function QAShell({
     setShowJumpToBottom(false);
   }, []);
 
-  const handleCitationJump = useCallback((savedScrollTop: number) => {
+  const handleCitationJump = useCallback((payload: CitationBackTarget) => {
     programmaticScrollRef.current = true;
-    setBackScrollPos(savedScrollTop);
+    setBackTarget(payload);
     // Clear the flag after smooth scroll settles (~600ms)
     setTimeout(() => { programmaticScrollRef.current = false; }, 600);
   }, []);
 
   const handleBackToCitation = useCallback(() => {
     const el = scrollRef.current;
-    if (el === null || backScrollPos === null) return;
-    el.scrollTo({ top: backScrollPos, behavior: "smooth" });
-    setBackScrollPos(null);
-  }, [backScrollPos]);
+    if (el === null || backTarget === null) return;
+    programmaticScrollRef.current = true;
+    jumpToCitationOrigin({
+      originId: backTarget.originId,
+      fallbackScrollTop: backTarget.savedScrollTop,
+      documentRef: document,
+      chatScrollContainer: el,
+    });
+    setBackTarget(null);
+    setTimeout(() => { programmaticScrollRef.current = false; }, 600);
+  }, [backTarget]);
 
   // When a new user message is sent, reset scroll lock so we follow the response
   useEffect(() => {
@@ -328,15 +346,15 @@ export function QAShell({
       )}
 
       <div className="relative flex-1 min-h-0">
-        {backScrollPos !== null && (
+        {backTarget !== null && (
           <button
             type="button"
             className="absolute left-1/2 top-3 z-30 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border/70 bg-white/95 px-3 py-1.5 text-xs text-muted-foreground shadow-sm transition-colors hover:bg-white hover:text-foreground dark:bg-card/95 dark:hover:bg-card"
             onClick={handleBackToCitation}
-            aria-label="返回引用位置"
+            aria-label="返回原文引用位置"
           >
             <ChevronUp className="h-3.5 w-3.5" />
-            返回引用位置
+            返回原文引用
           </button>
         )}
         <div className="qa-scrollbar h-full overflow-x-hidden overflow-y-auto bg-white px-6 py-4 dark:bg-background" ref={scrollRef} onScroll={handleScroll}>
@@ -559,9 +577,10 @@ function AssistantContent({
   onSend?: (question?: string) => void;
   onFillInput?: (value: string) => void;
   onImageClick?: (src: string) => void;
-  onCitationJump?: (savedScrollTop: number) => void;
+  onCitationJump?: (payload: CitationBackTarget) => void;
   scrollRef?: React.RefObject<HTMLElement | null>;
 }) {
+  const sourceScrollRef = useRef<HTMLDivElement>(null);
   const {
     content,
     stableMarkdown,
@@ -577,9 +596,36 @@ function AssistantContent({
   // --- Citation state (isolated module) ---
   const {
     sourcesNormalized,
+    activeCitationLabel,
     handleCitationSelect,
     citationAnchorComponent,
-  } = useCitationState({ sources, messageId: message.id, scrollRef, onCitationJump });
+  } = useCitationState({
+    sources,
+    messageId: message.id,
+    scrollRef,
+    sourceScrollRef,
+    sourceTargetsEnabled: Boolean(!isStreaming && sources && sources.length > 0),
+    onCitationJump,
+  });
+
+  const handleCitationClickCapture = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const pill = target.closest("[data-citation-label]");
+    if (!(pill instanceof HTMLAnchorElement)) return;
+    if (pill.dataset.citationHandled === "true") return;
+
+    const label = pill.getAttribute("data-citation-label");
+    if (!label) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    handleCitationSelect({
+      label,
+      originId: pill.getAttribute("data-citation-origin-id"),
+    } satisfies CitationClickPayload);
+  }, [handleCitationSelect]);
 
   // --- Render state derivation ---
   const renderState = deriveAssistantRenderState(message);
@@ -654,6 +700,7 @@ function AssistantContent({
           className={cn(
             useSidebarSourceLayout && "mt-1 grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]"
           )}
+          onClickCapture={handleCitationClickCapture}
         >
           {/* Markdown rendering (isolated module) */}
           <div className="min-w-0">
@@ -698,8 +745,9 @@ function AssistantContent({
               sources={sourcesNormalized}
               messageId={message.id}
               query={precedingQuestion}
-              onCitationSelect={handleCitationSelect}
+              activeCitationLabel={activeCitationLabel}
               layout={useSidebarSourceLayout ? "sidebar" : "inline"}
+              sourceScrollRef={sourceScrollRef}
             />
           )}
         </div>

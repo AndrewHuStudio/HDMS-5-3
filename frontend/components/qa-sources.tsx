@@ -4,14 +4,15 @@
  */
 "use client";
 
+import React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type React from "react";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ChevronRight, ExternalLink, FileText, GitBranch, X, FileSearch } from "lucide-react";
+import type { CitationSelection } from "@/features/qa/citation-engine";
 import type { SourceInfo } from "@/features/qa/types";
 import { API_BASE, QA_API_BASE, normalizeApiBase } from "@/lib/api-base";
 import { cn } from "@/lib/utils";
@@ -23,18 +24,19 @@ import { deriveSourceMeta } from "@/lib/qa-source-meta";
 import { normalizeSourcePreviewMarkdown } from "@/lib/normalize-source-preview-markdown";
 import { QA_REMARK_PLUGINS } from "@/lib/qa-markdown-plugins";
 import { resolvePdfUrlForSource } from "@/lib/resolve-pdf-url";
-import { resolvePdfSearchKeyword } from "@/lib/pdf-auto-highlight";
 import { getSourcePreviewCacheKey } from "@/lib/source-preview-cache";
 import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
-import { buildCitationTargetId } from "@/features/qa/citation-engine";
+import {
+  buildCitationTargetId,
+  buildCitationTargetMessageToken,
+} from "@/features/qa/citation-engine";
 
 interface QASourcesProps {
   sources: SourceInfo[];
   messageId?: string;
   query?: string;
-  activeCitation?: string | null;
+  selectedCitation?: string | null;
   onCitationHover?: (citation: string | null) => void;
-  onCitationSelect?: (citation: string) => void;
   previewCache?: Record<string, SourcePreview[]>;
   setPreviewCache?: React.Dispatch<React.SetStateAction<Record<string, SourcePreview[]>>>;
   layout?: "inline" | "sidebar";
@@ -119,9 +121,8 @@ export function QASources({
   sources,
   messageId,
   query,
-  activeCitation,
+  selectedCitation,
   onCitationHover,
-  onCitationSelect,
   previewCache: externalPreviewCache,
   setPreviewCache: setExternalPreviewCache,
   layout = "inline",
@@ -129,54 +130,11 @@ export function QASources({
   const sourcesNormalized = useMemo(() => normalizeCitationSources(sources ?? []), [sources]);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [pdfSrc, setPdfSrc] = useState<string | null>(null);
-  const [pdfSearchKeyword, setPdfSearchKeyword] = useState<string | undefined>(undefined);
   const [localPreviewCache, setLocalPreviewCache] = useState<Record<string, SourcePreview[]>>({});
   const previewCache = externalPreviewCache ?? localPreviewCache;
   const setPreviewCache = setExternalPreviewCache ?? setLocalPreviewCache;
-  // If parent provides a cache, parent is responsible for prefetching.
-  const prefetchingKeysRef = useRef<Set<string>>(new Set());
   const prefetchedImageUrlsRef = useRef<Set<string>>(new Set());
   const hasSources = sourcesNormalized.length > 0;
-
-  useEffect(() => {
-    if (!hasSources) return;
-    if (externalPreviewCache && setExternalPreviewCache) return;
-    const PREFETCH_LIMIT = 12;
-    const missing = sourcesNormalized
-      .map((source) => {
-        const key = getSourcePreviewCacheKey(source);
-        if (!key || previewCache[key]?.length) return null;
-        const firstChunkId = source.chunk_ids?.[0] ?? source.chunk_id;
-        if (!firstChunkId) return null;
-        return { key, chunkId: firstChunkId };
-      })
-      .filter((item): item is { key: string; chunkId: string } => Boolean(item));
-
-    if (missing.length === 0) return;
-
-    const qParam = query ? `?q=${encodeURIComponent(query)}` : "";
-
-    missing.slice(0, PREFETCH_LIMIT).forEach(({ key, chunkId }) => {
-      if (prefetchingKeysRef.current.has(key)) return;
-      prefetchingKeysRef.current.add(key);
-
-      void fetch(`/api/rag/sources/${encodeURIComponent(chunkId)}${qParam}`)
-        .then(async (res) => (res.ok ? ((await res.json()) as SourcePreview) : null))
-        .then((preview) => {
-          if (!preview) return;
-          setPreviewCache((prev) => {
-            if (prev[key]?.length) return prev;
-            return { ...prev, [key]: [preview] };
-          });
-        })
-        .catch(() => {
-          // Background prefetch should be silent.
-        })
-        .finally(() => {
-          prefetchingKeysRef.current.delete(key);
-        });
-    });
-  }, [externalPreviewCache, hasSources, previewCache, query, setExternalPreviewCache, sourcesNormalized]);
 
   // Prefetch image binaries as soon as source metadata/preview metadata is available.
   // This reduces the delay between answer render and first visible image.
@@ -252,13 +210,11 @@ export function QASources({
                   return { ...prev, [cacheKey]: items };
                 });
               }}
-              isActive={activeCitation === label}
+              isSelected={selectedCitation === label}
               onHover={onCitationHover}
-              onSelect={onCitationSelect}
               onLightbox={setLightboxSrc}
-              onPdfOpen={(url, keyword) => {
+              onPdfOpen={(url) => {
                 setPdfSrc(url);
-                setPdfSearchKeyword(keyword);
               }}
             />
           );
@@ -293,9 +249,7 @@ export function QASources({
           src={pdfSrc}
           onClose={() => {
             setPdfSrc(null);
-            setPdfSearchKeyword(undefined);
           }}
-          searchKeyword={pdfSearchKeyword}
         />
       )}
     </div>
@@ -309,9 +263,8 @@ function SourceCard({
   query,
   cachedPreviews,
   onCachePreviews,
-  isActive,
+  isSelected,
   onHover,
-  onSelect,
   onLightbox,
   onPdfOpen,
 }: {
@@ -321,15 +274,15 @@ function SourceCard({
   query?: string;
   cachedPreviews?: SourcePreview[];
   onCachePreviews?: (items: SourcePreview[]) => void;
-  isActive: boolean;
+  isSelected: boolean;
   onHover?: (citation: string | null) => void;
-  onSelect?: (citation: string) => void;
   onLightbox?: (src: string) => void;
-  onPdfOpen?: (src: string, searchKeyword?: string) => void;
+  onPdfOpen?: (src: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [previews, setPreviews] = useState<SourcePreview[]>(cachedPreviews ?? []);
   const [loading, setLoading] = useState(false);
+  const wasSelectedRef = useRef(isSelected);
 
   // Use chunk_ids (grouped) if available, otherwise fall back to single chunk_id
   const allChunkIds = source.chunk_ids?.length ? source.chunk_ids : (source.chunk_id ? [source.chunk_id] : []);
@@ -370,45 +323,38 @@ function SourceCard({
 
   const handleToggle = (open: boolean) => {
     setIsOpen(open);
-    if (open) {
-      if (allChunkIds.length > 0) {
-        void fetchPreviews();
-      }
-    }
   };
+
+  useEffect(() => {
+    const wasSelected = wasSelectedRef.current;
+    wasSelectedRef.current = isSelected;
+    if (!isSelected || wasSelected || isOpen) return;
+    setIsOpen(true);
+  }, [isOpen, isSelected]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (allChunkIds.length === 0) return;
+    void fetchPreviews();
+  }, [allChunkIds.length, fetchPreviews, isOpen]);
 
   const firstPreview = previews[0] ?? null;
   const meta = deriveSourceMeta(source, firstPreview);
 
-  // Prefetch preview metadata when the initial source payload lacks key UI fields.
-  // This fixes "page info only appears after expanding" for sources missing page/section.
-  useEffect(() => {
-    if (allChunkIds.length === 0) return;
-    if (loading || previews.length > 0) return;
-    const needsMeta = !meta.pageLabel || !meta.title;
-    if (!needsMeta) return;
-    void fetchPreviews();
-  }, [allChunkIds.length, fetchPreviews, loading, meta.pageLabel, meta.title, previews.length]);
-
   /** Open PDF in overlay for a specific chunk page */
   const handleOpenPdf = (page?: number) => {
     const preferredPage = page ?? firstPreview?.page_hint ?? source.page;
-    const searchKeyword = resolvePdfSearchKeyword(source, firstPreview?.text);
-
-    // Debug logging
-    console.log("Opening PDF with search keyword:", searchKeyword);
-    console.log("Source data:", { quote: source.quote, page: preferredPage, name: source.name });
 
     void resolvePdfUrlForSource(source, { preferredPage, query }).then((url) => {
       if (!url) return;
-      onPdfOpen?.(resolveAssetLink(url) ?? url, searchKeyword);
+      onPdfOpen?.(resolveAssetLink(url) ?? url);
     });
   };
 
   const Icon = source.source === "knowledge_graph" ? GitBranch : FileText;
   const typeLabel = source.source === "knowledge_graph" ? "知识图谱" : "文档检索";
   const fallbackPdfUrl = source.doc_id ? `/rag/documents/${source.doc_id}/pdf` : null;
-  const hasDocumentLink = Boolean(source.pdf_url || firstPreview?.document.pdf_url || fallbackPdfUrl);
+  const hasDocumentLink = Boolean(source.pdf_url || firstPreview?.document.pdf_url || fallbackPdfUrl || allChunkIds.length > 0);
   const hasVisualAsset = meta.hasImage || Boolean(firstPreview?.has_table);
 
   return (
@@ -420,12 +366,15 @@ function SourceCard({
         >
           <div
             id={buildCitationTargetId(label, messageId)}
+            data-citation-target-label={label}
+            data-citation-target-message={buildCitationTargetMessageToken(messageId)}
             role="button"
             tabIndex={0}
             className={cn(
               "flex w-full items-start gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2.5 text-left text-xs shadow-sm transition-[border-color,box-shadow,background-color]",
               "cursor-pointer hover:border-sky-200 hover:bg-sky-50/40 hover:shadow-[0_10px_24px_rgba(14,165,233,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-amber-500/10",
-              isOpen && "rounded-b-none border-b-0 border-sky-200 bg-sky-50/35 shadow-[0_12px_28px_rgba(14,165,233,0.10)]"
+              isOpen && "rounded-b-none border-b-0 border-sky-200 bg-sky-50/35 shadow-[0_12px_28px_rgba(14,165,233,0.10)]",
+              isSelected && "border-sky-300 bg-sky-50/60 ring-2 ring-sky-200/80"
             )}
             onFocus={() => onHover?.(label)}
             onBlur={() => onHover?.(null)}

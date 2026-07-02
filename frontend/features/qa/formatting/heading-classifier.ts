@@ -95,6 +95,10 @@ export function splitInlineHeadingAndBody(line: string): string {
   if (numberedRunOn) {
     const headingBody = (numberedRunOn[1] || "").trimEnd();
     const remainder = (numberedRunOn[2] || "").trimStart();
+    const protectedFigureRef =
+      /(?:见图|如图|下图|图号|图示)\s*$/u.test(headingBody) ||
+      /^(?:\d{1,2}[)）])/.test(remainder);
+    if (protectedFigureRef) return line;
     const normalizedRemainder = remainder
       .replace(/^(\d{1,2}[.．])(?=\S)/, "$1 ")
       .replace(/^(\d{1,2}[)）])(?=\S)/, "$1 ");

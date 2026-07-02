@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useId, useRef } from "react";
+import React, { useCallback, useEffect, useId, useRef } from "react";
 import type { MouseEvent } from "react";
 import type { SourceInfo } from "../../types";
 import { cn } from "@/lib/utils";
-import { buildCitationTargetHref } from "../core/dom-targets";
+import type { CitationSelection } from "../core";
+import { buildCitationOriginId, buildCitationTargetHref } from "../core/dom-targets";
 
 interface CitationPillProps {
   label: string;
@@ -11,7 +12,7 @@ interface CitationPillProps {
   /** instanceId of the currently hovered pill (not label) */
   activeInstanceId: string | null;
   onHover: (instanceId: string | null) => void;
-  onSelect: (label: string) => void;
+  onSelect: (selection: CitationSelection) => void;
 }
 
 export function CitationPill({
@@ -23,6 +24,7 @@ export function CitationPill({
   onSelect,
 }: CitationPillProps) {
   const instanceId = useId();
+  const originId = buildCitationOriginId({ label, messageId, instanceId });
   const isActive = activeInstanceId === instanceId;
   const typeLabel = source?.source === "knowledge_graph" ? "知识图谱" : "文档检索";
   const hoverExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,7 +57,12 @@ export function CitationPill({
 
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
-    onSelect(label);
+    event.stopPropagation();
+    event.currentTarget.dataset.citationHandled = "true";
+    onSelect({ label, originId });
+    queueMicrotask(() => {
+      delete event.currentTarget.dataset.citationHandled;
+    });
   };
 
   return (
@@ -65,8 +72,11 @@ export function CitationPill({
       onMouseLeave={hideCitationHover}
     >
       <a
+        id={originId}
         href={buildCitationTargetHref(label, messageId)}
         title={source?.name || `引用 [${label}]`}
+        data-citation-label={label}
+        data-citation-origin-id={originId}
         className={cn(
           "inline-flex h-5 items-center justify-center rounded-full border px-1.5 text-[10px] font-medium no-underline transition-colors",
           "cursor-pointer",

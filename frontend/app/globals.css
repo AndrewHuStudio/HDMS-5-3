@@ -527,6 +527,15 @@
   display: none;
 }
 
+.qa-markdown .qa-list-item .qa-figure-image--list-nested {
+  display: block;
+  max-width: min(100%, 34rem);
+}
+
+.qa-markdown .qa-list-item .qa-figure-caption--list-nested {
+  display: block;
+}
+
 /* Keep long display formulas inside chat cards instead of stretching the message width. */
 .qa-markdown .katex-display,
 .chunk-markdown .katex-display {

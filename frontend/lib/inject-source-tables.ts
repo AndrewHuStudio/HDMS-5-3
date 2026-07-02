@@ -63,7 +63,7 @@ function stripDanglingTableRefs(text: string): string {
   return text
     .replace(/[（(]\s*见表\s*\d{1,2}\s*[)）]/g, "")
     .replace(/[ \t]{2,}/g, " ")
-    .replace(/\s+\n/g, "\n");
+    .replace(/[ \t]+\n/g, "\n");
 }
 
 /**

@@ -48,9 +48,16 @@ function appendPageHash(url: string, page: number | null): string {
   return `${base}#page=${page}`;
 }
 
-async function fetchSourceDetails(chunkId: string, query?: string): Promise<SourceDetailsResponse | null> {
-  const qParam = query ? `?q=${encodeURIComponent(query)}` : "";
-  const url = `/api/rag/sources/${encodeURIComponent(chunkId)}${qParam}`;
+async function fetchSourceDetails(
+  chunkId: string,
+  query?: string,
+  opts?: { resolvePage?: boolean },
+): Promise<SourceDetailsResponse | null> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (opts?.resolvePage) params.set("resolve_page", "true");
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const url = `/api/rag/sources/${encodeURIComponent(chunkId)}${suffix}`;
 
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) return null;
@@ -72,9 +79,10 @@ export async function resolvePdfUrlForSource(
     fileUrl = String(source.pdf_url);
   }
 
-  // If we are missing either page or fileUrl, try the details endpoint which can
-  // (a) infer physical page via PDF search, and/or (b) tell us doc_id.
-  if ((!page || !fileUrl) && firstChunkId(source)) {
+  // Keep PDF opening fast: if we already know a PDF URL/doc_id, open it
+  // immediately even when page is unknown. Page lookup can require scanning a
+  // large PDF and should not block the viewer.
+  if (!fileUrl && firstChunkId(source)) {
     try {
       const details = await fetchSourceDetails(firstChunkId(source) as string, opts?.query);
       if (details) {

@@ -5,7 +5,7 @@
  */
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -24,6 +24,7 @@ import {
   TABLE_NOTE_TEXT_RE,
   highlightRetrievalDocNames,
   flattenReactText,
+  stripCitationWrapperDelimiters,
   stripLeadingFigcaptionPrefix,
 } from "./md-reference-components";
 
@@ -106,13 +107,26 @@ export function QAMarkdownRenderer({
     ...QA_HEADING_COMPONENTS,
     ...QA_TABLE_COMPONENTS,
     img: buildImageComponent(onImageClick),
-    p: ({ children }: { children?: ReactNode }) => {
-      const flattened = flattenReactText(children).trim();
+    p: ({
+      children,
+      node,
+    }: {
+      children?: ReactNode;
+      node?: {
+        position?: {
+          start?: {
+            column?: number;
+          };
+        };
+      };
+    }) => {
+      const normalizedChildren = stripCitationWrapperDelimiters(children);
+      const flattened = flattenReactText(normalizedChildren).trim();
       const isPlainTextOnly =
-        typeof children === "string" ||
-        (Array.isArray(children) && children.every((c) => typeof c === "string"));
+        typeof normalizedChildren === "string" ||
+        (Array.isArray(normalizedChildren) && normalizedChildren.every((c) => typeof c === "string"));
       const plain = isPlainTextOnly
-        ? String(Array.isArray(children) ? children.join("") : children).trim()
+        ? String(Array.isArray(normalizedChildren) ? normalizedChildren.join("") : normalizedChildren).trim()
         : "";
       const isFigureCaption = FIGURE_CAPTION_TEXT_RE.test(flattened);
 
@@ -121,8 +135,12 @@ export function QAMarkdownRenderer({
         const strippedChildren = isPlainTextOnly
           ? shown
           : stripLeadingFigcaptionPrefix(children);
+        const isNestedInList = Boolean((node?.position?.start?.column ?? 0) >= 4);
         return (
-          <p className="qa-figure-caption mt-1 mb-5 rounded-lg bg-slate-50/80 px-3 py-2 text-[11px] leading-snug text-center text-slate-500 italic dark:bg-muted/25 dark:text-muted-foreground/80">
+          <p className={cn(
+            "qa-figure-caption mt-1 mb-5 rounded-lg bg-slate-50/80 px-3 py-2 text-[11px] leading-snug text-center text-slate-500 italic dark:bg-muted/25 dark:text-muted-foreground/80",
+            isNestedInList && "qa-figure-caption--list-nested mx-auto mt-0 mb-4 max-w-[min(100%,34rem)] rounded-2xl border border-slate-200/90 bg-gradient-to-r from-slate-50 via-white to-slate-50 px-4 py-2.5 text-slate-600 not-italic shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:border-border dark:bg-muted/20 dark:text-muted-foreground dark:shadow-none"
+          )}>
             {strippedChildren}
           </p>
         );
@@ -131,18 +149,23 @@ export function QAMarkdownRenderer({
       // Table boundary notes: "注：...", "说明：...", "备注：..." etc.
       if (TABLE_NOTE_TEXT_RE.test(flattened)) {
         return (
-          <p className="qa-table-note -mt-1 mb-3 rounded-b-xl border border-t-0 border-amber-200/80 bg-amber-50/80 px-3 py-2 text-[11px] leading-relaxed text-amber-900/80 dark:border-amber-400/20 dark:bg-amber-500/5 dark:text-amber-100/80">
-            {children}
-          </p>
+          <div className="qa-table-note mb-4 rounded-2xl border border-sky-200/80 bg-gradient-to-r from-sky-50 via-white to-sky-50/70 px-4 py-3 text-[12px] leading-6 text-sky-900 shadow-[0_10px_24px_rgba(14,165,233,0.10)] dark:border-sky-400/20 dark:bg-gradient-to-r dark:from-sky-500/10 dark:via-background dark:to-sky-500/5 dark:text-sky-100/90 dark:shadow-none">
+            <span className="mb-1 inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold tracking-[0.02em] text-sky-700 dark:bg-sky-400/15 dark:text-sky-200">
+              备注说明
+            </span>
+            <div className="qa-table-note__body">
+              {normalizedChildren}
+            </div>
+          </div>
         );
       }
 
-      const ordinalNode = renderOrdinalParagraph(children);
+      const ordinalNode = renderOrdinalParagraph(normalizedChildren);
       if (ordinalNode) {
         return <p className="qa-paragraph qa-ordinal-paragraph mb-3 last:mb-0">{ordinalNode}</p>;
       }
 
-      return <p className="qa-paragraph mb-3 text-[14px] leading-7 text-slate-700 last:mb-0 dark:text-foreground/90">{children}</p>;
+      return <p className="qa-paragraph mb-3 text-[14px] leading-7 text-slate-700 last:mb-0 dark:text-foreground/90">{normalizedChildren}</p>;
     },
     ul: ({ children }: { children?: ReactNode }) => (
       <ul className="qa-list qa-list--unordered mb-3 list-disc space-y-1.5 pl-5 text-[14px] text-slate-700 marker:text-sky-600 dark:text-foreground/90 dark:marker:text-sky-400">
@@ -155,17 +178,18 @@ export function QAMarkdownRenderer({
       </ol>
     ),
     li: ({ children }: { children?: ReactNode }) => {
+      const normalizedChildren = stripCitationWrapperDelimiters(children);
       const plainText =
-        typeof children === "string"
-          ? children
-          : Array.isArray(children)
-            ? children.filter((c) => typeof c === "string").join("").trim()
+        typeof normalizedChildren === "string"
+          ? normalizedChildren
+          : Array.isArray(normalizedChildren)
+            ? normalizedChildren.filter((c) => typeof c === "string").join("").trim()
             : "";
       const isRetrievalReason = plainText.startsWith("资料调用理由（");
       const isRetrievalList = plainText.startsWith("检索资料清单");
       const content = (isRetrievalReason || isRetrievalList)
-        ? highlightRetrievalDocNames(children, "retrieval-doc")
-        : children;
+        ? highlightRetrievalDocNames(normalizedChildren, "retrieval-doc")
+        : normalizedChildren;
       return <li className="qa-list-item mb-1.5 last:mb-0">{content}</li>;
     },
     strong: ({ children }: { children?: ReactNode }) => (

@@ -17,6 +17,7 @@ import { QAConversationToolbar } from "@/components/qa-new/qa-conversation-toolb
 import type { CityElement } from "@/lib/city-data";
 import { toolRegistry, useToolSceneProps } from "@/lib/registries/tool-registry";
 import { deriveToolRunStatus, resolveAutoRevealToolId } from "@/lib/tool-view-state";
+import { resolveReviewSidebarToolStatusMap } from "@/lib/review-tool-links";
 import {
   hideAllReviewToolVisuals,
   REVIEW_TOOL_IDS,
@@ -250,7 +251,7 @@ export function PersistentWorkspaceShell() {
 
   return (
     <AppShell
-      toolStatusMap={isReviewsRoute ? toolStatusMap : {}}
+      toolStatusMap={resolveReviewSidebarToolStatusMap(pathname, toolStatusMap)}
       activeToolId={isReviewsRoute ? activeToolId : undefined}
       onToolNavigate={isReviewsRoute ? setActiveToolId : undefined}
     >

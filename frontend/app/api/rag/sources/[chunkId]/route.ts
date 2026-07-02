@@ -21,8 +21,12 @@ export async function GET(
   }
 
   const url = new URL(req.url);
+  const upstreamParams = new URLSearchParams();
   const query = url.searchParams.get("q");
-  const qParam = query ? `?q=${encodeURIComponent(query)}` : "";
+  const resolvePage = url.searchParams.get("resolve_page");
+  if (query) upstreamParams.set("q", query);
+  if (resolvePage) upstreamParams.set("resolve_page", resolvePage);
+  const qParam = upstreamParams.toString() ? `?${upstreamParams.toString()}` : "";
   const upstreamUrl = `${qaBaseUrl()}/rag/sources/${encodeURIComponent(chunkId)}${qParam}`;
 
   try {

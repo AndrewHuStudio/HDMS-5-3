@@ -93,6 +93,12 @@ function isLikelyTableRow(line: string): boolean {
   return cells.length >= 3;
 }
 
+function isIndentedTableRow(line: string): boolean {
+  const raw = String(line || "");
+  if (!/^\s{2,}\|/.test(raw)) return false;
+  return isLikelyTableRow(raw.trimStart());
+}
+
 function isHeadingCandidate(line: string): boolean {
   const trimmed = (line || "").trim();
   if (!trimmed) return false;
@@ -228,6 +234,9 @@ export function parseMarkdownBlocks(text: string): MarkdownBlock[] {
         if (isLikelyTableRow(nextLine)) {
           // Do not swallow table-looking rows into a preceding list block.
           // Let the main parser handle them as independent table blocks.
+          break;
+        }
+        if (isIndentedTableRow(nextLine)) {
           break;
         }
         if (isListStart(nextLine) || LIST_CONTINUATION_RE.test(nextLine)) {

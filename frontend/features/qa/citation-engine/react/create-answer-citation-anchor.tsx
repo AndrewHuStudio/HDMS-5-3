@@ -1,6 +1,8 @@
+import React from "react";
 import type { ReactNode } from "react";
 import type { Components } from "react-markdown";
 import type { SourceInfo } from "../../types";
+import type { CitationSelection } from "../core";
 import { CitationLink } from "./citation-link";
 
 interface BuildAnswerCitationAnchorArgs {
@@ -9,7 +11,7 @@ interface BuildAnswerCitationAnchorArgs {
   messageId?: string;
   activeInstanceId: string | null;
   onCitationHover: (instanceId: string | null) => void;
-  onCitationSelect: (label: string) => void;
+  onCitationSelect: (selection: CitationSelection) => void;
 }
 
 export function buildAnswerCitationAnchorComponent(

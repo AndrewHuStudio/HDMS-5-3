@@ -592,6 +592,10 @@ class RAGService:
                 )
 
                 yield ("status", {"stage": "reasoning", "message": "正在进行智能研判..."})
+                if retrieval_overview_prefix:
+                    yield ("answer", {"content": retrieval_overview_prefix})
+                    full_answer_parts.append(retrieval_overview_prefix)
+
                 doc_nums = sorted({s["doc_num"] for s in sources if s.get("doc_num")})
                 prompt = self._build_prompt(
                     question,
@@ -604,18 +608,10 @@ class RAGService:
 
                 llm_start = time.perf_counter()
                 first_token_received = False
-                overview_prefix_emitted = False
                 for event_type, payload in self._stream_chat_completion(
                     prompt,
                     max_tokens=app_config.QA_STREAM_MAX_TOKENS,
                 ):
-                    # Inject retrieval overview right before the first answer token
-                    # (i.e. after thinking_done), so it doesn't flash during thinking.
-                    if not overview_prefix_emitted and event_type == "answer" and retrieval_overview_prefix:
-                        overview_prefix_emitted = True
-                        yield ("answer", {"content": retrieval_overview_prefix})
-                        full_answer_parts.append(retrieval_overview_prefix)
-
                     if event_type == "answer":
                         answer_piece = payload.get("content", "")
                         full_answer_parts.append(answer_piece)

@@ -1,13 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { Components } from "react-markdown";
+import type {
+  CitationSelection,
+  PendingCitationSelection,
+} from "@/features/qa/citation-engine";
 import type { SourceInfo } from "@/features/qa/types";
 import { normalizeCitationSources } from "@/lib/normalize-citation-sources";
 import {
+  advancePendingCitationSelection,
   buildAnswerCitationAnchorComponent,
+  buildCitationSourcePanelScrollerId,
   buildCitationLabelIndexMap,
-  buildCitationTargetId,
+  createPendingCitationSelection,
+  jumpToCitationSource,
+  normalizeCitationSelection,
 } from "@/features/qa/citation-engine";
 import { QASources } from "@/components/qa-sources";
 import { cn } from "@/lib/utils";
@@ -20,7 +28,9 @@ interface UseCitationStateArgs {
   sources: SourceInfo[] | undefined;
   messageId: string;
   scrollRef?: React.RefObject<HTMLElement | null>;
-  onCitationJump?: (savedScrollTop: number) => void;
+  sourceScrollRef?: React.RefObject<HTMLElement | null>;
+  sourceTargetsEnabled?: boolean;
+  onCitationJump?: (payload: { savedScrollTop: number; originId: string | null }) => void;
 }
 
 export interface CitationState {
@@ -28,14 +38,24 @@ export interface CitationState {
   labelIndexMap: Map<string, number>;
   /** instanceId of the currently hovered pill (not citation label) */
   activeInstanceId: string | null;
+  activeCitationLabel: string | null;
   setActiveInstanceId: (id: string | null) => void;
-  handleCitationSelect: (label: string) => void;
+  handleCitationSelect: (selection: string | CitationSelection) => void;
   /** Ready-made `a` component override for QAMarkdownRenderer */
   citationAnchorComponent: Components["a"];
 }
 
-export function useCitationState({ sources, messageId, scrollRef, onCitationJump }: UseCitationStateArgs): CitationState {
+export function useCitationState({
+  sources,
+  messageId,
+  scrollRef,
+  sourceScrollRef,
+  sourceTargetsEnabled = false,
+  onCitationJump,
+}: UseCitationStateArgs): CitationState {
   const [activeInstanceId, setActiveInstanceId] = useState<string | null>(null);
+  const [activeCitationLabel, setActiveCitationLabel] = useState<string | null>(null);
+  const [pendingCitationSelection, setPendingCitationSelection] = useState<PendingCitationSelection | null>(null);
 
   const sourcesNormalized = useMemo(
     () => normalizeCitationSources(sources ?? []),
@@ -50,34 +70,87 @@ export function useCitationState({ sources, messageId, scrollRef, onCitationJump
   // Reset on message change
   useEffect(() => {
     setActiveInstanceId(null);
+    setActiveCitationLabel(null);
+    setPendingCitationSelection(null);
   }, [messageId]);
 
-  const handleCitationSelect = useCallback((label: string) => {
-    const container = scrollRef?.current ?? (document.querySelector(".qa-scrollbar") as HTMLElement | null);
-    if (!container) return;
-    const savedScrollTop = container.scrollTop;
+  useEffect(() => {
+    if (!activeCitationLabel) return;
+    const timeoutId = window.setTimeout(() => {
+      setActiveCitationLabel((current) => (current === activeCitationLabel ? null : current));
+    }, 1400);
+    return () => window.clearTimeout(timeoutId);
+  }, [activeCitationLabel]);
 
-    // Try exact ID first, then fallback to doc-level label (e.g. "1-1" → "1")
-    const exactId = buildCitationTargetId(label, messageId);
-    let target = document.getElementById(exactId);
-    if (!target) {
-      const docLabel = label.split("-")[0];
-      target = document.getElementById(buildCitationTargetId(docLabel, messageId));
+  const attemptCitationJump = useCallback((selection: Required<CitationSelection>) => {
+    const { label } = selection;
+    const chatContainer = scrollRef?.current ?? (document.querySelector(".qa-scrollbar") as HTMLElement | null);
+    const sourceScrollerId = buildCitationSourcePanelScrollerId(messageId);
+    const sourceContainer = sourceScrollRef?.current?.id === sourceScrollerId
+      ? sourceScrollRef.current
+      : (document.getElementById(sourceScrollerId) as HTMLElement | null);
+    const result = jumpToCitationSource({
+      label,
+      messageId,
+      documentRef: document,
+      chatScrollContainer: chatContainer,
+      sourceScrollContainer: sourceContainer,
+    });
+    if (result.found && result.resolvedLabel && result.resolvedLabel !== label) {
+      setActiveCitationLabel(result.resolvedLabel);
     }
-    if (!target) return;
+    return result;
+  }, [messageId, scrollRef, sourceScrollRef]);
 
-    // Calculate target's offset relative to the scroll container
-    const containerRect = container.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    const targetOffsetInContainer = targetRect.top - containerRect.top + container.scrollTop;
-    // Center the target in the container
-    const scrollTo = targetOffsetInContainer - container.clientHeight / 2 + target.offsetHeight / 2;
+  const handleCitationSelect = useCallback((selection: string | CitationSelection) => {
+    const normalizedSelection = normalizeCitationSelection(selection);
+    const { label, originId } = normalizedSelection;
+    const chatContainer = scrollRef?.current ?? (document.querySelector(".qa-scrollbar") as HTMLElement | null);
+    const savedScrollTop = chatContainer?.scrollTop ?? 0;
+    setActiveCitationLabel(label);
 
-    onCitationJump?.(savedScrollTop);
-    container.scrollTo({ top: scrollTo, behavior: "smooth" });
-    target.classList.add("qa-source-flash");
-    setTimeout(() => target.classList.remove("qa-source-flash"), 1200);
-  }, [messageId, scrollRef, onCitationJump]);
+    onCitationJump?.({ savedScrollTop, originId });
+    requestAnimationFrame(() => {
+      const result = attemptCitationJump(normalizedSelection);
+      setPendingCitationSelection(
+        advancePendingCitationSelection({
+          pendingSelection: createPendingCitationSelection(normalizedSelection),
+          found: result.found,
+          sourceTargetsEnabled,
+          maxAttempts: 8,
+        }),
+      );
+    });
+  }, [attemptCitationJump, onCitationJump, scrollRef, sourceTargetsEnabled]);
+
+  useEffect(() => {
+    if (!pendingCitationSelection || !sourceTargetsEnabled) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const result = attemptCitationJump(pendingCitationSelection);
+      setPendingCitationSelection((current) => {
+        if (
+          !current ||
+          current.label !== pendingCitationSelection.label ||
+          current.originId !== pendingCitationSelection.originId ||
+          current.attempts !== pendingCitationSelection.attempts
+        ) {
+          return current;
+        }
+
+        return advancePendingCitationSelection({
+          pendingSelection: current,
+          found: result.found,
+          sourceTargetsEnabled,
+          maxAttempts: 8,
+        });
+      });
+    }, 120);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [attemptCitationJump, pendingCitationSelection, sourceTargetsEnabled]);
 
   const citationAnchorComponent: Components["a"] = useMemo(
     () =>
@@ -96,6 +169,7 @@ export function useCitationState({ sources, messageId, scrollRef, onCitationJump
     sourcesNormalized,
     labelIndexMap,
     activeInstanceId,
+    activeCitationLabel,
     setActiveInstanceId,
     handleCitationSelect,
     citationAnchorComponent,
@@ -110,18 +184,20 @@ interface QACitationSourcePanelProps {
   sources: SourceInfo[];
   messageId: string;
   query?: string;
-  onCitationSelect: (label: string) => void;
+  activeCitationLabel?: string | null;
   layout: "inline" | "sidebar";
   className?: string;
+  sourceScrollRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 export function QACitationSourcePanel({
   sources,
   messageId,
   query,
-  onCitationSelect,
+  activeCitationLabel,
   layout,
   className,
+  sourceScrollRef,
 }: QACitationSourcePanelProps) {
   if (!sources.length) return null;
 
@@ -130,13 +206,21 @@ export function QACitationSourcePanel({
       layout === "sidebar" ? "self-start xl:sticky xl:top-4" : "mt-2",
       className,
     )}>
-      <QASources
-        sources={sources}
-        messageId={messageId}
-        query={query}
-        onCitationSelect={onCitationSelect}
-        layout={layout}
-      />
+      <div
+        id={buildCitationSourcePanelScrollerId(messageId)}
+        ref={sourceScrollRef}
+        className={cn(
+          layout === "sidebar" && "max-h-[min(72vh,calc(100vh-9rem))] overflow-y-auto pr-1"
+        )}
+      >
+        <QASources
+          sources={sources}
+          messageId={messageId}
+          query={query}
+          selectedCitation={activeCitationLabel}
+          layout={layout}
+        />
+      </div>
     </aside>
   );
 }

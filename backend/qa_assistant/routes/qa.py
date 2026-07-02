@@ -13,6 +13,7 @@ import re
 import time
 import logging
 import mimetypes
+import threading
 from pathlib import Path
 from urllib.parse import quote
 
@@ -213,6 +214,17 @@ def _resolve_pdf_path(document: Optional[dict]) -> Optional[Path]:
 
 
 _pdf_page_texts_cache: dict[str, Optional[List[str]]] = {}
+_pdf_page_texts_locks: dict[str, threading.Lock] = {}
+_pdf_page_texts_locks_guard = threading.Lock()
+
+
+def _get_pdf_page_texts_lock(key: str) -> threading.Lock:
+    with _pdf_page_texts_locks_guard:
+        lock = _pdf_page_texts_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _pdf_page_texts_locks[key] = lock
+        return lock
 
 
 class _DisabledRetriever:
@@ -264,34 +276,38 @@ def _get_pdf_page_texts(pdf_path: Path) -> Optional[List[str]]:
     if key in _pdf_page_texts_cache:
         return _pdf_page_texts_cache[key]
 
-    try:
-        from pypdf import PdfReader  # type: ignore
-    except ImportError:
-        _pdf_page_texts_cache[key] = None
-        return None
+    with _get_pdf_page_texts_lock(key):
+        if key in _pdf_page_texts_cache:
+            return _pdf_page_texts_cache[key]
 
-    _ws_re = re.compile(r"\s+")
+        try:
+            from pypdf import PdfReader  # type: ignore
+        except ImportError:
+            _pdf_page_texts_cache[key] = None
+            return None
 
-    try:
-        reader = PdfReader(key, strict=False)
-        if getattr(reader, "is_encrypted", False):
-            try:
-                reader.decrypt("")
-            except Exception:
-                pass
-        texts = []
-        for page in reader.pages:
-            try:
-                raw = page.extract_text() or ""
-            except Exception:
-                raw = ""
-            texts.append(_ws_re.sub("", raw).lower())
-        _pdf_page_texts_cache[key] = texts
-        return texts
-    except Exception as exc:
-        logger.debug("Failed to read PDF pages from %s: %s", pdf_path, exc)
-        _pdf_page_texts_cache[key] = None
-        return None
+        _ws_re = re.compile(r"\s+")
+
+        try:
+            reader = PdfReader(key, strict=False)
+            if getattr(reader, "is_encrypted", False):
+                try:
+                    reader.decrypt("")
+                except Exception:
+                    pass
+            texts = []
+            for page in reader.pages:
+                try:
+                    raw = page.extract_text() or ""
+                except Exception:
+                    raw = ""
+                texts.append(_ws_re.sub("", raw).lower())
+            _pdf_page_texts_cache[key] = texts
+            return texts
+        except Exception as exc:
+            logger.debug("Failed to read PDF pages from %s: %s", pdf_path, exc)
+            _pdf_page_texts_cache[key] = None
+            return None
 
 
 def _search_page_in_pdf(pdf_path: Optional[Path], chunk_text: str) -> Optional[int]:
@@ -586,43 +602,52 @@ def chat_stream(request: ChatRequest):
     logger.info(f"[TIMING] Request received at /qa/chat/stream")
 
     try:
-        retrieval_available = True
-        try:
-            retriever = _create_retriever()
-        except HTTPException as exc:
-            if exc.status_code != 503:
-                raise
-            retrieval_available = False
-            logger.warning("QA retrieval unavailable, degraded to model-only answer: %s", exc.detail)
-            retriever = _DisabledRetriever()
-
-        rag_service = create_rag_service(retriever)
-
         history = _normalize_history(request.history)
+        question = request.question.strip()
+        requested_use_retrieval = request.use_retrieval
+        requested_top_k = request.top_k
 
-        setup_elapsed = (time.perf_counter() - request_start) * 1000
-        logger.info(f"[TIMING] Request setup completed in {setup_elapsed:.2f}ms")
+        def format_sse(event_type: str, data: object) -> str:
+            return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
         def event_generator():
+            yield format_sse("status", {"stage": "understanding", "message": "正在理解你的问题..."})
             try:
+                retrieval_available = True
+                try:
+                    retriever = _create_retriever()
+                except HTTPException as exc:
+                    if exc.status_code != 503:
+                        error_data = {"detail": str(exc.detail)}
+                        yield format_sse("error", error_data)
+                        return
+                    retrieval_available = False
+                    logger.warning("QA retrieval unavailable, degraded to model-only answer: %s", exc.detail)
+                    retriever = _DisabledRetriever()
+
+                rag_service = create_rag_service(retriever)
+
+                setup_elapsed = (time.perf_counter() - request_start) * 1000
+                logger.info(f"[TIMING] Request streaming setup completed in {setup_elapsed:.2f}ms")
+
                 for event_type, data in rag_service.answer_question_stream(
-                    question=request.question.strip(),
+                    question=question,
                     history=history,
-                    use_retrieval=request.use_retrieval and retrieval_available,
-                    top_k=request.top_k,
+                    use_retrieval=requested_use_retrieval and retrieval_available,
+                    top_k=requested_top_k,
                 ):
-                    yield f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                    yield format_sse(event_type, data)
             except Exception as e:
                 logger.error(f"QA stream error: {e}")
-                error_data = json.dumps({"detail": str(e)}, ensure_ascii=False)
-                yield f"event: error\ndata: {error_data}\n\n"
+                yield format_sse("error", {"detail": str(e)})
 
         return StreamingResponse(
             event_generator(),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache, no-transform",
                 "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
             },
         )
 
@@ -676,9 +701,17 @@ def submit_feedback(request: FeedbackRequest):
 
 
 @router.get("/rag/sources/{chunk_id}")
-def get_source_details(chunk_id: str, q: str = Query("", description="Original query for keyword highlighting")):
+def get_source_details(
+    chunk_id: str,
+    q: str = Query("", description="Original query for keyword highlighting"),
+    resolve_page: bool = Query(False, description="Scan the source PDF to infer an exact physical page"),
+):
     """Get detailed information about a specific source chunk."""
     try:
+        if not isinstance(q, str):
+            q = ""
+        resolve_page = resolve_page is True
+
         if not db_manager._initialized:
             raise HTTPException(
                 status_code=503,
@@ -728,14 +761,16 @@ def get_source_details(chunk_id: str, q: str = Query("", description="Original q
         elif isinstance(raw_page_end, str) and raw_page_end.isdigit():
             page_end_hint = int(raw_page_end)
 
-        pdf_path = _resolve_pdf_path(document)
-        pdf_url = f"/rag/documents/{doc_id}/pdf" if doc_id and pdf_path else None
+        pdf_path = _resolve_pdf_path(document) if resolve_page else None
+        pdf_url = f"/rag/documents/{doc_id}/pdf" if doc_id else None
 
-        # Try to locate the exact physical page by searching chunk text in PDF
-        searched_page = _search_page_in_pdf(pdf_path, text)
-        if searched_page is not None:
-            page_hint = searched_page
-            page_end_hint = None  # single-page precision, drop stale range
+        if resolve_page:
+            # Exact page lookup can require extracting every page of a large PDF.
+            # Keep it opt-in so expanding citation cards and opening PDFs stay responsive.
+            searched_page = _search_page_in_pdf(pdf_path, text)
+            if searched_page is not None:
+                page_hint = searched_page
+                page_end_hint = None  # single-page precision, drop stale range
 
         image_refs = _extract_image_refs(text)
         preview_images = []

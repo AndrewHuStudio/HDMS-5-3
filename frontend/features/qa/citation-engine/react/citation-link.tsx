@@ -1,5 +1,7 @@
+import React from "react";
 import type { ReactNode } from "react";
 import type { SourceInfo } from "../../types";
+import type { CitationSelection } from "../core";
 import { CitationPill } from "./citation-pill";
 import { parseCitationLabelFromHref } from "../core/citation-utils";
 
@@ -11,7 +13,7 @@ interface CitationLinkProps {
   messageId?: string;
   activeInstanceId: string | null;
   onCitationHover: (instanceId: string | null) => void;
-  onCitationSelect: (label: string) => void;
+  onCitationSelect: (selection: CitationSelection) => void;
 }
 
 export function CitationLink({

@@ -65,6 +65,12 @@ function normalizeMixedListClusters(text: string): string {
       const indent = ordered[1] ?? "";
       return indent.length === 0;
     }).length;
+    const topLevelBulletCount = cluster.filter((entry) => {
+      const bullet = entry.match(BULLET_RE);
+      if (!bullet) return false;
+      const indent = bullet[1] ?? "";
+      return indent.length === 0;
+    }).length;
 
     if (cluster.length === 0 || bulletCount === 0 || orderedCount === 0) {
       if (cluster.length > 0) out.push(...cluster);
@@ -78,7 +84,21 @@ function normalizeMixedListClusters(text: string): string {
     // Preserve legitimate ordered parents with nested children. These are the
     // exact structures produced by list-numbering/list-nesting and should not
     // be flattened back into bullets during final stabilization.
-    if (nestedContentCount > 0 || leadingOrderedCount >= 2) {
+    if (topLevelBulletCount === 0 && (nestedContentCount > 0 || leadingOrderedCount >= 1)) {
+      out.push(...cluster);
+      continue;
+    }
+
+    // Preserve "bullet lead-in + ordered parent items" structures. These are
+    // used in QA answers to introduce a checklist, and flattening them back to
+    // bullets destroys the intended parent numbering.
+    const firstTopLevelEntry = cluster.find((entry) => entry.trim().length > 0) ?? "";
+    const startsWithTopLevelBullet = BULLET_RE.test(firstTopLevelEntry);
+    if (
+      startsWithTopLevelBullet &&
+      leadingOrderedCount > 0 &&
+      nestedContentCount > 0
+    ) {
       out.push(...cluster);
       continue;
     }

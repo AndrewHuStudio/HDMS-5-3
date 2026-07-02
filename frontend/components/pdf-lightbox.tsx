@@ -6,16 +6,12 @@ import { ScrollMode, SpecialZoomLevel, Viewer, ViewMode, Worker } from "@react-p
 import { defaultLayoutPlugin } from "@react-pdf-viewer/default-layout";
 import { searchPlugin, type RenderSearchProps } from "@react-pdf-viewer/search";
 import { scrollModePlugin } from "@react-pdf-viewer/scroll-mode";
-import { buildPdfSearchCandidates, scheduleAutoPdfHighlight } from "@/lib/pdf-auto-highlight";
 import { preserveScrollPositions } from "@/lib/preserve-scroll";
-import { highlightAndStayOnPage } from "@/lib/stay-on-page";
-import { clearHighlightsPreservingScroll, restoreScrollTop } from "@/lib/pdf-viewer-scroll";
 
 interface PdfLightboxProps {
   src: string;
   onClose: () => void;
   title?: string;
-  searchKeyword?: string;
 }
 
 const FALLBACK_TITLE = "PDF 预览";
@@ -126,7 +122,7 @@ function SearchSidebarContent(props: RenderSearchProps) {
   );
 }
 
-export function PdfLightbox({ src, onClose, title = FALLBACK_TITLE, searchKeyword }: PdfLightboxProps) {
+export function PdfLightbox({ src, onClose, title = FALLBACK_TITLE }: PdfLightboxProps) {
   const { fileUrl, initialPage } = useMemo(() => normalizePdfSource(src), [src]);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -151,18 +147,7 @@ export function PdfLightbox({ src, onClose, title = FALLBACK_TITLE, searchKeywor
   // Plugin factories can use React hooks internally, so they must be called
   // at the top level of the component (not inside useMemo callbacks).
   const searchPluginInstance = searchPlugin();
-  const { Search, clearHighlights, highlight, setTargetPages } = searchPluginInstance;
-  const clearHighlightsRef = useRef(clearHighlights);
-  clearHighlightsRef.current = clearHighlights;
-  const highlightRef = useRef(highlight);
-  highlightRef.current = highlight;
-  const setTargetPagesRef = useRef(setTargetPages);
-  setTargetPagesRef.current = setTargetPages;
-  const hasTriggeredSearchRef = useRef(false);
-  const [documentLoaded, setDocumentLoaded] = useState(false);
-  const [textLayerReady, setTextLayerReady] = useState(false);
-  const autoHighlightCleanupRef = useRef<(() => void) | null>(null);
-  const normalizedSearchKeyword = (searchKeyword ?? "").trim();
+  const { Search } = searchPluginInstance;
 
   const requestClose = () => {
     // If we are in fullscreen, exit before closing to avoid a "blank fullscreen" state.
@@ -340,8 +325,6 @@ export function PdfLightbox({ src, onClose, title = FALLBACK_TITLE, searchKeywor
         const viewerRoot = props.ele.closest(".rpv-core__viewer") as HTMLElement | null;
         viewerRoot?.style.setProperty("--scale-factor", String(safeScale));
 
-        // Signal that text layer is ready for search
-        setTextLayerReady(true);
       },
     }),
     []
@@ -522,89 +505,6 @@ export function PdfLightbox({ src, onClose, title = FALLBACK_TITLE, searchKeywor
     };
   }, []);
 
-  useEffect(() => {
-    // Reset state when either the PDF (fileUrl/initialPage) or keyword changes.
-    // IMPORTANT: Do not depend on plugin function identities in this effect, or we can create a render loop.
-    hasTriggeredSearchRef.current = false;
-    autoHighlightCleanupRef.current?.();
-    autoHighlightCleanupRef.current = null;
-
-    setDocumentLoaded(false);
-    setTextLayerReady(false);
-
-    // Clear any prior highlights and reset page filter.
-    clearHighlightsRef.current();
-    if (normalizedSearchKeyword) {
-      const pageWindowStart = Math.max(0, initialPage - 1);
-      const pageWindowEnd = initialPage + 1;
-      setTargetPagesRef.current(({ pageIndex }) => pageIndex >= pageWindowStart && pageIndex <= pageWindowEnd);
-    } else {
-      setTargetPagesRef.current(() => true);
-    }
-  }, [fileUrl, initialPage, normalizedSearchKeyword]);
-
-  // Auto-search and highlight when searchKeyword is provided.
-  useEffect(() => {
-    if (!normalizedSearchKeyword) return;
-
-    const candidates = buildPdfSearchCandidates({ quote: normalizedSearchKeyword });
-    if (!documentLoaded || candidates.length === 0 || hasTriggeredSearchRef.current) return;
-
-    autoHighlightCleanupRef.current?.();
-
-    const pageWindowStart = Math.max(0, initialPage - 1);
-    const pageWindowEnd = initialPage + 1;
-
-    setTargetPagesRef.current(({ pageIndex }) => pageIndex >= pageWindowStart && pageIndex <= pageWindowEnd);
-
-    autoHighlightCleanupRef.current = scheduleAutoPdfHighlight({
-      candidates,
-      delayMs: textLayerReady ? 1200 : 2000,
-      clearAfterMs: 5000,
-      clearHighlights: () => {
-        const viewerEl = dialogRef.current?.querySelector(".rpv-core__inner-pages") as HTMLElement | null;
-        // Don't call jumpToPage() here; it can cause a visible "nudge" when highlights end.
-        clearHighlightsPreservingScroll({
-          viewerEl,
-          clearHighlights: () => clearHighlightsRef.current(),
-          frames: 2,
-        });
-      },
-      highlight: async (keyword) => {
-        // The search plugin's highlight() internally calls jumpToMatch which
-        // scrolls to the first result. We must save and restore scroll position
-        // to keep the viewer on the correct (initial) page.
-        const viewerEl = dialogRef.current?.querySelector(".rpv-core__inner-pages") as HTMLElement | null;
-        const savedTop = viewerEl?.scrollTop;
-
-        const matches = await highlightAndStayOnPage({
-          keyword,
-          highlight: (kw) => highlightRef.current(kw),
-          jumpToPage: (pageIndex) => viewerApiRef.current.jumpToPage?.(pageIndex),
-          stayOnPageIndex: initialPage,
-        });
-
-        // Restore scroll position after highlight to undo any auto-jump.
-        restoreScrollTop(viewerEl, savedTop, 2);
-        return matches;
-      },
-      onMatched: (keyword, matchCount) => {
-        hasTriggeredSearchRef.current = true;
-        console.log("PDF auto-search matched:", { keyword, matchCount, textLayerReady });
-      },
-      onNotMatched: () => {
-        // Keep manual search available if automatic matching fails.
-        setTargetPagesRef.current(() => true);
-        console.warn("PDF auto-search found no matches", { candidates });
-      },
-    });
-
-    return () => {
-      autoHighlightCleanupRef.current?.();
-      autoHighlightCleanupRef.current = null;
-    };
-  }, [documentLoaded, initialPage, normalizedSearchKeyword, textLayerReady]);
-
   return (
     <div
       ref={rootRef}
@@ -641,7 +541,6 @@ export function PdfLightbox({ src, onClose, title = FALLBACK_TITLE, searchKeywor
               scrollMode={readingMode === "continuous" ? ScrollMode.Vertical : ScrollMode.Page}
               viewMode={ViewMode.SinglePage}
               onDocumentLoad={() => {
-                setDocumentLoaded(true);
                 console.log("PDF document loaded");
               }}
               onZoom={({ scale }) => {

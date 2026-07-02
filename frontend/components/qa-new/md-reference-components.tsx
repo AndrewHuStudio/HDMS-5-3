@@ -2,7 +2,7 @@
  * QA Markdown 引用/参考文献渲染组件
  * 独立模块：图注检测、表格注释检测、文档名高亮、引用锚点等文本级渲染逻辑。
  */
-import { isValidElement } from "react";
+import React, { Fragment, isValidElement } from "react";
 import type { ReactNode } from "react";
 
 const RETRIEVAL_DOC_NAME_PATTERN = /([A-Za-z0-9\u4e00-\u9fff_\-（）()《》【】·、]+\.pdf)/giu;
@@ -50,6 +50,61 @@ export function flattenReactText(node: ReactNode): string {
     return flattenReactText(withChildren.props?.children);
   }
   return "";
+}
+
+function unwrapSingleChild(node: ReactNode): ReactNode {
+  if (Array.isArray(node) && node.length === 1) return node[0];
+  return node;
+}
+
+function isCitationPillNode(node: ReactNode): boolean {
+  const value = unwrapSingleChild(node);
+  if (!isValidElement(value)) return false;
+  const withType = value as { type?: { displayName?: string } | string };
+  const displayName = typeof withType.type === "object" ? withType.type?.displayName : undefined;
+  if (displayName === "CitationPill" || displayName === "AnswerCitationAnchor") return true;
+
+  const withProps = value as { props?: { href?: string; children?: ReactNode } };
+  if (typeof withProps.props?.href === "string" && /^#source-/.test(withProps.props.href)) return true;
+  return false;
+}
+
+export function stripCitationWrapperParentheses(children: ReactNode): ReactNode {
+  if (!Array.isArray(children) || children.length !== 3) return children;
+  const [before, middle, after] = children;
+  if (typeof before !== "string" || typeof after !== "string") return children;
+  if (!before.endsWith("（") && !before.endsWith("(")) return children;
+  if (!after.startsWith("）") && !after.startsWith(")")) return children;
+  if (!isCitationPillNode(middle)) return children;
+
+  const normalizedBefore = before.slice(0, -1);
+  const normalizedAfter = after.slice(1);
+  return [
+    normalizedBefore,
+    middle,
+    normalizedAfter,
+  ];
+}
+
+export function stripCitationWrapperBrackets(children: ReactNode): ReactNode {
+  if (!Array.isArray(children) || children.length !== 3) return children;
+  const [before, middle, after] = children;
+  if (typeof before !== "string" || typeof after !== "string") return children;
+  if (!before.endsWith("[")) return children;
+  if (!after.startsWith("]")) return children;
+  if (!isCitationPillNode(middle)) return children;
+
+  const normalizedBefore = before.slice(0, -1);
+  const normalizedAfter = after.slice(1);
+  return [
+    normalizedBefore,
+    middle,
+    normalizedAfter,
+  ];
+}
+
+export function stripCitationWrapperDelimiters(children: ReactNode): ReactNode {
+  return stripCitationWrapperBrackets(stripCitationWrapperParentheses(children));
 }
 
 /** Strip leading "FIGCAPTION " prefix from mixed ReactNode children (text + anchors). */

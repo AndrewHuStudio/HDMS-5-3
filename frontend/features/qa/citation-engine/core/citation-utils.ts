@@ -6,7 +6,7 @@
  */
 import type { SourceInfo } from "../../types";
 
-const CITATION_HREF_RE = /^#source-(\d{1,2}-\d{1,2})$/;
+const CITATION_HREF_RE = /^#source-(?:(.+?)-)?(\d{1,2}-\d{1,2})$/;
 
 /**
  * Build a map from citation_label (e.g. "1-1") to source index.
@@ -28,7 +28,7 @@ export function buildCitationLabelIndexMap(sources: SourceInfo[] | undefined): M
 export function parseCitationLabelFromHref(href?: string): string | null {
   if (!href) return null;
   const match = href.match(CITATION_HREF_RE);
-  return match ? match[1] : null;
+  return match ? match[2] : null;
 }
 
 export function collectValidCitationLabels(sources: SourceInfo[]): Set<string> {

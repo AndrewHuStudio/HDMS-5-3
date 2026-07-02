@@ -33,6 +33,7 @@ const DECIMAL_SECTION_RE =
   /^(?:\*{2})?\s*[.。]?\s*(\d{1,2}(?:\.\d{1,2}){1,3})\s*(.+?)(?:\*{2})?\s*$/;
 const BULLET_LINE_RE = /^\s{0,3}[-*+]\s+/;
 const ORDERED_LIST_LINE_RE = /^\s{0,3}\d+[.)．、]\s+/;
+const MARKDOWN_HEADING_LINE_RE = /^\s*#{1,6}\s+\S/;
 
 export const chineseHeadings = {
   id: "chinese-headings",
@@ -60,14 +61,36 @@ export const chineseHeadings = {
 
     const isLikelyListHeadingLeadIn = (idx: number, title: string): boolean => {
       const normalized = String(title || "").trim();
+      const normalizedWithoutTrailingCitations = normalized
+        .replace(/(?:\s*\[\d{1,2}-\d{1,2}\]\s*)+$/g, "")
+        .replace(/(?:\s*\[\d{1,2}-\d{1,2}\]\(#source-[^)]+\)\s*)+$/g, "")
+        .trim();
       const next = nextNonEmptyLine(idx) || "";
       const followedByList = BULLET_LINE_RE.test(next) || ORDERED_LIST_LINE_RE.test(next);
+      const followedByTable = /^\s*\|.+\|\s*$/.test(next);
+      if (followedByTable && /[：:]$/.test(normalizedWithoutTrailingCitations)) return true;
       if (!followedByList) return false;
-      if (/[：:]$/.test(normalized)) return true;
+      if (/[：:]$/.test(normalizedWithoutTrailingCitations)) return true;
       // Numbered lead-in lines followed by list blocks are usually list items
       // instead of real headings, even without a trailing colon.
-      if (normalized.length <= 40 && !/[。！？.!?；;]$/.test(normalized)) return true;
+      if (
+        normalizedWithoutTrailingCitations.length <= 40 &&
+        !/[。！？.!?；;]$/.test(normalizedWithoutTrailingCitations)
+      ) {
+        return true;
+      }
       return false;
+    };
+
+    const isLikelyNestedSectionLeadIn = (idx: number): boolean => {
+      const prev = prevNonEmptyLine(idx) || "";
+      const next = nextNonEmptyLine(idx) || "";
+      const followedByStructuredBlock =
+        BULLET_LINE_RE.test(next) ||
+        ORDERED_LIST_LINE_RE.test(next) ||
+        /^\s*\|.+\|\s*$/.test(next);
+      if (!followedByStructuredBlock) return false;
+      return MARKDOWN_HEADING_LINE_RE.test(prev);
     };
 
     for (let idx = 0; idx < lines.length; idx++) {
@@ -87,6 +110,10 @@ export const chineseHeadings = {
       // Level-1: 一、标题
       let match = trimmed.match(CN_H1_RE);
       if (match) {
+        if (isLikelyNestedSectionLeadIn(idx)) {
+          result.push(line);
+          continue;
+        }
         const candidate = `${match[1]}\u3001${match[2].trim()}`;
         const classification = classifyHeadingCandidate(candidate, {
           previousNonEmptyLine: prevNonEmptyLine(idx) || "",

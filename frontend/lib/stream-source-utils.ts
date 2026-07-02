@@ -110,6 +110,8 @@ export function collapseFigureMentions(text: string): string {
 
   const lines = text.split("\n");
   const out = lines.map((line) => {
+    const leadingWhitespaceMatch = line.match(/^(\s*)/u);
+    const leadingWhitespace = leadingWhitespaceMatch?.[1] ?? "";
     const trimmed = line.trim();
     if (FIGURE_CAPTION_LINE_RE.test(trimmed) || FIGURE_LEGEND_LINE_RE.test(trimmed)) {
       return line.trimEnd();
@@ -140,11 +142,14 @@ export function collapseFigureMentions(text: string): string {
       }
     }
 
-    return deduped
+    const normalizedBody = deduped
+      .slice(leadingWhitespace.length)
       .replace(/[（(]\s*[)）]/g, "")
       .replace(/\s{2,}/g, " ")
       .replace(/([，、；;。！？.!?])\s*([，、；;。！？.!?])/g, "$1")
       .trimEnd();
+
+    return `${leadingWhitespace}${normalizedBody}`;
   });
 
   return out.join("\n").replace(/\n{3,}/g, "\n\n");

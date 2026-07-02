@@ -24,6 +24,7 @@ import {
   showOnlyReviewToolVisuals,
 } from "@/lib/review-visual-controls";
 import { getPedestrianEntranceViolationCount } from "@/lib/approval-checklist-status";
+import { resolveReviewToolId } from "@/lib/review-tool-links";
 
 // Feature APIs
 import { checkHeight } from "@/features/height-check/api";
@@ -215,7 +216,7 @@ function useFeatureStatus(id: FeatureId): { checked: boolean; summary: string; i
 }
 
 function getFeatureStatusSnapshot(id: FeatureId): { checked: boolean; summary: string; isPass: boolean } {
-  switch (id) {
+  switch (resolveReviewToolId(id)) {
     case "height-check": {
       const heightResults = useHeightCheckStore.getState().results;
       if (!heightResults.length) return { checked: false, summary: "未检测", isPass: false };
@@ -236,7 +237,7 @@ function getFeatureStatusSnapshot(id: FeatureId): { checked: boolean; summary: s
         isPass: exceeded_count === 0,
       };
     }
-    case "sight-corridor": {
+    case "view-corridor-check": {
       const corridorResult = useSightCorridorStore.getState().collisionResult;
       if (!corridorResult) return { checked: false, summary: "未检测", isPass: false };
       const blocking = corridorResult.blocked_buildings?.length ?? 0;
@@ -246,7 +247,7 @@ function getFeatureStatusSnapshot(id: FeatureId): { checked: boolean; summary: s
         isPass: blocking === 0,
       };
     }
-    case "fire-ladder": {
+    case "fire-ladder-check": {
       const fireLadderResults = useFireLadderStore.getState().results;
       if (!fireLadderResults.length) return { checked: false, summary: "未检测", isPass: false };
       const failed = fireLadderResults.filter((r) => r.status === "fail").length;
@@ -256,7 +257,7 @@ function getFeatureStatusSnapshot(id: FeatureId): { checked: boolean; summary: s
         isPass: failed === 0,
       };
     }
-    case "sky-bridge": {
+    case "sky-bridge-check": {
       const skyBridgeResults = useSkyBridgeStore.getState().results;
       if (!skyBridgeResults.length) return { checked: false, summary: "未检测", isPass: false };
       const failed = skyBridgeResults.filter((r) => r.status === "fail").length;

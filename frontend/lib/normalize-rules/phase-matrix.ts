@@ -29,6 +29,7 @@ export const PHASE_MATRIX: Record<string, Set<NormalizePhase>> = {
   "split-run-on-items":         ALL,
   "split-inline-heading":       ALL,
   "loose-pipe-tables":          ALL,
+  "list-table-blank-lines":     ALL,
   "unicode-bullets":            ALL,
   "heading-blank-lines":        ALL,
   "list-blank-lines":           ALL,
