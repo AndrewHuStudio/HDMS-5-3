@@ -1,5 +1,79 @@
 # Session: 2026-05-06 QA首token与流式输出性能
 
+## Session: 2026-07-02 QA多资料综合检索
+
+### Phase 1: 根因调查
+- **Status:** complete
+- Actions taken:
+  - 继续沿用本轮已读取的 `using-superpowers`、`systematic-debugging`、`test-driven-development`、`planning-with-files` 流程。
+  - 检查 `backend/qa_assistant/rag/retriever.py`、`backend/qa_assistant/rag/context_builder.py`、`backend/qa_assistant/rag/service.py`、`backend/qa_assistant/rag/prompting.py`。
+  - 确认前端引用来源展示只是消费后端 sources；问题不应在前端用展示层“补资料”。
+  - 锁定两个后端截断点：融合阶段按分数截断到 `top_k`，rerank 启用后再次按 `top_k` 覆盖结果。
+- Files modified:
+  - `task_plan.md`
+  - `findings.md`
+  - `progress.md`
+
+### Phase 2: failing regressions
+- **Status:** complete
+- Actions taken:
+  - 新增 `backend/qa_assistant/tests/test_retrieval_document_diversity.py`。
+  - 测试 1 复现融合阶段 doc-a 的 5 个高分 chunk 挤掉 doc-b/doc-c。
+  - 测试 2 复现检索分支只取 `top_k` 导致拿不到靠后的其他资料候选，并覆盖 rerank 后不能塌缩回单文档。
+  - 运行 `python -m pytest backend\qa_assistant\tests\test_retrieval_document_diversity.py -q`，确认旧实现按预期失败。
+
+### Phase 3: minimal fix
+- **Status:** complete
+- Actions taken:
+  - 在 `backend/qa_assistant/core/config.py` 增加 `QA_RETRIEVAL_CANDIDATE_MULTIPLIER` 和 `QA_RETRIEVAL_MIN_DOCUMENTS`。
+  - 在 `backend/qa_assistant/rag/retriever.py` 将向量/关键词分支候选池扩大到默认 `top_k * 3`，最终 fused results 仍截回用户请求的 `top_k`。
+  - 新增文档 key 识别、去重 key、候选池大小和文档多样性选择 helper。
+  - 在融合去重后和 rerank 后都应用文档多样性选择，保留分数顺序，同时为其他可用文档保留结果位。
+
+### Phase 4: verification
+- **Status:** complete
+- Verification:
+  - `python -m pytest backend\qa_assistant\tests\test_retrieval_document_diversity.py -q` passed.
+  - `python -m pytest backend\qa_assistant\tests -q` passed.
+- Files created/modified:
+  - `backend/qa_assistant/tests/test_retrieval_document_diversity.py`
+  - `backend/qa_assistant/rag/retriever.py`
+  - `backend/qa_assistant/core/config.py`
+  - `task_plan.md`
+  - `findings.md`
+  - `progress.md`
+
+## Session: 2026-07-02 PDF打开自动标注移除
+
+### Phase 1: 根因调查
+- **Status:** complete
+- Actions taken:
+  - 读取并应用 `using-superpowers`、`brainstorming`、`systematic-debugging`、`test-driven-development`、`planning-with-files`。
+  - 检查 `frontend/components/pdf-lightbox.tsx`、`frontend/components/qa-sources.tsx`、`frontend/lib/pdf-auto-highlight.ts`、`frontend/lib/stay-on-page.ts`、`frontend/lib/pdf-viewer-scroll.ts`。
+  - 确认 PDF 打开后的红框/黄色标注来自 `PdfLightbox` 的自动 search/highlight effect，而不是 PDF 文件本身。
+
+### Phase 2: failing regression
+- **Status:** complete
+- Actions taken:
+  - 新增 `frontend/scripts/qa-pdf-lightbox-no-auto-highlight-regression.ts`。
+  - 先运行并确认失败，失败点为 `PdfLightbox` 仍包含 `scheduleAutoPdfHighlight`。
+
+### Phase 3: minimal fix
+- **Status:** complete
+- Actions taken:
+  - 移除 `PdfLightbox` 的 `searchKeyword` prop、自动候选词构造、自动高亮调度、自动清理高亮逻辑。
+  - 保留 PDF viewer 的手动 Search sidebar。
+  - 清理 `QASources` 中的 `pdfSearchKeyword` 状态和 `resolvePdfSearchKeyword()` 调用，打开 PDF 只解析 URL/page。
+  - 删除已无生产引用的自动高亮辅助文件：`frontend/lib/stay-on-page.ts`、`frontend/lib/pdf-viewer-scroll.ts`。
+
+### Phase 4: verification
+- **Status:** complete
+- Verification:
+  - `npx --yes tsx scripts/qa-pdf-lightbox-no-auto-highlight-regression.ts` passed.
+  - `npx --yes tsx scripts/qa-pdf-open-docid-fast-path-regression.ts` passed.
+  - `node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json` passed from `frontend`.
+  - `rg` confirmed no production references remain for `scheduleAutoPdfHighlight`, `buildPdfSearchCandidates`, `highlightAndStayOnPage`, `resolvePdfSearchKeyword`, or `searchKeyword=`.
+
 ### Phase 1: 根因调查
 - **Status:** complete
 - Actions taken:
@@ -369,7 +443,7 @@
   - `frontend/scripts/qa-answer-replacement-list-shape-guard-regression.ts` (updated)
 
 ### Phase 4: 验证
-- **Status:** in_progress
+- **Status:** complete
 - Actions taken:
   - 运行 `pytest backend/qa_assistant/tests/test_citation_normalization_preserves_list_indent.py backend/qa_assistant/tests/test_answer_replacement_shape_guard.py -q`，通过。
   - 运行 `pytest backend/qa_assistant/tests/test_stream_answer_stability.py backend/qa_assistant/tests/test_answer_replacement_shape_guard.py backend/qa_assistant/tests/test_citation_normalization_preserves_list_indent.py -q`，通过。
@@ -390,6 +464,58 @@
   - 重新以 `8032` 为 QA 上游重启 `8021`，确认 `POST http://127.0.0.1:8021/qa/chat/stream` 已恢复为 `200 text/event-stream`。
   - 运行 `python -m pytest backend/qa_assistant/tests/test_stream_answer_stability.py backend/qa_assistant/tests/test_answer_replacement_shape_guard.py backend/qa_assistant/tests/test_citation_normalization_preserves_list_indent.py -q`，通过。
 - Files created/modified:
+  - `progress.md` (updated)
+
+## Session: 2026-07-03 QA资料融合与图片返回优化
+
+### Phase 1: 根因调查
+- **Status:** complete
+- Actions taken:
+  - 复核后端 `context_builder`、`postprocess/sources`、`service` 的检索结果到最终 sources 链路。
+  - 确认后端最终过滤已开启保留未引用 document sources。
+  - 锁定前端 `mergeStreamingSources()` 在 `answer_replaced` 时只补回有图片字段的历史来源，导致最终来源列表被收窄。
+  - 锁定图片链路中 `image-injection-pipeline.ts` 禁用了 `injectSourceImages()` 的受控相关配图兜底。
+- Files created/modified:
+  - `task_plan.md` (updated)
+  - `findings.md` (updated)
+  - `progress.md` (updated)
+
+### Phase 2: 测试先行
+- **Status:** complete
+- Actions taken:
+  - 新增 `frontend/scripts/qa-answer-replacement-preserves-stream-sources-regression.ts`。
+  - 旧逻辑下运行失败：最终替换后只保留 2 个 sources，证明无图片的其它资料被丢弃。
+  - 新增 `frontend/scripts/qa-image-intent-appendix-regression.ts`。
+  - 旧逻辑下运行失败：图片意图问题没有生成 `### 相关配图`。
+  - 新增 `backend/qa_assistant/tests/test_source_filter_preserves_fusion_assets.py` 保护后端 source filter 行为。
+- Files created/modified:
+  - `frontend/scripts/qa-answer-replacement-preserves-stream-sources-regression.ts` (created)
+  - `frontend/scripts/qa-image-intent-appendix-regression.ts` (created)
+  - `backend/qa_assistant/tests/test_source_filter_preserves_fusion_assets.py` (created)
+
+### Phase 3: 最小实现
+- **Status:** complete
+- Actions taken:
+  - 修改 `frontend/lib/stream-source-utils.ts`，`answer_replaced` 合并时保留所有已有来源，而不只保留带图片的来源。
+  - 修改 `frontend/features/qa/render/image-injection-pipeline.ts`，开启受控相关配图兜底。
+  - 在小管线层将“图片/图像/插图/图纸/图表/图示”问题归一为底层可识别的“配图”意图，避免直接修改超过 600 行的 `inject-source-images.ts`。
+- Files created/modified:
+  - `frontend/lib/stream-source-utils.ts` (updated)
+  - `frontend/features/qa/render/image-injection-pipeline.ts` (updated)
+
+### Phase 4: 验证
+- **Status:** in_progress
+- Actions taken:
+  - `python -m pytest backend\qa_assistant\tests\test_source_filter_preserves_fusion_assets.py backend\qa_assistant\tests\test_retrieval_document_diversity.py -q` 通过。
+  - `npx --yes tsx scripts/qa-answer-replacement-preserves-stream-sources-regression.ts` 通过。
+  - `npx --yes tsx scripts/qa-image-intent-appendix-regression.ts` 通过。
+  - `npx --yes tsx scripts/qa-retrieval-overview-image-boundary-regression.ts` 通过。
+  - `npx --yes tsx scripts/qa-streaming-equals-final-regression.tsx` 通过。
+  - `node node_modules\typescript\bin\tsc --noEmit -p tsconfig.json` 通过。
+  - `.\scripts\check-module-lines.ps1 -Path ...` 通过。
+- Files created/modified:
+  - `task_plan.md` (updated)
+  - `findings.md` (updated)
   - `progress.md` (updated)
 
 ## Session: 2026-04-29 QA引用跳转修复

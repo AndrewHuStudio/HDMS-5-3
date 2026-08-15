@@ -98,17 +98,18 @@ class MultiSourceRetriever:
         start_times: Dict[str, float] = {}
         branch_timeout = float(getattr(app_config, "QA_RETRIEVAL_BRANCH_TIMEOUT_SECONDS", 12.0))
         total_timeout = float(getattr(app_config, "QA_RETRIEVAL_TOTAL_TIMEOUT_SECONDS", 25.0))
+        candidate_top_k = self._candidate_limit(top_k)
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
         try:
             if use_vector:
                 start_times["vector_results"] = time.perf_counter()
-                futures["vector_results"] = executor.submit(self._vector_search, query, top_k)
+                futures["vector_results"] = executor.submit(self._vector_search, query, candidate_top_k)
             if use_graph:
                 start_times["graph_results"] = time.perf_counter()
                 futures["graph_results"] = executor.submit(self._graph_search, query)
             if use_keyword:
                 start_times["keyword_results"] = time.perf_counter()
-                futures["keyword_results"] = executor.submit(self._keyword_search, query, top_k)
+                futures["keyword_results"] = executor.submit(self._keyword_search, query, candidate_top_k)
 
             if futures:
                 overall_start = time.perf_counter()
@@ -163,7 +164,7 @@ class MultiSourceRetriever:
             results["vector_results"],
             results["graph_results"],
             results["keyword_results"],
-            top_k,
+            candidate_top_k,
             query=query
         )
 
@@ -171,16 +172,23 @@ class MultiSourceRetriever:
         results["reranked"] = False
         if enable_rerank and self.reranker and results["fused_results"]:
             try:
+                rerank_top_n = min(candidate_top_k, len(results["fused_results"]))
                 reranked = self.reranker.rerank(
                     query=query,
                     documents=results["fused_results"],
-                    top_n=top_k,
+                    top_n=rerank_top_n,
                 )
-                results["fused_results"] = reranked
+                results["fused_results"] = self._select_document_diverse_results(reranked, top_k)
                 results["reranked"] = True
                 logger.info("Rerank applied successfully (%d results)", len(reranked))
             except Exception as exc:
                 logger.warning("Rerank failed, keeping original fusion order: %s", exc)
+
+        if not results["reranked"]:
+            results["fused_results"] = self._select_document_diverse_results(
+                results["fused_results"],
+                top_k,
+            )
 
         return results
 
@@ -401,6 +409,108 @@ class MultiSourceRetriever:
         else:
             return {"vector": 0.50, "graph": 0.25, "keyword": 0.25}
 
+    @staticmethod
+    def _candidate_limit(top_k: int) -> int:
+        top_k = max(1, int(top_k or 1))
+        multiplier = max(1, int(getattr(app_config, "QA_RETRIEVAL_CANDIDATE_MULTIPLIER", 3)))
+        max_candidates = max(top_k, int(getattr(app_config, "QA_TOP_K_MAX", top_k)))
+        return min(max_candidates, max(top_k, top_k * multiplier))
+
+    @staticmethod
+    def _dedupe_key(result: Dict[str, Any]) -> Any:
+        if "id" in result:
+            return ("id", str(result["id"]))
+        if "_id" in result:
+            return ("id", str(result["_id"]))
+        if "text" in result:
+            return ("text", str(result["text"])[:100])
+        return ("raw", str(result))
+
+    @staticmethod
+    def _document_key(result: Dict[str, Any]) -> Optional[str]:
+        metadata = result.get("metadata", {}) or {}
+        doc_id = (
+            result.get("doc_id")
+            or result.get("source_doc_id")
+            or metadata.get("doc_id")
+            or metadata.get("source_doc_id")
+        )
+        if doc_id is not None:
+            normalized = str(doc_id).strip()
+            if normalized:
+                return f"doc:{normalized}"
+
+        file_name = (
+            metadata.get("file_name")
+            or metadata.get("source_doc")
+            or result.get("file_name")
+            or result.get("source_doc")
+        )
+        if file_name is not None:
+            normalized = str(file_name).strip().replace("\\", "/").split("/")[-1].lower()
+            if normalized and normalized != "未知文档":
+                return f"file:{normalized}"
+
+        return None
+
+    def _select_document_diverse_results(
+        self,
+        ranked_results: List[Dict[str, Any]],
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Keep score order while reserving slots for other documents when
+        candidates from multiple documents exist.
+        """
+        if not ranked_results:
+            return []
+
+        top_k = max(1, int(top_k or 1))
+        if len(ranked_results) <= top_k:
+            return list(ranked_results)
+
+        doc_keys_in_order: List[str] = []
+        seen_doc_keys: set[str] = set()
+        for result in ranked_results:
+            doc_key = self._document_key(result)
+            if doc_key and doc_key not in seen_doc_keys:
+                seen_doc_keys.add(doc_key)
+                doc_keys_in_order.append(doc_key)
+
+        if len(doc_keys_in_order) <= 1 or top_k <= 1:
+            return list(ranked_results[:top_k])
+
+        min_documents = max(1, int(getattr(app_config, "QA_RETRIEVAL_MIN_DOCUMENTS", 3)))
+        target_doc_count = min(top_k, min_documents, len(doc_keys_in_order))
+        selected_indices: set[int] = {0}
+        selected_doc_keys: set[str] = set()
+        first_doc_key = self._document_key(ranked_results[0])
+        if first_doc_key:
+            selected_doc_keys.add(first_doc_key)
+
+        for index, result in enumerate(ranked_results):
+            if len(selected_indices) >= top_k or len(selected_doc_keys) >= target_doc_count:
+                break
+            doc_key = self._document_key(result)
+            if not doc_key or doc_key in selected_doc_keys:
+                continue
+            selected_indices.add(index)
+            selected_doc_keys.add(doc_key)
+
+        for index in range(len(ranked_results)):
+            if len(selected_indices) >= top_k:
+                break
+            selected_indices.add(index)
+
+        selected = [ranked_results[index] for index in sorted(selected_indices)]
+        logger.info(
+            "Document-diverse selection: %d -> %d results across %d documents",
+            len(ranked_results),
+            len(selected),
+            len({self._document_key(result) for result in selected if self._document_key(result)}),
+        )
+        return selected
+
     def _fuse_results(
         self,
         vector_results: List[Dict[str, Any]],
@@ -455,23 +565,16 @@ class MultiSourceRetriever:
 
         # Deduplicate based on chunk_id or text
         seen = set()
-        fused_results = []
+        deduped_results = []
 
         for result in all_results:
-            if "id" in result:
-                key = result["id"]
-            elif "text" in result:
-                key = result["text"][:100]
-            else:
-                key = str(result)
+            key = self._dedupe_key(result)
 
             if key not in seen:
                 seen.add(key)
-                fused_results.append(result)
+                deduped_results.append(result)
 
-            if len(fused_results) >= top_k:
-                break
-
+        fused_results = self._select_document_diverse_results(deduped_results, top_k)
         logger.info(f"Fused results: {len(fused_results)} unique items")
         return fused_results
 

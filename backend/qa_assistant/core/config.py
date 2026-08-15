@@ -188,6 +188,18 @@ QA_DEFAULT_TOP_K = _parse_int(
     min_value=QA_TOP_K_MIN,
     max_value=QA_TOP_K_MAX,
 )
+QA_RETRIEVAL_CANDIDATE_MULTIPLIER = _parse_int(
+    os.getenv("QA_RETRIEVAL_CANDIDATE_MULTIPLIER", "3"),
+    3,
+    min_value=1,
+    max_value=5,
+)
+QA_RETRIEVAL_MIN_DOCUMENTS = _parse_int(
+    os.getenv("QA_RETRIEVAL_MIN_DOCUMENTS", "3"),
+    3,
+    min_value=1,
+    max_value=QA_TOP_K_MAX,
+)
 QA_IMAGE_BOOST_LIMIT = _parse_int(
     os.getenv("QA_IMAGE_BOOST_LIMIT", "4"),
     4,

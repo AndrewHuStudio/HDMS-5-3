@@ -74,10 +74,6 @@ export function mergeStreamingSources(
       return;
     }
 
-    if (!hasImagePayload(source)) {
-      return;
-    }
-
     keyToIndex.set(key, merged.length);
     merged.push(source);
   });

@@ -1,3 +1,20 @@
+# QA PDF打开自动标注移除（2026-07-02）
+- 用户截图中的 PDF 打开后红框/黄色区域标注，对应前端 `frontend/components/pdf-lightbox.tsx` 的自动搜索高亮链路。
+- 根因是 `PdfLightbox` 接收 `searchKeyword` 后，在 PDF 文档和 text layer ready 后调用 `scheduleAutoPdfHighlight()`，再经 search plugin 的 `highlight()` 去全文/局部搜索答案片段。
+- 这条链路会额外等待文本层、构造候选关键词、执行 PDF 文本搜索、触发匹配跳转并恢复滚动，因此既产生可见标注，也拖慢打开后的可交互速度。
+- `frontend/components/qa-sources.tsx` 原本会从 source quote/preview text 推导 `pdfSearchKeyword` 并传给 `PdfLightbox`。去掉这层传递后，“查看PDF”只解析 URL 和页码，不再把答案文本带入阅读器。
+- 手动搜索功能仍保留：`PdfLightbox` 继续挂载 `@react-pdf-viewer/search` 的 Search sidebar，只是不再打开时自动搜索和自动画标注。
+- 新增 `frontend/scripts/qa-pdf-lightbox-no-auto-highlight-regression.ts`，防止 `PdfLightbox` 重新引入 `scheduleAutoPdfHighlight` / `buildPdfSearchCandidates` / `highlightAndStayOnPage`。
+
+# QA多资料综合检索（2026-07-02）
+- 用户反馈“所有问题都集中在一个资料”，实际链路集中在后端 RAG 检索阶段，而不是前端引用来源展示。
+- `backend/qa_assistant/rag/retriever.py` 的 `_fuse_results()` 会把 vector / graph / keyword 候选按加权分数全局排序，然后去重并直接截断到 `top_k`。如果同一 PDF 有多个相邻高分 chunk，它会占满最终 `fused_results`。
+- `backend/qa_assistant/rag/context_builder.py` 只是按 `doc_id or file_name` 把 `fused_results` 分组并生成 `1-1`、`2-1` 等引用标签；它没有额外丢弃其他文档，因此“只来自一份资料”的问题已经在 fused/reranked results 中形成。
+- 启用 rerank 时还有第二个截断点：`retrieve()` 将 reranker 的 `top_n=top_k` 返回值直接覆盖 `fused_results`，所以即使融合阶段包含多份资料，也可能在重排后重新塌缩到单一资料。
+- 修复方向：在融合去重后和 rerank 后都应用轻量文档多样性选择。保留分数优先顺序，但当候选中存在其他文档时，至少为其他文档保留结果位，避免一个 PDF 独占上下文。
+- 已实现：向量/关键词分支候选池默认扩大为 `top_k * 3`（受 `QA_TOP_K_MAX` 限制），最终上下文仍按用户请求的 `top_k` 返回；`QA_RETRIEVAL_CANDIDATE_MULTIPLIER` 和 `QA_RETRIEVAL_MIN_DOCUMENTS` 可通过环境变量调整。
+- 文档多样性选择会识别顶层 `doc_id/source_doc_id/file_name/source_doc`，以及 `metadata.doc_id/source_doc_id/file_name/source_doc`。若候选确实只来自一份资料，则不会强行编造其他资料。
+
 # QA首token与流式输出性能（2026-05-06）
 - 后端 `backend/qa_assistant/routes/qa.py:chat_stream()` 当前会在返回 `StreamingResponse` 前执行 `_create_retriever()` 和 `create_rag_service()`，这意味着数据库 lazy init、embedder 初始化、retriever 构造等 setup 时间都会发生在首个 SSE 字节之前。用户感知就是“发出问题后很久才有任何输出/状态”。
 - `backend/qa_assistant/rag/service.py:answer_question_stream()` 在检索完成后会构造 `retrieval_overview_prefix`，但旧逻辑直到 LLM 第一个 `answer` 事件到达时才把这段前缀作为 answer 发出。如果模型先长时间输出 `reasoning_content` 或 `<think>`，首个可见 answer token 会被模型 reasoning 时间拖住。
@@ -115,6 +132,20 @@
   - `backend/qa_assistant/routes/qa.py` 现在对 `_get_pdf_page_texts()` 使用按 PDF 路径划分的锁，避免同一 PDF 在并发来源详情请求中被重复完整解析。
   - `frontend/components/qa-sources.tsx` 已移除答案渲染后的批量 source detail 预取和缺元信息时的自动预取；来源详情仍在卡片展开/选中时按需加载。
   - 对只有 `chunk_id`、暂时没有 `doc_id/pdf_url` 的来源，仍显示“查看PDF”按钮；点击时沿用 `resolvePdfUrlForSource()` 通过 source detail endpoint 按需解析 PDF URL。
+
+## QA资料融合只剩一个资料与图片不显示根因（2026-07-03）
+- 后端检索/上下文阶段可以构造多个 document sources，且最终 source filter 已支持 `keep_uncited_document_sources=True`。
+- 实际导致“最终参考资料只剩一个”的断点在前端 `frontend/lib/stream-source-utils.ts`：
+  - `answer_replaced` 事件到达时，`mergeStreamingSources(previous, incoming)` 以 incoming 为主。
+  - 旧逻辑只把 previous 中“带图片字段”的 source 补回。
+  - 因此如果最终替换 payload 只有一个被模型引用的 source，其它无图片但相关的资料会被 UI 丢弃。
+- 图片不显示的主要断点在 `frontend/features/qa/render/image-injection-pipeline.ts`：
+  - source 中已有 `image_urls` 时，底层 `injectSourceImages()` 有受控 “相关配图” 兜底。
+  - 但管线强制 `allowAppendixFallback: false`，所以只有模型显式输出图号或 `[[IMG:N-M]]` 时才会插图。
+  - 用户常说的“图片/图像/插图/图纸/图表/图示”未命中底层强意图词，需要归一化为“配图”意图。
+- 修复方向：
+  - 最终 answer replacement 不再收窄流式阶段已经展示过的来源；保留所有 previous sources，同时继续让 incoming 更新同一 chunk/label。
+  - 开启受控图片附录兜底，并在小管线层把“图片/图像/插图/图纸/图表/图示”问题补充为“配图”意图。
 
 ## OCR任务持久化（2026-04-09）
 - OCR job 当前仅存在 `data_process/ocr_process/core.py` 的进程内 `_jobs` 字典。
