@@ -88,3 +88,4 @@ docker-compose.yml
 cloudflare/
 .claude/
 nginx/
+.worktrees/
