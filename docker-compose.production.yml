@@ -1,0 +1,251 @@
+name: hdms
+
+x-app-common: &app-common
+  image: hdms-python:production
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  env_file:
+    - ${HDMS_ENV_FILE:-.env.production}
+  environment:
+    PYTHONUNBUFFERED: "1"
+    MONGODB_URI: mongodb://${MONGODB_USER}:${MONGODB_PASSWORD}@mongodb:27017/${MONGODB_DATABASE}?authSource=admin
+  networks:
+    - internal
+  volumes:
+    - application_data:/app/data
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      frontend:
+        condition: service_started
+      review:
+        condition: service_healthy
+      qa:
+        condition: service_healthy
+      data_process:
+        condition: service_healthy
+      approval:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/hdms.production.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    networks:
+      - internal
+    mem_limit: 128m
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${HDMS_ENV_FILE:-.env.production}
+    networks:
+      - internal
+    mem_limit: 768m
+
+  review:
+    <<: *app-common
+    working_dir: /app/backend/review_system
+    command: python -m uvicorn app:app --host 0.0.0.0 --port 8003
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8003/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 1g
+
+  qa:
+    <<: *app-common
+    working_dir: /app/backend/qa_assistant
+    command: python -m uvicorn app:app --host 0.0.0.0 --port 8002
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      milvus:
+        condition: service_started
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8002/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    mem_limit: 2g
+
+  data_process:
+    <<: *app-common
+    command: python -m uvicorn data_process.main:app --host 0.0.0.0 --port 8004
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      milvus:
+        condition: service_started
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8004/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    mem_limit: 3g
+
+  approval:
+    <<: *app-common
+    working_dir: /app/backend/approval_checklist
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python -m uvicorn app:app --host 0.0.0.0 --port 8005"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8005/approval/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    mem_limit: 768m
+
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+    mem_limit: 512m
+
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGODB_DATABASE}
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config_data:/data/configdb
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - internal
+    mem_limit: 1g
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.15
+    restart: unless-stopped
+    command: >
+      etcd --advertise-client-urls=http://etcd:2379
+      --listen-client-urls=http://0.0.0.0:2379
+      --data-dir=/etcd
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "8589934592"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    volumes:
+      - etcd_data:/etcd
+    networks:
+      - internal
+    mem_limit: 512m
+
+  minio:
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    restart: unless-stopped
+    command: minio server /minio_data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BROWSER: "off"
+    volumes:
+      - minio_data:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+    networks:
+      - internal
+    mem_limit: 1g
+
+  milvus:
+    image: milvusdb/milvus:v2.6.2
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    depends_on:
+      etcd:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    environment:
+      MILVUS_DEPLOY_MODE: standalone
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      DATA_COORD_SEGMENT_MAX_SIZE: "512"
+      LOG_LEVEL: info
+    volumes:
+      - milvus_data:/var/lib/milvus
+    networks:
+      - internal
+    mem_limit: 4g
+
+  neo4j:
+    image: neo4j:5.13-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_security_procedures_allowlist: apoc.*
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 512m
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 >/dev/null"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - internal
+    mem_limit: 3g
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  application_data:
+  postgres_data:
+  mongodb_data:
+  mongodb_config_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+  neo4j_data:
+  neo4j_logs:

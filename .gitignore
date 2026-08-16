@@ -85,7 +85,11 @@ docker-compose.external.yml
 docker-compose.yml
 .env.external
 .env
+.env.production
 cloudflare/
 .claude/
 nginx/
+!nginx/
+nginx/*
+!nginx/hdms.production.conf
 .worktrees/
