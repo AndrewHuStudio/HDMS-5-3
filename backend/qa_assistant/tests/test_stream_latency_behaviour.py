@@ -100,7 +100,7 @@ class StreamLatencyBehaviourTests(unittest.TestCase):
             qa_routes._create_retriever = original_create_retriever
             qa_routes.create_rag_service = original_create_service
 
-    def test_retrieval_overview_is_emitted_before_llm_reasoning_tokens(self):
+    def test_retrieval_overview_is_emitted_after_thinking_completes(self):
         service = _OverviewLatencyService()
         service.retriever = type(
             "Retriever",
@@ -128,14 +128,20 @@ class StreamLatencyBehaviourTests(unittest.TestCase):
             )
         )
 
-        first_thinking_index = next(i for i, (name, _) in enumerate(events) if name == "thinking")
+        thinking_done_index = next(i for i, (name, _) in enumerate(events) if name == "thinking_done")
         overview_index = next(
             i
             for i, (name, payload) in enumerate(events)
             if name == "answer" and "检索综述" in payload.get("content", "")
         )
+        formal_answer_index = next(
+            i
+            for i, (name, payload) in enumerate(events)
+            if name == "answer" and payload.get("content") == "正式答案。"
+        )
 
-        self.assertLess(overview_index, first_thinking_index)
+        self.assertLess(thinking_done_index, overview_index)
+        self.assertLess(overview_index, formal_answer_index)
 
 
 if __name__ == "__main__":

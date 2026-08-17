@@ -27,14 +27,18 @@ function normalizeImageIntentQuery(query?: string): string | undefined {
 }
 
 export function injectAnswerImagesByPhase(args: InjectAnswerImagesArgs): string {
-  const { markdown, sources, precedingQuestion } = args;
+  const { markdown, sources, precedingQuestion, renderPhase } = args;
   if (!markdown) return markdown;
 
-  // All phases use identical strategy: full line-level matching, no placeholder replacement.
-  // Appendix fallback is still guarded by image intent inside injectSourceImages.
+  const streaming = renderPhase === "streaming";
+
+  // During streaming, insert an image only after its [[IMG:N-M#K]] anchor
+  // arrives from the model. Citation/intent fallbacks are reserved for the
+  // completed answer so source metadata cannot make images jump ahead of text.
   return injectSourceImages(markdown, sources, normalizeImageIntentQuery(precedingQuestion), {
-    streaming: false,
+    streaming,
     allowPlaceholderReplacement: false,
-    allowAppendixFallback: true,
+    allowAppendixFallback: !streaming,
+    allowCitationLineInjection: !streaming,
   });
 }
