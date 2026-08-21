@@ -89,3 +89,6 @@ cloudflare/
 .claude/
 nginx/
 .worktrees/
+
+# 本地临时文件与数据库迁移备份(体积大,不应入库)
+tmp/
