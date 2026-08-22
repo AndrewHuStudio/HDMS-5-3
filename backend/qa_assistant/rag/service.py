@@ -6,8 +6,6 @@ import json
 import re
 from typing import List, Dict, Any, Optional, Generator, Tuple
 import logging
-from pathlib import Path
-import threading
 
 import openai
 
@@ -17,6 +15,7 @@ from rag import prompting as rag_prompting
 from rag import retrieval_helpers as rag_retrieval
 from rag import context_builder as rag_context_builder
 from rag import retrieval_mode as rag_retrieval_mode
+from rag.pdf_index import pdf_is_available as _pdf_is_available
 
 from rag.postprocess import citations as pp_citations
 from rag.postprocess import answer as pp_answer
@@ -24,16 +23,18 @@ from rag.postprocess import sources as pp_sources
 from rag.postprocess import markdown as pp_markdown
 from rag.postprocess import images as pp_images
 from rag.postprocess import summary as pp_summary
+# Re-exported under their historical private names so existing tests and callers
+# that import them from `rag.service` keep working.
+from rag.postprocess.replacement_guard import (  # noqa: F401
+    inspect_markdown_shape as _inspect_markdown_shape,
+    should_emit_answer_replacement as _should_emit_answer_replacement,
+)
 
 logger = logging.getLogger(__name__)
 
 _QUICK_GREETING_REPLY = "\u60a8\u597d\uff0c\u6211\u5728\u3002\u8bf7\u76f4\u63a5\u544a\u8bc9\u6211\u60a8\u60f3\u54a8\u8be2\u7684\u95ee\u9898\u3002"
 _QUICK_IDENTITY_REPLY = "\u6211\u662fHDMS\u95ee\u7b54\u52a9\u624b\uff0c\u4e13\u6ce8\u7247\u533a\u7ba1\u63a7\u8d44\u6599\u95ee\u7b54\u548c\u5efa\u8bbe\u5408\u89c4\u5efa\u8bae\u3002"
 
-
-_PDF_KEY_RE = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff]+")
-_PDF_INDEX_LOCK = threading.Lock()
-_PDF_AVAILABLE_KEYS: Optional[set[str]] = None
 
 _PAGE_MARKER_RE = re.compile(r"<!--\s*PAGE\s*(\d+)\s*-->", flags=re.IGNORECASE)
 
@@ -59,97 +60,6 @@ def _infer_page_range_from_text(text: str) -> Tuple[Optional[int], Optional[int]
 
 
 _PAGE_RANGE_RE = re.compile(r"(\d{1,5})\s*(?:[-~—–至]\s*(\d{1,5}))?")
-_MARKDOWN_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
-_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*]\([^)]+\)")
-_STRUCTURED_IMG_MARKER_RE = re.compile(r"\[\[\s*IMG\s*:\s*\d{1,2}-\d{1,2}(?:#\d{1,2})?\s*\]\]", re.IGNORECASE)
-
-
-def _inspect_markdown_shape(markdown: str) -> Dict[str, int]:
-    text = str(markdown or "")
-    lines = text.split("\n")
-    gfm_table_blocks = 0
-    pipe_heavy_lines = 0
-    nested_ordered_list_lines = 0
-    nested_bullet_list_lines = 0
-
-    for i, line in enumerate(lines):
-        if line.count("|") >= 2:
-            pipe_heavy_lines += 1
-        header_like = bool(re.match(r"^\s*\|.+\|\s*$", line.strip()))
-        sep_like = bool(
-            _MARKDOWN_TABLE_SEPARATOR_RE.match((lines[i + 1] if i + 1 < len(lines) else "").strip())
-        )
-        if header_like and sep_like:
-            gfm_table_blocks += 1
-
-        if re.match(r"^\s{4,}\d+[.)]\s+\S+", line):
-            nested_ordered_list_lines += 1
-        if re.match(r"^\s{4,}[-*+]\s+\S+", line):
-            nested_bullet_list_lines += 1
-
-    return {
-        "gfm_table_blocks": gfm_table_blocks,
-        "pipe_heavy_lines": pipe_heavy_lines,
-        "markdown_image_count": len(_MARKDOWN_IMAGE_RE.findall(text)),
-        "structured_img_marker_count": len(_STRUCTURED_IMG_MARKER_RE.findall(text)),
-        "length": len(text.strip()),
-        "ordered_list_lines": len(re.findall(r"^\s{0,3}\d+[.)]\s+\S+", text, flags=re.MULTILINE)),
-        "bullet_list_lines": len(re.findall(r"^\s{0,3}[-*+]\s+\S+", text, flags=re.MULTILINE)),
-        "nested_ordered_list_lines": nested_ordered_list_lines,
-        "nested_bullet_list_lines": nested_bullet_list_lines,
-    }
-
-
-def _should_emit_answer_replacement(current: str, replacement: str) -> Tuple[bool, Optional[str]]:
-    current_text = str(current or "")
-    next_text = str(replacement or "")
-    if not next_text.strip():
-        return False, "empty-replacement"
-    if not current_text.strip():
-        return True, None
-
-    cur = _inspect_markdown_shape(current_text)
-    nxt = _inspect_markdown_shape(next_text)
-
-    # Preserve streamed table layout: if the stream had GFM tables, don't let
-    # post-processing collapse them away in the final replacement.
-    if cur["gfm_table_blocks"] > 0 and nxt["gfm_table_blocks"] == 0:
-        return False, "table-block-lost"
-
-    # Preserve image-like anchors that were visible during streaming.
-    cur_image_like = cur["markdown_image_count"] + cur["structured_img_marker_count"]
-    nxt_image_like = nxt["markdown_image_count"] + nxt["structured_img_marker_count"]
-    if cur_image_like > 0 and nxt_image_like == 0:
-        return False, "image-lost"
-
-    # Preserve visible ordered-list structure from streaming/finalized answer.
-    if (
-        cur["ordered_list_lines"] > 0
-        and nxt["ordered_list_lines"] < cur["ordered_list_lines"]
-        and nxt["bullet_list_lines"] > cur["bullet_list_lines"]
-    ):
-        return False, "ordered-list-lost"
-
-    # Preserve nested list depth visible during streaming. Flattening nested
-    # ordered/bullet children into top-level siblings causes the exact
-    # "序号跳变 / 级别错乱 / 平级消融" behavior seen online.
-    if (
-        cur["nested_ordered_list_lines"] > 0
-        and nxt["nested_ordered_list_lines"] < cur["nested_ordered_list_lines"]
-    ):
-        return False, "ordered-list-nesting-lost"
-    if (
-        cur["nested_bullet_list_lines"] > 0
-        and nxt["nested_bullet_list_lines"] < cur["nested_bullet_list_lines"]
-    ):
-        return False, "bullet-list-nesting-lost"
-
-    # Guard accidental truncation caused by downstream cleanup.
-    if cur["length"] > 120 and nxt["length"] < int(cur["length"] * 0.55):
-        return False, "severe-truncation"
-
-    return True, None
-
 
 
 def _parse_page_like(value: object) -> Tuple[Optional[int], Optional[int]]:
@@ -185,61 +95,6 @@ def _parse_page_like(value: object) -> Tuple[Optional[int], Optional[int]]:
         if end is not None and end > start:
             return start, end
     return start, None
-
-
-def _find_project_root() -> Path:
-    """Walk up from this file to find the directory containing .env."""
-    for parent in Path(__file__).resolve().parents:
-        if (parent / ".env").exists():
-            return parent
-    return Path(__file__).resolve().parent
-
-
-def _normalize_pdf_key(name: str) -> str:
-    base = Path(str(name or "")).name
-    stem = base[:-4] if base.lower().endswith(".pdf") else Path(base).stem
-    return _PDF_KEY_RE.sub("", stem).lower()
-
-
-def _build_pdf_index(project_root: Path) -> set[str]:
-    """
-    Build a set of normalized keys for all PDFs present on disk.
-
-    Used to ensure a strict invariant: any numbered citation source must have a local PDF.
-    """
-    roots = [
-        project_root / "data" / "orginal_input",  # intentionally misspelled
-        project_root / "data" / "original_input",
-        project_root / "data" / "documents",
-        project_root / "data" / "uploads",
-    ]
-    keys: set[str] = set()
-    for root in roots:
-        if not root.is_dir():
-            continue
-        try:
-            for pdf in root.rglob("*.pdf"):
-                if pdf.is_file():
-                    keys.add(_normalize_pdf_key(pdf.name))
-        except Exception:
-            # Skip unreadable roots; caller will simply see fewer available PDFs.
-            continue
-    return keys
-
-
-def _pdf_is_available(file_name: str) -> bool:
-    """Return True if a local PDF matching the given filename is present in data roots."""
-    global _PDF_AVAILABLE_KEYS
-    key = _normalize_pdf_key(file_name)
-    if not key:
-        return False
-
-    if _PDF_AVAILABLE_KEYS is None:
-        with _PDF_INDEX_LOCK:
-            if _PDF_AVAILABLE_KEYS is None:
-                _PDF_AVAILABLE_KEYS = _build_pdf_index(_find_project_root())
-
-    return key in (_PDF_AVAILABLE_KEYS or set())
 
 
 class RAGService:
@@ -584,17 +439,18 @@ class RAGService:
                             break
 
                 # --- Build retrieval overview as answer prefix ---
+                # Held back until just before the first answer token: reasoning should
+                # stream first so the user sees movement immediately, while the overview
+                # still leads the answer text.
                 retrieval_overview_prefix = self._build_retrieval_overview_text(
                     candidate_count=candidate_count,
                     fused_count=fused_count,
                     doc_names=doc_names,
                     sources=sources,
                 )
+                overview_emitted = False
 
                 yield ("status", {"stage": "reasoning", "message": "正在进行智能研判..."})
-                if retrieval_overview_prefix:
-                    yield ("answer", {"content": retrieval_overview_prefix})
-                    full_answer_parts.append(retrieval_overview_prefix)
 
                 doc_nums = sorted({s["doc_num"] for s in sources if s.get("doc_num")})
                 prompt = self._build_prompt(
@@ -614,6 +470,10 @@ class RAGService:
                 ):
                     if event_type == "answer":
                         answer_piece = payload.get("content", "")
+                        if retrieval_overview_prefix and not overview_emitted:
+                            overview_emitted = True
+                            yield ("answer", {"content": retrieval_overview_prefix})
+                            full_answer_parts.append(retrieval_overview_prefix)
                         full_answer_parts.append(answer_piece)
                         if not first_token_received and answer_piece:
                             first_token_received = True
@@ -625,6 +485,13 @@ class RAGService:
                                 total_elapsed,
                             )
                     yield (event_type, payload)
+
+                # Fallback: the model produced reasoning but never an answer token.
+                # Emit the overview anyway so the retrieval evidence is not lost.
+                if retrieval_overview_prefix and not overview_emitted:
+                    overview_emitted = True
+                    yield ("answer", {"content": retrieval_overview_prefix})
+                    full_answer_parts.append(retrieval_overview_prefix)
             else:
                 # No retrieval: keep existing behavior (sources first, then answer).
                 yield ("sources", {"sources": []})

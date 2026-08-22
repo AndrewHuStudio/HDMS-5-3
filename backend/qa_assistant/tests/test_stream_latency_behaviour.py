@@ -100,8 +100,8 @@ class StreamLatencyBehaviourTests(unittest.TestCase):
             qa_routes._create_retriever = original_create_retriever
             qa_routes.create_rag_service = original_create_service
 
-    def test_retrieval_overview_is_emitted_before_llm_reasoning_tokens(self):
-        service = _OverviewLatencyService()
+    @staticmethod
+    def _attach_stub_retriever(service):
         service.retriever = type(
             "Retriever",
             (),
@@ -118,8 +118,18 @@ class StreamLatencyBehaviourTests(unittest.TestCase):
                 "_compute_weights": lambda self, query: {"vector": 1.0, "graph": 0.0, "keyword": 0.0},
             },
         )()
+        return service
 
-        events = list(
+    @staticmethod
+    def _overview_index(events) -> int:
+        return next(
+            i
+            for i, (name, payload) in enumerate(events)
+            if name == "answer" and "检索综述" in payload.get("content", "")
+        )
+
+    def _run_stream(self, service):
+        return list(
             service.answer_question_stream(
                 question="请分析首层公共空间管控要求",
                 history=[],
@@ -128,14 +138,43 @@ class StreamLatencyBehaviourTests(unittest.TestCase):
             )
         )
 
-        first_thinking_index = next(i for i, (name, _) in enumerate(events) if name == "thinking")
-        overview_index = next(
-            i
-            for i, (name, payload) in enumerate(events)
-            if name == "answer" and "检索综述" in payload.get("content", "")
-        )
+    def test_retrieval_overview_is_emitted_after_llm_reasoning_tokens(self):
+        events = self._run_stream(self._attach_stub_retriever(_OverviewLatencyService()))
 
-        self.assertLess(overview_index, first_thinking_index)
+        thinking_indexes = [i for i, (name, _) in enumerate(events) if name == "thinking"]
+        overview_index = self._overview_index(events)
+        answer_indexes = [i for i, (name, _) in enumerate(events) if name == "answer"]
+
+        # Reasoning streams first so the user sees movement immediately.
+        self.assertTrue(thinking_indexes)
+        self.assertGreater(overview_index, max(thinking_indexes))
+        # The overview still leads the answer body, keeping it at the top of the text.
+        self.assertEqual(overview_index, min(answer_indexes))
+
+    def test_retrieval_overview_leads_answer_when_model_skips_reasoning(self):
+        class _NoThinkingService(_OverviewLatencyService):
+            def _stream_chat_completion(self, messages, *, max_tokens):
+                yield ("answer", {"content": "直接给出答案。"})
+
+        events = self._run_stream(self._attach_stub_retriever(_NoThinkingService()))
+
+        answer_indexes = [i for i, (name, _) in enumerate(events) if name == "answer"]
+        self.assertEqual(self._overview_index(events), min(answer_indexes))
+
+    def test_retrieval_overview_is_still_emitted_when_model_returns_no_answer(self):
+        class _ThinkingOnlyService(_OverviewLatencyService):
+            def _stream_chat_completion(self, messages, *, max_tokens):
+                yield ("thinking", {"content": "只有推理，没有答案。"})
+                yield ("thinking_done", {})
+
+        events = self._run_stream(self._attach_stub_retriever(_ThinkingOnlyService()))
+
+        thinking_indexes = [i for i, (name, _) in enumerate(events) if name == "thinking"]
+        overview_index = self._overview_index(events)
+        done_index = next(i for i, (name, _) in enumerate(events) if name == "done")
+
+        self.assertGreater(overview_index, max(thinking_indexes))
+        self.assertLess(overview_index, done_index)
 
 
 if __name__ == "__main__":
