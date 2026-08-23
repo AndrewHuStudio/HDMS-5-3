@@ -23,11 +23,48 @@ function mergeNumberMax(a?: number, b?: number): number | undefined {
   return Math.max(a, b);
 }
 
+/** True when two entries describe the same underlying chunk. */
+function isSameChunk(a: SourceInfo, b: SourceInfo): boolean {
+  const aId = a.chunk_id?.trim();
+  const bId = b.chunk_id?.trim();
+  if (aId && bId) return aId === bId;
+
+  const aIds = Array.isArray(a.chunk_ids) ? a.chunk_ids.filter(Boolean) : [];
+  const bIds = Array.isArray(b.chunk_ids) ? b.chunk_ids.filter(Boolean) : [];
+  if (aIds.length > 0 && bIds.length > 0) {
+    return aIds.some((id) => bIds.includes(id));
+  }
+
+  // No chunk identity available on either side: fall back to treating them as
+  // the same entry, matching the historical merge behavior.
+  return true;
+}
+
+/** Lowest "N-M" label for document N that no other entry has taken. */
+function nextFreeLabel(label: string, taken: Set<string>): string {
+  const sep = label.indexOf("-");
+  if (sep <= 0) return label;
+  const doc = label.slice(0, sep);
+  let index = Number.parseInt(label.slice(sep + 1), 10);
+  if (!Number.isFinite(index) || index < 1) index = 1;
+
+  let candidate = `${doc}-${index}`;
+  while (taken.has(candidate)) {
+    index += 1;
+    candidate = `${doc}-${index}`;
+  }
+  return candidate;
+}
+
 /**
  * UI-side normalization to ensure each citation_label maps to exactly one display card.
  * Backend can return duplicate citation labels (e.g. two entries with 2-2). That breaks:
  * - strict correspondence between answer markers and reference list items
  * - unique DOM ids (#source-2-2)
+ *
+ * Duplicates of the *same* chunk are merged. Duplicates that are actually
+ * distinct chunks are kept and relabelled onto a free index instead — merging
+ * them would drop a real citation and collapse its page number via min().
  */
 export function normalizeCitationSources(sources: SourceInfo[]): SourceInfo[] {
   const out: SourceInfo[] = [];
@@ -35,7 +72,7 @@ export function normalizeCitationSources(sources: SourceInfo[]): SourceInfo[] {
 
   for (let i = 0; i < sources.length; i++) {
     const src = sources[i];
-    const label = src.citation_label;
+    let label = src.citation_label;
 
     // No label: keep as-is (these won't be linked from answer markers anyway).
     if (!label) {
@@ -43,9 +80,15 @@ export function normalizeCitationSources(sources: SourceInfo[]): SourceInfo[] {
       continue;
     }
 
+    const collision = byLabel.get(label);
+    if (collision && !isSameChunk(collision, src)) {
+      // Distinct chunk wearing a taken label: give it its own card.
+      label = nextFreeLabel(label, new Set(byLabel.keys()));
+    }
+
     const existing = byLabel.get(label);
     if (!existing) {
-      const cloned: SourceInfo = { ...src };
+      const cloned: SourceInfo = { ...src, citation_label: label };
       // Normalize chunk id collections up front.
       const ids = uniq([
         ...(Array.isArray(cloned.chunk_ids) ? cloned.chunk_ids : []),

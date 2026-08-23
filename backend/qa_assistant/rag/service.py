@@ -18,6 +18,7 @@ from rag import retrieval_mode as rag_retrieval_mode
 from rag.pdf_index import pdf_is_available as _pdf_is_available
 
 from rag.postprocess import citations as pp_citations
+from rag.postprocess import citation_labels as pp_citation_labels
 from rag.postprocess import answer as pp_answer
 from rag.postprocess import sources as pp_sources
 from rag.postprocess import markdown as pp_markdown
@@ -141,12 +142,8 @@ class RAGService:
 
     @staticmethod
     def _apply_citation_remap_to_sources(sources: List[Dict[str, Any]], remap: Dict[str, str]) -> None:
-        if not remap:
-            return
-        for src in sources:
-            old_label = src.get("citation_label", "")
-            if old_label in remap:
-                src["citation_label"] = remap[old_label]
+        """Relabel sources so cited and uncited labels stay collision-free."""
+        pp_citation_labels.apply_citation_remap_to_sources(sources, remap)
 
     def _finalize_answer_and_sources(
         self,
