@@ -8,7 +8,8 @@
     "dev:external": "powershell -ExecutionPolicy Bypass -File ../scripts/start-frontend.ps1 -Mode external",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "regression": "tsx"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -94,6 +95,7 @@
     "eslint-config-next": "^16.0.10",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
+    "tsx": "4.19.2",
     "tw-animate-css": "1.3.3",
     "typescript": "^5"
   }
