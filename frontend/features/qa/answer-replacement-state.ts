@@ -44,7 +44,10 @@ export function finalizeStreamingAssistantMessage(
     captureVisibleAnswerMarkdown({
       content: finalContent,
       sources: finalSources,
-      isStreaming: Boolean(message.isStreaming),
+      // This is the done branch — the message stops streaming here (see the
+      // returned isStreaming: false).  Baking the final frame as "streaming"
+      // would permanently skip the final-only image fallbacks.
+      isStreaming: false,
       renderState: message.renderState,
       precedingQuestion,
       finalizedByServer: message.finalizedByServer,

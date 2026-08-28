@@ -5,6 +5,7 @@ type CandidateImage = {
   name: string;
   figure: string;
   caption: string;
+  hint: string;
 };
 
 const FIGURE_REF_RE = /图\s*([0-9]+(?:[.\-][0-9]+){1,3})/g;
@@ -112,9 +113,18 @@ function looksLikeOpaqueFilename(text: string): boolean {
   return false;
 }
 
+// Backend fills image_hints with a condensed semantic hint, but falls
+// back to "图片N" when it has nothing better — that names no figure.
+const PLACEHOLDER_IMAGE_HINT_RE = /^图片\d+$/u;
+
 function pickDisplayText(image: CandidateImage): string {
   const caption = normalizeCaptionText(image.caption || "");
   if (caption && !looksLikeOpaqueFilename(caption)) return caption;
+
+  const hint = String(image.hint || "").trim();
+  if (hint && !PLACEHOLDER_IMAGE_HINT_RE.test(hint) && !looksLikeOpaqueFilename(hint)) {
+    return hint;
+  }
 
   const name = String(image.name || "").trim();
   if (name && !looksLikeOpaqueFilename(name)) return name;
@@ -270,12 +280,16 @@ function buildCandidates(src: SourceInfo): CandidateImage[] {
     : (src.image_name ? [src.image_name] : []);
   const figures = Array.isArray(src.image_figures) ? src.image_figures : [];
   const captions = Array.isArray(src.image_captions) ? src.image_captions : [];
+  // Prefer the backend's condensed hint; raw descriptions are far too long to
+  // use as a caption or match target.
+  const hints = Array.isArray(src.image_hints) ? src.image_hints : [];
 
   return urls.map((url, idx) => {
     const figure = String(figures[idx] || "").trim();
     const caption = String(captions[idx] || "").trim();
+    const hint = String(hints[idx] || "").trim();
     const name = String(names[idx] || deriveImageNameFromUrl(url, idx)).trim();
-    return { url, name, figure, caption };
+    return { url, name, figure, caption, hint };
   });
 }
 
@@ -321,6 +335,8 @@ function pickImageByKeyword(lineOrKeyword: string, candidates: CandidateImage[])
   if (softened) {
     const byCaption = candidates.find((c) => (c.caption || "").replace(/\s+/g, "").includes(softened));
     if (byCaption) return byCaption;
+    const byHint = candidates.find((c) => (c.hint || "").replace(/\s+/g, "").includes(softened));
+    if (byHint) return byHint;
     const byName = candidates.find((c) => (c.name || "").replace(/\s+/g, "").includes(softened));
     if (byName) return byName;
   }
@@ -335,7 +351,9 @@ function pickImageByKeyword(lineOrKeyword: string, candidates: CandidateImage[])
 
   if (tokens.length > 0) {
     for (const t of tokens) {
-      const matched = candidates.find((c) => (c.caption || "").includes(t) || (c.name || "").includes(t));
+      const matched = candidates.find(
+        (c) => (c.caption || "").includes(t) || (c.hint || "").includes(t) || (c.name || "").includes(t)
+      );
       if (matched) return matched;
     }
   }
@@ -847,6 +865,8 @@ function scoreImageByKeywords(img: CandidateImage, keywords: string[]): number {
 
   const hay = (
     normalizeCaptionText(img.caption || "") +
+    " " +
+    String(img.hint || "") +
     " " +
     String(img.figure || "") +
     " " +

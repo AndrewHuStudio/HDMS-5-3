@@ -187,6 +187,8 @@ class RAGService:
             search_image_chunks_by_text=self._search_image_chunks_by_text,
             extract_image_refs=pp_images.extract_image_refs,
             extract_image_figure_meta=pp_images.extract_image_figure_meta,
+            extract_image_descriptions=rag_retrieval.extract_image_descriptions,
+            build_image_semantic_hint=rag_retrieval.build_image_semantic_hint,
             rewrite_image_urls=pp_images.rewrite_image_urls,
             extract_first_markdown_table=pp_markdown.extract_first_markdown_table,
             pdf_is_available=_pdf_is_available,

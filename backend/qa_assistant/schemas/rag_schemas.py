@@ -56,6 +56,8 @@ class SourceInfo(BaseModel):
     image_names: Optional[List[str]] = Field(None, description="All image file names in this chunk")
     image_figures: Optional[List[str]] = Field(None, description="Figure labels aligned with image_urls (e.g. '图3.0.1')")
     image_captions: Optional[List[str]] = Field(None, description="Best-effort captions aligned with image_urls")
+    image_descriptions: Optional[List[str]] = Field(None, description="Raw vision-model image descriptions aligned with image_urls")
+    image_hints: Optional[List[str]] = Field(None, description="Condensed one-line semantic hints aligned with image_urls")
 
 
 class RAGChatResponse(BaseModel):

@@ -27,6 +27,8 @@ export interface SourceInfo {
   image_names?: string[];
   image_figures?: string[];
   image_captions?: string[];
+  image_descriptions?: string[];
+  image_hints?: string[];
 }
 
 export interface RetrievalStats {

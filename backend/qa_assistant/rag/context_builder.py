@@ -39,6 +39,8 @@ def build_context_and_sources(
     search_image_chunks_by_text: Callable[[str, int], List[Dict[str, Any]]],
     extract_image_refs: Callable[[str], List[str]],
     extract_image_figure_meta: Callable[[str], tuple[list[str], list[str]]],
+    extract_image_descriptions: Callable[[str], List[str]],
+    build_image_semantic_hint: Callable[..., str],
     rewrite_image_urls: Callable[[str, str], str],
     extract_first_markdown_table: Callable[[str], Optional[str]],
     pdf_is_available: Callable[[str], bool],
@@ -278,10 +280,20 @@ def build_context_and_sources(
         image_url = image_urls[0] if image_urls else None
         image_name = image_names[0] if image_names else None
 
+        image_descriptions: List[str] = []
         if image_refs:
             figs, caps = extract_image_figure_meta(image_ref_text)
             image_figures = figs[: len(image_refs)]
             image_captions = caps[: len(image_refs)]
+
+            # Vision-model descriptions live only on the persisted chunk's
+            # enhanced_text.  Ingestion de-duplicates them by description text,
+            # so a count mismatch means we cannot tell which image each one
+            # belongs to — drop them all rather than mislabel a figure.
+            if isinstance(chunk_doc, dict):
+                parsed = extract_image_descriptions(chunk_doc.get("enhanced_text") or "")
+                if len(parsed) == len(image_refs):
+                    image_descriptions = parsed
 
         rewritten_text = rewrite_image_urls(text, doc_id) if doc_id else text
         table_markdown = extract_first_markdown_table(rewritten_text)
@@ -320,6 +332,7 @@ def build_context_and_sources(
                 "image_names": image_names,
                 "image_figures": image_figures,
                 "image_captions": image_captions,
+                "image_descriptions": image_descriptions,
             }
         )
 
@@ -337,24 +350,37 @@ def build_context_and_sources(
 
             section_label = f" - {chunk['section']}" if chunk.get("section") else ""
 
+            # One condensed semantic hint per image, shared by the prompt's
+            # image catalog and the frontend's figure captions.  Raw vision
+            # descriptions run ~800 chars, so only the hint goes on the wire.
+            image_hints: List[str] = []
+            figures = chunk.get("image_figures") or []
+            captions = chunk.get("image_captions") or []
+            names = chunk.get("image_names") or []
+            descriptions = chunk.get("image_descriptions") or []
+            for idx in range(len(chunk.get("image_urls") or [])):
+                fig = str(figures[idx]).strip() if idx < len(figures) else ""
+                cap = str(captions[idx]).strip() if idx < len(captions) else ""
+                name = str(names[idx]).strip() if idx < len(names) else ""
+                description = str(descriptions[idx]) if idx < len(descriptions) else ""
+                image_hints.append(
+                    build_image_semantic_hint(
+                        description=description,
+                        figure=fig,
+                        caption=cap,
+                        name=name,
+                        ordinal=idx + 1,
+                        caption_is_usable=not _looks_like_opaque_image_name(cap),
+                        name_is_usable=not _looks_like_opaque_image_name(name),
+                    )
+                )
+
             image_hint = ""
             if chunk.get("image_urls"):
-                hint_lines: list[str] = []
-                figures = chunk.get("image_figures") or []
-                captions = chunk.get("image_captions") or []
-                names = chunk.get("image_names") or []
-                for idx in range(min(len(chunk["image_urls"]), 5)):
-                    fig = str(figures[idx]).strip() if idx < len(figures) else ""
-                    cap = str(captions[idx]).strip() if idx < len(captions) else ""
-                    name = str(names[idx]).strip() if idx < len(names) else ""
-                    safe_cap = cap if cap and not _looks_like_opaque_image_name(cap) else ""
-                    safe_name = name if name and not _looks_like_opaque_image_name(name) else ""
-                    if fig and safe_cap and fig not in safe_cap:
-                        desc = f"{fig} {safe_cap}"
-                    else:
-                        desc = safe_cap or fig or safe_name or f"图片{idx + 1}"
-                    anchor = f"[[IMG:{label}#{idx + 1}]]"
-                    hint_lines.append(f"  - {anchor} {desc}")
+                hint_lines = [
+                    f"  - [[IMG:{label}#{idx + 1}]] {hint}"
+                    for idx, hint in enumerate(image_hints[:5])
+                ]
                 img_count = len(hint_lines)
                 image_hint = (
                     f"\n[本片段包含 {img_count} 张图片；相关段落请优先使用如下 IMG 标记引用，不要输出图片文件名]\n"
@@ -393,6 +419,8 @@ def build_context_and_sources(
                     "image_names": chunk["image_names"],
                     "image_figures": chunk.get("image_figures") or [],
                     "image_captions": chunk.get("image_captions") or [],
+                    "image_descriptions": chunk.get("image_descriptions") or [],
+                    "image_hints": image_hints,
                 }
             )
 
