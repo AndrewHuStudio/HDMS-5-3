@@ -23,17 +23,28 @@ export async function GET(
   const upstreamUrl = `${qaBaseUrl()}/rag/documents/${encodeURIComponent(docId)}/pdf`;
   const range = req.headers.get("range");
 
-  const upstream = await fetch(upstreamUrl, {
-    headers: range ? { range } : undefined,
-    cache: "no-store",
-  });
+  try {
+    const upstream = await fetch(upstreamUrl, {
+      headers: range ? { range } : undefined,
+      cache: "no-store",
+    });
 
-  // Pass through PDF bytes and important headers (including 206/Content-Range for PDF.js range loading).
-  const headers = new Headers(upstream.headers);
-  headers.set("Cache-Control", "no-store");
+    // Pass through PDF bytes and important headers (including 206/Content-Range for PDF.js range loading).
+    const headers = new Headers(upstream.headers);
+    headers.set("Cache-Control", "no-store");
 
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers,
-  });
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers,
+    });
+  } catch (error) {
+    console.error("PDF upstream unreachable", { upstreamUrl, error });
+    return new Response(
+      JSON.stringify({ error: "upstream unreachable", upstream: upstreamUrl }),
+      {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
 }
