@@ -42,11 +42,23 @@ _pdf_cache: dict[str, Optional[Path]] = {}
 
 
 def _find_project_root() -> Path:
-    """Walk up from this file to find the directory containing .env."""
+    """
+    Locate the directory that holds `data/`.
+
+    Prefer the directory containing `.env` (local dev). Production containers
+    inject config as environment variables and ship no `.env`, so fall back to
+    this file's position in the tree (routes → qa_assistant → backend → root),
+    matching the `parents[N]` convention in review_system/data_process configs.
+    Returning the wrong root leaves `_iter_pdf_roots` empty and 404s every PDF.
+    """
     for parent in Path(__file__).resolve().parents:
         if (parent / ".env").exists():
             return parent
-    return Path(__file__).resolve().parent
+
+    parents = Path(__file__).resolve().parents
+    if len(parents) > 3:
+        return parents[3]
+    return parents[0]
 
 
 def _ocr_output_roots(project_root: Path) -> List[Path]:
