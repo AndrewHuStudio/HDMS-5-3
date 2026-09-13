@@ -3,7 +3,7 @@ const MIIT_FILING_URL = "https://beian.miit.gov.cn/";
 
 export function SiteFilingLink() {
   return (
-    <footer className="pointer-events-none fixed inset-x-0 bottom-1 z-[100] flex justify-center px-2">
+    <footer className="pointer-events-none fixed inset-x-0 bottom-1 z-10 flex justify-center px-2">
       <a
         href={MIIT_FILING_URL}
         target="_blank"

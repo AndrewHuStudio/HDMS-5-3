@@ -18,6 +18,8 @@ async function main() {
   assert.match(markup, /href="https:\/\/beian\.miit\.gov\.cn\/"/);
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
+  assert.match(markup, /\bz-10\b/, "filing link should remain below dialogs and overlays");
+  assert.doesNotMatch(markup, /\bz-\[100\]\b/);
 
   const layoutSource = readFileSync(layoutPath, "utf8");
   assert.match(layoutSource, /import \{ SiteFilingLink \} from "@\/components\/site-filing-link"/);
