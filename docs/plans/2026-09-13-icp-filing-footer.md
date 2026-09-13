@@ -4,7 +4,7 @@
 
 **Goal:** Display the confirmed service filing number on every HDMS page and link it to the MIIT filing system.
 
-**Architecture:** Add a small server component for the filing link and render it once from the Next.js root layout. Use fixed bottom-center positioning because the application shell owns a full-height, overflow-hidden viewport.
+**Architecture:** Add a small server component for the filing link and render it once from the Next.js root layout. Use fixed bottom-left positioning because the application shell owns a full-height, overflow-hidden viewport.
 
 **Tech Stack:** Next.js 16, React 19, TypeScript, Tailwind CSS, Node/tsx regression scripts.
 
@@ -17,7 +17,7 @@
 
 **Step 1: Write the failing test**
 
-Add assertions that the component exists, renders `赣ICP备2026022319号-1`, points to `https://beian.miit.gov.cn/`, uses safe new-window attributes, and is rendered by the root layout.
+Add assertions that the component exists, renders `赣ICP备2026022319号-1`, points to `https://beian.miit.gov.cn/`, uses safe new-window attributes, stays at the bottom-left edge, and is rendered by the root layout.
 
 **Step 2: Run test to verify it fails**
 

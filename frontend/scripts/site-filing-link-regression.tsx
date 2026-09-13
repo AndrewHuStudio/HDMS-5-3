@@ -20,6 +20,8 @@ async function main() {
   assert.match(markup, /rel="noopener noreferrer"/);
   assert.match(markup, /\bz-10\b/, "filing link should remain below dialogs and overlays");
   assert.doesNotMatch(markup, /\bz-\[100\]\b/);
+  assert.match(markup, /\bleft-2\b/, "filing link should sit at the bottom-left edge");
+  assert.doesNotMatch(markup, /\binset-x-0\b|\bjustify-center\b/);
 
   const layoutSource = readFileSync(layoutPath, "utf8");
   assert.match(layoutSource, /import \{ SiteFilingLink \} from "@\/components\/site-filing-link"/);
