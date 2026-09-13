@@ -7,6 +7,7 @@ import "@react-pdf-viewer/core/lib/styles/index.css";
 import "@react-pdf-viewer/default-layout/lib/styles/index.css";
 import "@react-pdf-viewer/search/lib/styles/index.css";
 import { ThemeProvider } from "@/components/theme-provider"
+import { SiteFilingLink } from "@/components/site-filing-link"
 
 export const metadata: Metadata = {
   title: '数字化管控软件',
@@ -33,6 +34,7 @@ export default function RootLayout({
       >
         <ThemeProvider>
           {children}
+          <SiteFilingLink />
         </ThemeProvider>
         <Analytics />
       </body>
