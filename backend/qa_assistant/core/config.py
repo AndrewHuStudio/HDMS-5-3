@@ -119,7 +119,7 @@ DB_INIT_ON_STARTUP = _parse_bool(os.getenv("DB_INIT_ON_STARTUP", "1"), True)
 # --- LLM Configuration ---
 HDMS_BASE_URL = os.getenv("HDMS_BASE_URL", "https://api.apiyi.com")
 HDMS_API_KEY = os.getenv("HDMS_API_KEY", "")
-HDMS_QA_MODEL = os.getenv("HDMS_QA_MODEL", "deepseek-r1")
+HDMS_QA_MODEL = os.getenv("HDMS_QA_MODEL", "deepseek-v4.1-flash")
 
 # --- CORS Configuration ---
 DEFAULT_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,http://172.20.16.1:3000"

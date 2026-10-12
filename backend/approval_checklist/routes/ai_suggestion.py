@@ -16,7 +16,10 @@ router = APIRouter()
 
 HDMS_BASE_URL = os.getenv("HDMS_BASE_URL", "https://api.apiyi.com/v1")
 HDMS_API_KEY = os.getenv("HDMS_API_KEY", "")
-CHECK_LIST_MODEL = os.getenv("HDMS_CHECK_LIST_MODEL", os.getenv("HDMS_QA_MODEL", "deepseek-r1"))
+CHECK_LIST_MODEL = os.getenv(
+    "HDMS_CHECK_LIST_MODEL",
+    os.getenv("HDMS_QA_MODEL", "deepseek-v4.1-flash"),
+)
 
 
 def _read_parallel_limit() -> int:

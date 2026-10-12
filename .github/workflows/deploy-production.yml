@@ -1,0 +1,130 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+      PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT }}
+      PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+      PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+      PRODUCTION_KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            PRODUCTION_HOST \
+            PRODUCTION_PORT \
+            PRODUCTION_USER \
+            PRODUCTION_SSH_KEY \
+            PRODUCTION_KNOWN_HOSTS
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name is not configured"
+              exit 1
+            fi
+          done
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$PRODUCTION_SSH_KEY" > "$HOME/.ssh/production_key"
+          chmod 600 "$HOME/.ssh/production_key"
+          printf '%s\n' "$PRODUCTION_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy pushed main revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/production_key" \
+            -p "$PRODUCTION_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            bash -s -- "$GITHUB_SHA" <<'REMOTE'
+          set -euo pipefail
+
+          expected_sha="$1"
+          cd /opt/hdms
+
+          if [ "$(git branch --show-current)" != "main" ]; then
+            echo "Production checkout is not on main; refusing deployment." >&2
+            exit 1
+          fi
+
+          tracked_changes="$(git status --porcelain --untracked-files=no)"
+          if [ -n "$tracked_changes" ]; then
+            echo "Production checkout has tracked modifications; refusing deployment." >&2
+            printf '%s\n' "$tracked_changes" >&2
+            exit 1
+          fi
+
+          git fetch origin main
+          remote_sha="$(git rev-parse origin/main)"
+          if [ "$remote_sha" != "$expected_sha" ]; then
+            echo "origin/main does not match the pushed revision; refusing deployment." >&2
+            exit 1
+          fi
+
+          git merge --ff-only origin/main
+          deployed_sha="$(git rev-parse HEAD)"
+          if [ "$deployed_sha" != "$expected_sha" ]; then
+            echo "Production checkout did not reach the pushed revision." >&2
+            exit 1
+          fi
+
+          compose() {
+            docker compose --env-file .env.production -f docker-compose.production.yml "$@"
+          }
+
+          compose up -d --build --remove-orphans
+
+          deadline=$((SECONDS + 180))
+          while true; do
+            all_ready=1
+            for service in $(compose config --services); do
+              container_id="$(compose ps -q "$service")"
+              if [ -z "$container_id" ]; then
+                all_ready=0
+                continue
+              fi
+
+              state="$(docker inspect --format '{{.State.Status}}' "$container_id")"
+              health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id")"
+              if [ "$state" != "running" ] || [ "$health" = "starting" ] || [ "$health" = "unhealthy" ]; then
+                all_ready=0
+              fi
+            done
+
+            if [ "$all_ready" -eq 1 ]; then
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              compose ps
+              echo "Production services did not become ready before timeout." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          compose ps
+          REMOTE

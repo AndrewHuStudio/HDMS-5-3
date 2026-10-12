@@ -41,7 +41,6 @@ Do not alter production code before the expected failures have been observed.
 - Modify: `backend/qa_assistant/core/config.py:122`
 - Modify: `backend/approval_checklist/routes/ai_suggestion.py:19`
 - Modify: `.env.production.example:25-27`
-- Modify: `docs/使用手册/用户使用说明.md:627`
 
 **Step 1: Change both defaults**
 
@@ -50,8 +49,7 @@ Replace only the legacy default literals with
 
 **Step 2: Update non-secret configuration documentation**
 
-Set both model entries in `.env.production.example` and the user manual to the
-selected model.
+Set both model entries in `.env.production.example` to the selected model.
 
 **Step 3: Verify GREEN**
 
