@@ -41,7 +41,7 @@ export function stripInlineCitationLabels(text: string): string {
         const m = line.slice(i).match(/^\[\d{1,2}-\d{1,2}\]/);
         if (m) {
           // Preserve markdown link anchors [N-M](#source-N-M) — these are
-          // used by injectSourceImages and rendered as clickable citation pills.
+          // used by structured evidence binding and rendered as clickable citation pills.
           const afterMatch = line.slice(i + m[0].length);
           if (afterMatch.startsWith("(#source-")) {
             out += ch;

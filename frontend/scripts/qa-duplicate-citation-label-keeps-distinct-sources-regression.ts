@@ -43,14 +43,29 @@ function main(): void {
 
   // Genuine duplicates of the same chunk should still collapse into one card.
   const sameChunkTwice = [
-    buildSource({ citation_label: "2-1", chunk_id: "chunk-x", page: 4 }),
-    buildSource({ citation_label: "2-1", chunk_id: "chunk-x", page: 9 }),
+    buildSource({
+      citation_label: "2-1",
+      chunk_id: "chunk-x",
+      page: 4,
+      images: [{ id: "img-a", url: "/a.png", caption: "图片A", source_label: "2-1" }],
+    }),
+    buildSource({
+      citation_label: "2-1",
+      chunk_id: "chunk-x",
+      page: 9,
+      images: [{ id: "img-b", url: "/b.png", caption: "图片B", source_label: "2-1" }],
+    }),
   ];
 
   const merged = normalizeCitationSources(sameChunkTwice);
   assert.equal(merged.length, 1, "expected same-chunk duplicates to merge");
   assert.equal(merged[0].page, 4, "expected merged card to keep the lowest page");
   assert.equal(merged[0].page_end, 9, "expected merged card to widen the page range");
+  assert.deepEqual(
+    merged[0].images?.map((image) => image.id),
+    ["img-a", "img-b"],
+    "expected same-chunk structured image evidence to merge by stable ID",
+  );
 }
 
 main();

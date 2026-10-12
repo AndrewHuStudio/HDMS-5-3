@@ -5,7 +5,7 @@
  * and BEFORE stripInlineCitationLabels (which removes bare markers).
  *
  * The resulting anchors survive stripInlineCitationLabels and are used by
- * injectSourceImages for citation-based image placement, and by the
+ * structured answer document for citation-based evidence placement, and by the
  * ReactMarkdown `a` component handler for rendering clickable citation pills.
  */
 export function convertCitationsToAnchors(

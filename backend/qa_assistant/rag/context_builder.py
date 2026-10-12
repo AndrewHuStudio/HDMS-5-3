@@ -3,6 +3,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from core import config as app_config
+from rag.image_evidence import build_image_evidence_records
+from rag.postprocess.markdown import strip_markdown_images
 
 
 def _truncate_text(value: str, limit: int) -> str:
@@ -346,7 +348,7 @@ def build_context_and_sources(
         for chunk_seq, chunk in enumerate(chunks, start=1):
             label = f"{doc_num}-{chunk_seq}"
 
-            display_text = _truncate_text(chunk["text"], chunk_limit)
+            display_text = _truncate_text(strip_markdown_images(chunk["text"]), chunk_limit)
 
             section_label = f" - {chunk['section']}" if chunk.get("section") else ""
 
@@ -375,23 +377,19 @@ def build_context_and_sources(
                     )
                 )
 
-            image_hint = ""
-            if chunk.get("image_urls"):
-                hint_lines = [
-                    f"  - [[IMG:{label}#{idx + 1}]] {hint}"
-                    for idx, hint in enumerate(image_hints[:5])
-                ]
-                img_count = len(hint_lines)
-                image_hint = (
-                    f"\n[本片段包含 {img_count} 张图片；相关段落请优先使用如下 IMG 标记引用，不要输出图片文件名]\n"
-                    + "图片目录（IMG 标记 -> 图片语义）：\n"
-                    + "\n".join(hint_lines)
-                    + "\n"
-                )
+            image_records = build_image_evidence_records(
+                urls=chunk.get("image_urls") or [],
+                hints=image_hints,
+                figures=figures,
+                captions=captions,
+                source_label=label,
+                doc_id=group.get("doc_id"),
+                page=chunk.get("page"),
+            )
 
-            doc_blocks.append(f"[{label}] 来源：{group['file_name']}{section_label}{image_hint}\n{display_text}")
+            doc_blocks.append(f"[{label}] 来源：{group['file_name']}{section_label}\n{display_text}")
 
-            quote_text = _truncate_text(chunk["text"], quote_limit)
+            quote_text = _truncate_text(strip_markdown_images(chunk["text"]), quote_limit)
 
             sources.append(
                 {
@@ -421,6 +419,7 @@ def build_context_and_sources(
                     "image_captions": chunk.get("image_captions") or [],
                     "image_descriptions": chunk.get("image_descriptions") or [],
                     "image_hints": image_hints,
+                    "images": image_records,
                 }
             )
 

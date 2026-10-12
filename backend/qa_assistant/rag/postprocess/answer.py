@@ -4,7 +4,6 @@ from typing import Dict, Optional, Tuple
 from . import citations as pp_citations
 from . import markdown as pp_markdown
 from . import math as pp_math
-from . import images as pp_images
 
 
 # Match "## 检索综述" with optional trailing colon variants.
@@ -92,7 +91,6 @@ def postprocess_answer(text: str, valid_labels: Optional[set] = None) -> Tuple[s
 
     Kept (data-layer, frontend cannot do these):
       - _SECTION_PAREN_RE / _CITE_WITH_SECTION_RE cleanup (data noise)
-      - normalize_image_reference_markers (structured [[IMG:N-M]] protocol)
       - unescape_dollar_delimiters        (LLM output \\$ fix)
       - normalize_citations               (chunk_id remap)
     """
@@ -100,12 +98,8 @@ def postprocess_answer(text: str, valid_labels: Optional[set] = None) -> Tuple[s
     text = pp_markdown.sanitize_answer_data_only(text)
     # Idempotent guard: keep only the first "## 检索综述" heading.
     text = dedupe_retrieval_overview_heading(text)
-    # Structured image markers (frontend depends on this protocol).
-    text = pp_images.normalize_image_reference_markers(text, valid_labels)
     # Fix escaped dollar delimiters from LLM output.
     text = pp_math.unescape_dollar_delimiters(text)
     # Citation dedup and index remap (needs chunk_id mapping).
     text, remap = pp_citations.normalize_citations(text, valid_labels)
-    # Keep structured image markers aligned with remapped citation labels.
-    text = pp_images.remap_structured_image_markers(text, remap)
     return text, remap

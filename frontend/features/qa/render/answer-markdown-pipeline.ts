@@ -11,7 +11,6 @@ import { normalizeAnswerTables } from "@/lib/normalize-answer-tables";
 import { normalizeListItemBlocks } from "@/lib/normalize-list-item-blocks";
 import { pruneEmptyAnswerTableColumns } from "@/lib/prune-empty-answer-table-columns";
 import { collapseFigureMentions } from "@/lib/stream-source-utils";
-import { injectAnswerImagesByPhase } from "@/features/qa/render/image-injection-pipeline";
 import { normalizeAnswerMarkdownByPhase } from "@/features/qa/render/markdown-normalization-pipeline";
 
 export interface BuildAnswerMarkdownArgs {
@@ -60,7 +59,6 @@ export function buildAnswerMarkdown(args: BuildAnswerMarkdownArgs): string {
     sources,
     isStreaming,
     renderPhase,
-    precedingQuestion,
   } = args;
   const phase: AnswerRenderPhase = renderPhase || (isStreaming ? "streaming" : "final");
   const streamLike = phase === "streaming";
@@ -90,16 +88,9 @@ export function buildAnswerMarkdown(args: BuildAnswerMarkdownArgs): string {
     ? stripTrailingIncompleteTable(withoutInlineCitations)
     : withoutInlineCitations;
 
-  // Step 6: Image injection (unified — no appendix, no placeholder replacement)
-  const withImages = injectAnswerImagesByPhase({
-    markdown: safeContent,
-    sources,
-    precedingQuestion,
-    renderPhase: phase,
-  });
-
-  // Step 7: Table injection from sources
-  const withTablesAndImages = injectSourceTables(withImages, sources);
+  // Step 6: Table injection from sources. Images already arrive in the
+  // structured answer document and need no Markdown/source heuristics here.
+  const withTablesAndImages = injectSourceTables(safeContent, sources);
 
   // Step 8: Prune empty low-value answer columns (e.g. blank "依据")
   const withoutEmptyBasisColumns = pruneEmptyAnswerTableColumns(withTablesAndImages);

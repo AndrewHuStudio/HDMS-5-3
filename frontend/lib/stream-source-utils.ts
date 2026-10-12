@@ -14,17 +14,6 @@ const FIGURE_MENTION_RE = /[（(]?\s*(?:见)?图\s*([0-9]{1,2}(?:[.\-][0-9]{1,2}
 const FIGURE_CAPTION_LINE_RE = /^\s*(?:FIGCAPTION\s+)?图\s*\d+(?:[.\-]\d+){0,3}\s*[：:.]/u;
 const FIGURE_LEGEND_LINE_RE = /^\s*[（(]?\s*(?:图示|图注|图例)\s*[：:]/u;
 
-function hasImagePayload(source: SourceInfo): boolean {
-  return Boolean(
-    source.image_url ||
-      source.image_name ||
-      (source.image_urls && source.image_urls.length > 0) ||
-      (source.image_names && source.image_names.length > 0) ||
-      (source.image_figures && source.image_figures.length > 0) ||
-      (source.image_captions && source.image_captions.length > 0)
-  );
-}
-
 function mergeImageFields(primary: SourceInfo, fallback: SourceInfo): SourceInfo {
   return {
     ...primary,
@@ -34,6 +23,7 @@ function mergeImageFields(primary: SourceInfo, fallback: SourceInfo): SourceInfo
     image_names: (primary.image_names && primary.image_names.length > 0) ? primary.image_names : fallback.image_names,
     image_figures: (primary.image_figures && primary.image_figures.length > 0) ? primary.image_figures : fallback.image_figures,
     image_captions: (primary.image_captions && primary.image_captions.length > 0) ? primary.image_captions : fallback.image_captions,
+    images: (primary.images && primary.images.length > 0) ? primary.images : fallback.images,
   };
 }
 

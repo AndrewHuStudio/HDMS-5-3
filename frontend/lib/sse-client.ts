@@ -10,11 +10,12 @@
  * - graph: 知识图谱数据
  * - thinking: 思考过程 token
  * - answer: 答案 token
+ * - answer_document: 服务端校验后的段落与图片绑定
  * - status: 状态更新
  * - done: 完成
  * - error: 错误
  */
-import type { SourceInfo, RetrievalStats, SubgraphData } from "@/features/qa/types";
+import type { AnswerDocument, SourceInfo, RetrievalStats, SubgraphData } from "@/features/qa/types";
 
 export interface SSECallbacks {
   onSources: (sources: SourceInfo[]) => void;
@@ -23,6 +24,7 @@ export interface SSECallbacks {
   onThinking: (token: string) => void;
   onThinkingDone?: () => void;
   onAnswer: (token: string) => void;
+  onAnswerDocument?: (document: AnswerDocument, sources?: SourceInfo[]) => void;
   onAnswerReplaced?: (fullAnswer: string, sources?: SourceInfo[]) => void;
   onStatus: (stage: string, message: string) => void;
   onDone: (meta: { model?: string; context_used?: boolean; cached?: boolean }) => void;
@@ -65,7 +67,6 @@ export async function streamChat(
   const maxRetries = 1;
 
   const log = (phase: SSEPhase, msg: string, extra?: Record<string, unknown>) => {
-    // eslint-disable-next-line no-console
     console.debug(`[sse][${requestId}][${phase}]`, msg, extra ?? "");
   };
 
@@ -155,7 +156,12 @@ async function _nonStreamingFallback(
   if (data.sources) {
     callbacks.onSources(data.sources);
   }
-  if (data.answer) {
+  if (data.answer_document?.sections) {
+    callbacks.onAnswerDocument?.(
+      { sections: data.answer_document.sections },
+      data.sources,
+    );
+  } else if (data.answer) {
     callbacks.onAnswer(data.answer);
   }
   callbacks.onDone({ model: data.model, context_used: data.context_used });
@@ -248,6 +254,13 @@ async function _streamChatOnce(
         case "answer_replaced":
           flushTokenBuffers();
           callbacks.onAnswerReplaced?.(data.content || "", data.sources);
+          break;
+        case "answer_document":
+          flushTokenBuffers();
+          callbacks.onAnswerDocument?.(
+            { sections: Array.isArray(data.sections) ? data.sections : [] },
+            data.sources,
+          );
           break;
         case "done":
           flushTokenBuffers();

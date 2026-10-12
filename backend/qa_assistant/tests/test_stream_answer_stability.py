@@ -38,7 +38,7 @@ class _StableStreamingRAGService(RAGService):
 
 
 class StreamAnswerStabilityTests(unittest.TestCase):
-    def test_stream_answer_keeps_incremental_tokens_and_emits_final_replacement(self):
+    def test_stream_answer_keeps_incremental_tokens_and_emits_final_document(self):
         service = _StableStreamingRAGService()
 
         events = list(
@@ -56,18 +56,23 @@ class StreamAnswerStabilityTests(unittest.TestCase):
             for name, payload in events
             if name == "answer"
         )
-        replacement_payloads = [
+        document_payloads = [
             payload
             for name, payload in events
-            if name == "answer_replaced"
+            if name == "answer_document"
         ]
 
         self.assertIn("thinking", event_names)
         self.assertIn("thinking_done", event_names)
         self.assertIn("done", event_names)
         self.assertEqual(service.raw_answer, streamed_answer)
-        self.assertEqual(1, len(replacement_payloads))
-        self.assertEqual(service.final_answer, replacement_payloads[0].get("content"))
+        self.assertNotIn("answer_replaced", event_names)
+        self.assertEqual(1, len(document_payloads))
+        final_sections = document_payloads[0].get("sections") or []
+        self.assertEqual(
+            service.final_answer,
+            "\n\n".join(section["markdown"] for section in final_sections),
+        )
 
 
 if __name__ == "__main__":

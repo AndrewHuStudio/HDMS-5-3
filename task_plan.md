@@ -38,33 +38,34 @@ Phase 1 — root-cause investigation
 Replace free-form `[[IMG:...]]` image placement with a structured evidence-and-section protocol so each streamed answer section carries zero or more verified images retrieved with its text.
 
 ## Current Phase
-Phase 1 — design and baseline
+Complete — verified and ready for local handoff
 
 ## Phases
 
 ### Phase 1: Design, isolate, and establish baseline
 - [x] Create an ignored Git worktree from `main`.
-- [ ] Record the approved architecture and implementation plan.
-- [ ] Run focused backend/frontend image-streaming baselines.
-- **Status:** in_progress
+- [x] Record the approved architecture and implementation plan.
+- [x] Run focused backend/frontend image-streaming baselines.
+- **Status:** complete
 
 ### Phase 2: Backend protocol via TDD
-- [ ] Add failing tests for structured evidence image records and section events.
-- [ ] Implement stable image IDs, evidence bundles, and validated section/image bindings.
-- [ ] Remove new-answer `[[IMG:...]]` prompt/postprocessing behavior.
-- **Status:** pending
+- [x] Add failing tests for structured evidence image records and image recall.
+- [x] Add failing tests for answer sections and stream events.
+- [x] Implement stable image IDs, evidence bundles, and validated section/image bindings.
+- [x] Remove new-answer `[[IMG:...]]` prompt/postprocessing behavior.
+- **Status:** complete
 
 ### Phase 3: Frontend protocol via TDD
-- [ ] Add failing tests for structured section/image SSE handling and rendering.
-- [ ] Render images from section bindings without regex injection.
-- [ ] Remove legacy anchor injection modules and regressions.
-- **Status:** pending
+- [x] Add failing tests for structured section/image SSE handling and rendering.
+- [x] Render images from section bindings without regex injection.
+- [x] Remove legacy anchor injection modules and regressions.
+- **Status:** complete
 
 ### Phase 4: Verification and handoff
-- [ ] Run focused and broader regression suites.
-- [ ] Verify every touched source module is at most 600 lines.
-- [ ] Review the complete diff and document deployment status.
-- **Status:** pending
+- [x] Run focused and broader regression suites.
+- [x] Verify every touched source module is at most 600 lines.
+- [x] Review the complete diff and document deployment status.
+- **Status:** complete
 
 ## Constraints
 - Historical conversations may be discarded; no legacy `[[IMG:...]]` compatibility is required.
@@ -81,5 +82,7 @@ Phase 1 — design and baseline
 | Assumed `tsx` was installed in the repository-root `node_modules`, but it is under `frontend/node_modules` | 2 | Use `E:/MyPrograms/HDMS/frontend/node_modules/.bin/tsx.cmd`; no project file was changed. |
 | Borrowing the main checkout's `tsx` ran one dependency-free script but Node could not resolve React from the isolated worktree | 3 | Complete the worktree setup with `npm install` inside its `frontend/` directory before rerunning the baseline. |
 | PowerShell passed Unix-style wildcard source paths literally to `rg` while listing retriever methods | 1 | Use explicit file paths or `--glob`; the needed method locations were still returned from `retriever.py`. |
+| Full frontend QA regressions found `qa-final-structure-regression.tsx` failing its mixed-list assertion | 1 | Reproduced the identical failure on untouched `main`; record it as a pre-existing baseline failure and keep the image-protocol regressions independently green. |
+| First legacy-protocol search placed `rg --glob` options after explicit paths, so PowerShell treated them as paths | 1 | Rerun with all `--glob` options before search roots; do not treat the errored output as evidence. |
 
 ---

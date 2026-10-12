@@ -2,6 +2,28 @@
 
 export type ChatRole = "user" | "assistant";
 
+export interface ImageEvidence {
+  id: string;
+  url: string;
+  caption: string;
+  figure?: string;
+  hint?: string;
+  source_label: string;
+  doc_id?: string;
+  page?: number;
+}
+
+export interface AnswerSection {
+  id: string;
+  markdown: string;
+  source_labels: string[];
+  images: ImageEvidence[];
+}
+
+export interface AnswerDocument {
+  sections: AnswerSection[];
+}
+
 export interface SourceInfo {
   type: string;
   name: string;
@@ -29,6 +51,7 @@ export interface SourceInfo {
   image_captions?: string[];
   image_descriptions?: string[];
   image_hints?: string[];
+  images?: ImageEvidence[];
 }
 
 export interface RetrievalStats {

@@ -145,6 +145,17 @@ export function normalizeCitationSources(sources: SourceInfo[]): SourceInfo[] {
       ...(Array.isArray(merged.image_captions) ? merged.image_captions : []),
       ...(Array.isArray(src.image_captions) ? src.image_captions : []),
     ].filter(Boolean));
+    const structuredImages = [
+      ...(Array.isArray(merged.images) ? merged.images : []),
+      ...(Array.isArray(src.images) ? src.images : []),
+    ];
+    const seenImageIds = new Set<string>();
+    merged.images = structuredImages.filter((image) => {
+      const imageId = String(image?.id || "").trim();
+      if (!imageId || seenImageIds.has(imageId)) return false;
+      seenImageIds.add(imageId);
+      return true;
+    });
   }
 
   return out;

@@ -23,6 +23,7 @@ import {
   stageServerAnswerReplacement,
 } from "@/features/qa/answer-replacement-state";
 import { takeStreamingFrameChunk } from "@/features/qa/streaming-output-buffer";
+import { composeAnswerDocumentMarkdown } from "@/features/qa/structured-answer-markdown";
 
 const quickQuestions: string[] = [];
 
@@ -56,7 +57,6 @@ type MarkdownShapeMetrics = {
   gfmTableBlocks: number;
   pipeHeavyLines: number;
   markdownImageCount: number;
-  structuredImageMarkerCount: number;
   length: number;
   orderedListLines: number;
   bulletListLines: number;
@@ -67,7 +67,6 @@ type MarkdownShapeMetrics = {
 function inspectMarkdownShape(markdown: string): MarkdownShapeMetrics {
   const text = String(markdown || "");
   const normalized = text.replace(/[｜丨│┃¦￨￤]/g, "|");
-  const lines = text.split("\n");
   const normalizedLines = normalized.split("\n");
   let gfmTableBlocks = 0;
   let pipeHeavyLines = 0;
@@ -85,9 +84,6 @@ function inspectMarkdownShape(markdown: string): MarkdownShapeMetrics {
   }
 
   const markdownImageCount = (text.match(/!\[[^\]]*]\([^)]+\)/g) || []).length;
-  const structuredImageMarkerCount = (
-    text.match(/\[\[\s*IMG\s*:\s*\d{1,2}-\d{1,2}(?:#\d{1,2})?\s*\]\]/gi) || []
-  ).length;
   const orderedListLines = (text.match(/^\s{0,3}\d+[.)]\s+\S+/gm) || []).length;
   const bulletListLines = (text.match(/^\s{0,3}[-*+]\s+\S+/gm) || []).length;
   const nestedOrderedListLines = (text.match(/^\s{4,}\d+[.)]\s+\S+/gm) || []).length;
@@ -97,7 +93,6 @@ function inspectMarkdownShape(markdown: string): MarkdownShapeMetrics {
     gfmTableBlocks,
     pipeHeavyLines,
     markdownImageCount,
-    structuredImageMarkerCount,
     length: text.trim().length,
     orderedListLines,
     bulletListLines,
@@ -122,9 +117,9 @@ function shouldAcceptAnswerReplacement(current: string, replacement: string): bo
     next.pipeHeavyLines >= Math.max(2, cur.pipeHeavyLines);
   if (tableDowngradedToPipes) return false;
 
-  // Reject when image-like anchors disappear completely after replacement.
-  const curImageLike = cur.markdownImageCount + cur.structuredImageMarkerCount;
-  const nextImageLike = next.markdownImageCount + next.structuredImageMarkerCount;
+  // Reject when rendered Markdown images disappear completely after replacement.
+  const curImageLike = cur.markdownImageCount;
+  const nextImageLike = next.markdownImageCount;
   if (curImageLike > 0 && nextImageLike === 0) return false;
 
   // Reject replacement that downgrades visible ordered structure into bullets.
@@ -321,6 +316,18 @@ export function QAView({
         onAnswer: (token) => {
           answerTokenBuffer += token;
           scheduleAnswerTokenFlush();
+        },
+        onAnswerDocument: (document, documentSources) => {
+          clearAnswerFlush();
+          const structuredMarkdown = composeAnswerDocumentMarkdown(document);
+          updateMessage(assistantId, (msg) =>
+            stageServerAnswerReplacement({
+              message: msg,
+              fullAnswer: structuredMarkdown,
+              replacedSources: documentSources,
+              accepted: true,
+            })
+          );
         },
         onAnswerReplaced: (fullAnswer, replacedSources) => {
           clearAnswerFlush();

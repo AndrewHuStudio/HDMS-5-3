@@ -1,11 +1,8 @@
-"""Regression tests for the image semantic hints fed into the LLM prompt.
+"""Regression tests for semantic hints attached to structured image evidence.
 
-The QA prompt lists an "图片目录（IMG 标记 -> 图片语义）" so the model can decide
-which paragraph deserves an ``[[IMG:N-M#K]]`` anchor.  Before these helpers the
-catalogue only had markdown-derived captions, which for OCR'd documents are
-content hashes like ``307b272.jpg`` — semantically empty, so the model never
-emitted an anchor and no image was ever injected.  The vision-model
-descriptions persisted on the chunk's ``enhanced_text`` are the real signal.
+Markdown-derived captions for OCR'd documents are often content hashes such as
+``307b272.jpg``. Vision descriptions persisted in ``enhanced_text`` provide the
+human-readable signal used by section-bound image records and their captions.
 """
 
 import sys

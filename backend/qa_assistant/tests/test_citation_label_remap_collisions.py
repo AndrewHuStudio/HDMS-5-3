@@ -93,6 +93,27 @@ class CitationLabelRemapCollisionTests(unittest.TestCase):
         self.assertEqual("1", labels[0])
         self.assertEqual(len(labels), len(set(labels)), f"duplicate labels: {labels}")
 
+    def test_structured_image_owner_tracks_source_label_remap(self):
+        sources = [
+            {
+                "citation_label": "1-2",
+                "chunk_id": "c2",
+                "images": [
+                    {
+                        "id": "img-a",
+                        "url": "/a.png",
+                        "caption": "退线图",
+                        "source_label": "1-2",
+                    }
+                ],
+            }
+        ]
+
+        apply_citation_remap_to_sources(sources, {"1-2": "1-1"})
+
+        self.assertEqual("1-1", sources[0]["citation_label"])
+        self.assertEqual("1-1", sources[0]["images"][0]["source_label"])
+
 
 if __name__ == "__main__":
     unittest.main()

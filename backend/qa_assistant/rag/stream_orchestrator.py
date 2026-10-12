@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, TYPE_C
 from core import config as app_config
 from rag import prompting as rag_prompting
 from rag import retrieval_mode as rag_retrieval_mode
+from rag.postprocess import answer_document as pp_answer_document
 from rag.postprocess import summary as pp_summary
 
 if TYPE_CHECKING:
@@ -136,21 +137,11 @@ def answer_question_stream(
 
     full_answer = "".join(full_answer_parts)
     if full_answer:
-        streamed_sources = sources
         finalized_answer, finalized_sources = service._finalize_answer_and_sources(
             full_answer, sources, question=question,
             missing_image_log="Streamed answer mentions figures but no image-bearing sources survived filtering.",
         )
-        if finalized_answer != full_answer:
-            can_replace, reject_reason = (should_emit_answer_replacement or (lambda _current, _replacement: (True, None)))(
-                full_answer, finalized_answer,
-            )
-            if can_replace:
-                yield ("answer_replaced", {"content": finalized_answer, "sources": finalized_sources})
-                sources = finalized_sources
-            else:
-                logger.warning("Skip answer_replaced due to degraded markdown shape: %s", reject_reason)
-                sources = streamed_sources
-        else:
-            sources = finalized_sources
+        sources = finalized_sources
+        answer_document = pp_answer_document.build_answer_document(finalized_answer, sources)
+        yield ("answer_document", {**answer_document, "sources": sources})
     yield ("done", {"model": service.llm_model, "context_used": bool(context)})

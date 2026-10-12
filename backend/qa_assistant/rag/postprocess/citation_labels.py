@@ -109,4 +109,8 @@ def apply_citation_remap_to_sources(
     ]
     for src, new_label in zip(sources, resolved):
         if new_label:
+            old_label = str(src.get("citation_label") or "").strip()
             src["citation_label"] = new_label
+            for image in src.get("images") or []:
+                if isinstance(image, dict) and str(image.get("source_label") or "").strip() == old_label:
+                    image["source_label"] = new_label

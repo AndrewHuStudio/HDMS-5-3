@@ -37,6 +37,11 @@
 - The current image boost is still necessary for recall: it queries Mongo text search and only enters its keyword-regex fallback on exceptions. The new protocol must fix the empty-success case or image-bearing evidence will never reach section binding.
 - `context_builder.py` currently flattens aligned image properties into parallel arrays and injects `[[IMG:...]]` catalogue lines into the model context. Replace this with a nested `images` collection carrying stable IDs while retaining the existing arrays only if other source UIs still need them.
 - `postprocess_answer` explicitly normalizes/remaps IMG anchors. Those steps can be removed once the frontend injection code is gone; citation normalization remains the canonical evidence-reference protocol.
+- Citation normalization can relabel sources (for example `1-2` to `1-1`); nested image ownership must be remapped in the same transaction or the answer-document validator will correctly reject every image on that source.
+- Model-authored Markdown images are not trustworthy placement data. The final document strips them and renders only server-owned image records, preventing copied context URLs from bypassing ownership validation.
+- The existing retrieval overview does not emit source citation labels, so it cannot consume/deduplicate images before the detailed cited sections receive them.
+- Source normalization and streamed/final source merging both need to preserve the nested `images` collection; regression coverage now pins both paths.
+- The current Markdown image component shows alt text only as accessibility metadata, so the structured compiler emits a visible caption immediately after each image to keep multiple images distinguishable.
 
 ## Baseline
 - Backend focused image/stream suite: 21 passed.

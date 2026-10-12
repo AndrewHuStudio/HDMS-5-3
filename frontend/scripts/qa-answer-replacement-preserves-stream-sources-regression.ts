@@ -33,6 +33,14 @@ const streamedSources: SourceInfo[] = [
     doc_id: "doc-c",
     image_urls: ["/rag/documents/doc-c/image?ref=images/layout.png"],
     image_names: ["layout.png"],
+    images: [
+      {
+        id: "img-layout",
+        url: "/rag/documents/doc-c/image?ref=images/layout.png",
+        caption: "医院布局图",
+        source_label: "3-1",
+      },
+    ],
   },
 ];
 
@@ -45,6 +53,14 @@ const finalReplacementSources: SourceInfo[] = [
     chunk_id: "chunk-a",
     doc_id: "doc-a",
   },
+  {
+    type: "document",
+    name: "医院建筑设计指南.pdf",
+    source: "vector_search",
+    citation_label: "3-1",
+    chunk_id: "chunk-c",
+    doc_id: "doc-c",
+  },
 ];
 
 const merged = mergeStreamingSources(streamedSources, finalReplacementSources);
@@ -56,6 +72,10 @@ assert(merged.some((s) => s.doc_id === "doc-c"), "expected image-bearing source 
 assert(
   merged.some((s) => s.doc_id === "doc-c" && s.image_urls?.includes("/rag/documents/doc-c/image?ref=images/layout.png")),
   "expected image metadata to survive source replacement",
+);
+assert(
+  merged.some((s) => s.doc_id === "doc-c" && s.images?.some((image) => image.id === "img-layout")),
+  "expected structured image evidence to survive source replacement",
 );
 
 console.log("qa-answer-replacement-preserves-stream-sources-regression passed");

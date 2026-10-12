@@ -303,6 +303,21 @@ _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
 _RAG_IMAGE_ROUTE_RE = re.compile(r"^/(?:api/)?rag/documents/[^/?#]+/image$", re.IGNORECASE)
 
 
+def strip_markdown_images(text: str) -> str:
+    """Remove model-authored image URLs while retaining useful alt text."""
+    if not text:
+        return text
+
+    parts = re.split(r"(```[\s\S]*?```|`[^`\n]*`)", text)
+    out: list[str] = []
+    for index, segment in enumerate(parts):
+        if index % 2 == 1:
+            out.append(segment)
+            continue
+        out.append(_MD_IMAGE_RE.sub(lambda match: str(match.group(1) or "").strip(), segment))
+    return "".join(out)
+
+
 def _normalize_rag_image_query_url(raw: str) -> str:
     """Best-effort normalization for rag image URLs that were math-corrupted."""
     url = (raw or "").strip()

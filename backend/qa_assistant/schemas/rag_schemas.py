@@ -29,6 +29,19 @@ class RAGChatRequest(BaseModel):
     )
 
 
+class ImageEvidence(BaseModel):
+    """One image that can be bound to an answer section."""
+
+    id: str = Field(..., description="Stable opaque image ID")
+    url: str = Field(..., description="Application image URL")
+    caption: str = Field(..., description="Human-readable image caption")
+    figure: Optional[str] = Field(None, description="Document figure label")
+    hint: Optional[str] = Field(None, description="Condensed semantic description")
+    source_label: str = Field(..., description="Owning source citation label")
+    doc_id: Optional[str] = Field(None, description="Owning document ID")
+    page: Optional[int] = Field(None, description="Best-effort document page")
+
+
 class SourceInfo(BaseModel):
     """Source information."""
 
@@ -58,6 +71,7 @@ class SourceInfo(BaseModel):
     image_captions: Optional[List[str]] = Field(None, description="Best-effort captions aligned with image_urls")
     image_descriptions: Optional[List[str]] = Field(None, description="Raw vision-model image descriptions aligned with image_urls")
     image_hints: Optional[List[str]] = Field(None, description="Condensed one-line semantic hints aligned with image_urls")
+    images: List[ImageEvidence] = Field(default_factory=list, description="Structured image evidence owned by this source")
 
 
 class RAGChatResponse(BaseModel):

@@ -250,6 +250,9 @@ def search_image_chunks_by_text(*, mongo, query: str, limit: int = 2) -> List[Di
     try:
         docs = mongo.text_search("chunks", q, limit=limit, filter_query={"has_image": True})
     except Exception:
+        docs = []
+
+    if not docs:
         try:
             keywords = extract_query_keywords_for_image_boost(q)
             if keywords:
