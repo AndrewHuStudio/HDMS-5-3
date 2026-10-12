@@ -97,6 +97,7 @@ jobs:
           }
 
           compose up -d --build --remove-orphans
+          compose restart nginx
 
           deadline=$((SECONDS + 180))
           while true; do

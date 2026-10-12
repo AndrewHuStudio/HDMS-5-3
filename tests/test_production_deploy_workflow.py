@@ -23,5 +23,6 @@ def test_production_workflow_preserves_server_state_and_verifies_health():
         "-f docker-compose.production.yml"
     ) in workflow
     assert "up -d --build --remove-orphans" in workflow
+    assert "compose restart nginx" in workflow
     assert "docker inspect" in workflow
     assert "healthy" in workflow
