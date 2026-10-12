@@ -23,6 +23,11 @@ jobs:
       PRODUCTION_KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
 
     steps:
+      - name: Check out pushed revision
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Validate deployment secrets
         shell: bash
         run: |
@@ -50,20 +55,40 @@ jobs:
           printf '%s\n' "$PRODUCTION_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
+      - name: Build verified deployment bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_ref="refs/heads/production-deploy"
+          trap 'git update-ref -d "$bundle_ref"' EXIT
+          git update-ref "$bundle_ref" "$GITHUB_SHA"
+          git bundle create production.bundle "$bundle_ref"
+          git bundle verify production.bundle
+
       - name: Deploy pushed main revision
         shell: bash
         run: |
           set -euo pipefail
+          bundle_path="/opt/hdms/.deployment-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bundle"
+          scp \
+            -i "$HOME/.ssh/production_key" \
+            -P "$PRODUCTION_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            production.bundle \
+            "${PRODUCTION_USER}@${PRODUCTION_HOST}:$bundle_path"
           ssh \
             -i "$HOME/.ssh/production_key" \
             -p "$PRODUCTION_PORT" \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            bash -s -- "$GITHUB_SHA" <<'REMOTE'
+            bash -s -- "$GITHUB_SHA" "$bundle_path" <<'REMOTE'
           set -euo pipefail
 
           expected_sha="$1"
+          bundle_path="$2"
+          trap 'rm -f -- "$bundle_path"' EXIT
           cd /opt/hdms
 
           if [ "$(git branch --show-current)" != "main" ]; then
@@ -78,23 +103,13 @@ jobs:
             exit 1
           fi
 
-          fetch_attempts=3
-          fetch_succeeded=0
-          for attempt in $(seq 1 "$fetch_attempts"); do
-            if git fetch origin main; then
-              fetch_succeeded=1
-              break
-            fi
-            if [ "$attempt" -lt "$fetch_attempts" ]; then
-              echo "git fetch attempt $attempt failed; retrying." >&2
-              sleep "$((attempt * 10))"
-            fi
-          done
-          if [ "$fetch_succeeded" -ne 1 ]; then
-            echo "Unable to fetch origin/main after $fetch_attempts attempts." >&2
+          if [ ! -f "$bundle_path" ]; then
+            echo "Deployment bundle is missing; refusing deployment." >&2
             exit 1
           fi
 
+          git fetch "$bundle_path" \
+            refs/heads/production-deploy:refs/remotes/origin/main
           remote_sha="$(git rev-parse origin/main)"
           if [ "$remote_sha" != "$expected_sha" ]; then
             echo "origin/main does not match the pushed revision; refusing deployment." >&2
