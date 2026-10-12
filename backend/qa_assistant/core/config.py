@@ -219,9 +219,7 @@ QA_FEEDBACK_ID_MESSAGE_PREFIX_LEN = _parse_int(
     max_value=64,
 )
 QA_LLM_TEMPERATURE = _parse_float(os.getenv("QA_LLM_TEMPERATURE", "0.3"), 0.3, min_value=0.0, max_value=2.0)
-QA_LLM_MAX_TOKENS = _parse_int(os.getenv("QA_LLM_MAX_TOKENS", "4096"), 4096, min_value=1)
 QA_LLM_TIMEOUT_SECONDS = _parse_int(os.getenv("QA_LLM_TIMEOUT_SECONDS", "60"), 60, min_value=1)
-QA_STREAM_MAX_TOKENS = _parse_int(os.getenv("QA_STREAM_MAX_TOKENS", "4096"), 4096, min_value=1)
 QA_CONTEXT_CHUNK_MAX_CHARS = _parse_int(os.getenv("QA_CONTEXT_CHUNK_MAX_CHARS", "0"), 0, min_value=0)
 QA_CONTEXT_QUOTE_MAX_CHARS = _parse_int(os.getenv("QA_CONTEXT_QUOTE_MAX_CHARS", "260"), 260, min_value=0)
 # Backward-compat safeguard:

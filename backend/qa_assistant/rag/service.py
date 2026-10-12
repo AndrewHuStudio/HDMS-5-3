@@ -243,10 +243,8 @@ class RAGService:
     def _stream_chat_completion(
         self,
         messages: List[Dict[str, str]],
-        *,
-        max_tokens: int,
     ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
-        """Stream one chat completion and emit thinking/answer events."""
+        """Stream answer content with model thinking disabled."""
         client = openai.OpenAI(
             base_url=self.llm_base_url,
             api_key=self.llm_api_key,
@@ -256,55 +254,30 @@ class RAGService:
             model=self.llm_model,
             messages=messages,
             temperature=app_config.QA_LLM_TEMPERATURE,
-            max_tokens=max_tokens,
             stream=True,
+            extra_body={"thinking": {"type": "disabled"}},
         )
 
-        in_think_tag = False
-        has_reasoning_content = False
-        thinking_done_emitted = False
+        answer_content_seen = False
+        finish_reason = None
 
         for chunk in stream:
             choice = chunk.choices[0] if chunk.choices else None
             if not choice:
                 continue
+            finish_reason = choice.finish_reason or finish_reason
 
-            delta = choice.delta
-            reasoning = getattr(delta, "reasoning_content", None)
-            if reasoning:
-                has_reasoning_content = True
-                yield ("thinking", {"content": reasoning})
+            content = choice.delta.content
+            if not content:
+                continue
+            answer_content_seen = True
+            yield ("answer", {"content": content})
 
-            content = delta.content
-            if content and not has_reasoning_content:
-                # Fallback parser for APIs that wrap reasoning in <think> tags.
-                while content:
-                    if not in_think_tag:
-                        idx = content.find("<think>")
-                        if idx == -1:
-                            yield ("answer", {"content": content})
-                            break
-                        if idx > 0:
-                            yield ("answer", {"content": content[:idx]})
-                        in_think_tag = True
-                        content = content[idx + 7:]
-                    else:
-                        idx = content.find("</think>")
-                        if idx == -1:
-                            yield ("thinking", {"content": content})
-                            break
-                        if idx > 0:
-                            yield ("thinking", {"content": content[:idx]})
-                        in_think_tag = False
-                        if not thinking_done_emitted:
-                            thinking_done_emitted = True
-                            yield ("thinking_done", {})
-                        content = content[idx + 8:]
-            elif content and has_reasoning_content:
-                if not thinking_done_emitted:
-                    thinking_done_emitted = True
-                    yield ("thinking_done", {})
-                yield ("answer", {"content": content})
+        if not answer_content_seen:
+            logger.error(
+                "Non-thinking LLM stream ended without answer content (finish_reason=%s).",
+                finish_reason or "unknown",
+            )
 
     def answer_question_stream(
         self,

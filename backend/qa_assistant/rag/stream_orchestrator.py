@@ -27,7 +27,7 @@ def answer_question_stream(
     top_k: int = app_config.QA_DEFAULT_TOP_K,
     should_emit_answer_replacement: Callable[[str, str], Tuple[bool, Optional[str]]] | None = None,
 ) -> Generator[StreamEvent, None, None]:
-    """Yield QA events, placing the retrieval overview after visible thinking."""
+    """Yield retrieval-grounded answer events without exposing model reasoning."""
     question = (question or "").strip()
     stream_start = time.perf_counter()
     logger.info("[TIMING] Stream started for question: %s...", question[:50])
@@ -97,28 +97,15 @@ def answer_question_stream(
             yield ("status", {"stage": "understanding", "message": "正在理解你的问题..."})
             prompt = service._build_prompt(question, context, history, retrieval_hint=None)
 
-        yield ("status", {"stage": "reasoning", "message": "正在进行智能研判..."})
         full_answer_parts: List[str] = []
-        overview_emitted = False
-        thinking_seen = False
+        if overview:
+            yield ("answer", {"content": overview})
+            full_answer_parts.append(overview)
+
+        yield ("status", {"stage": "generating", "message": "正在生成回答..."})
         first_answer_received = False
         llm_start = time.perf_counter()
-        for event_type, payload in service._stream_chat_completion(prompt, max_tokens=app_config.QA_STREAM_MAX_TOKENS):
-            if event_type == "thinking":
-                thinking_seen = True
-            if event_type == "thinking_done" and overview and not overview_emitted:
-                yield ("thinking_done", payload)
-                yield ("answer", {"content": overview})
-                full_answer_parts.append(overview)
-                overview_emitted = True
-                continue
-            if event_type == "answer" and overview and not overview_emitted:
-                # Some providers do not expose reasoning tokens; preserve a useful answer order.
-                if thinking_seen:
-                    yield ("thinking_done", {})
-                yield ("answer", {"content": overview})
-                full_answer_parts.append(overview)
-                overview_emitted = True
+        for event_type, payload in service._stream_chat_completion(prompt):
             if event_type == "answer":
                 piece = payload.get("content", "")
                 full_answer_parts.append(piece)

@@ -27,9 +27,7 @@ class _StableStreamingRAGService(RAGService):
     def _build_prompt(self, question, context, history=None, retrieval_hint=None, source_doc_nums=None, source_doc_required_labels=None):
         return [{"role": "user", "content": question}]
 
-    def _stream_chat_completion(self, messages, *, max_tokens):
-        yield ("thinking", {"content": "先分析约束。"})
-        yield ("thinking_done", {})
+    def _stream_chat_completion(self, messages):
         for chunk in ["## 设计要点\n\n", "- 首层界面连续\n", "- 二层连桥衔接"]:
             yield ("answer", {"content": chunk})
 
@@ -62,8 +60,8 @@ class StreamAnswerStabilityTests(unittest.TestCase):
             if name == "answer_document"
         ]
 
-        self.assertIn("thinking", event_names)
-        self.assertIn("thinking_done", event_names)
+        self.assertNotIn("thinking", event_names)
+        self.assertNotIn("thinking_done", event_names)
         self.assertIn("done", event_names)
         self.assertEqual(service.raw_answer, streamed_answer)
         self.assertNotIn("answer_replaced", event_names)

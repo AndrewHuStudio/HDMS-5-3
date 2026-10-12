@@ -8,7 +8,6 @@
  * - sources: 检索到的来源文档
  * - retrieval_stats: 检索统计信息
  * - graph: 知识图谱数据
- * - thinking: 思考过程 token
  * - answer: 答案 token
  * - answer_document: 服务端校验后的段落与图片绑定
  * - status: 状态更新
@@ -21,8 +20,6 @@ export interface SSECallbacks {
   onSources: (sources: SourceInfo[]) => void;
   onRetrievalStats: (stats: RetrievalStats) => void;
   onGraph: (data: SubgraphData) => void;
-  onThinking: (token: string) => void;
-  onThinkingDone?: () => void;
   onAnswer: (token: string) => void;
   onAnswerDocument?: (document: AnswerDocument, sources?: SourceInfo[]) => void;
   onAnswerReplaced?: (fullAnswer: string, sources?: SourceInfo[]) => void;
@@ -132,7 +129,7 @@ async function _nonStreamingFallback(
   requestId: string,
   log: (phase: SSEPhase, msg: string, extra?: Record<string, unknown>) => void,
 ): Promise<void> {
-  callbacks.onStatus("reasoning", "流式连接失败，正在使用备用通道...");
+  callbacks.onStatus("generating", "流式连接失败，正在使用备用通道...");
 
   const res = await fetch("/qa/chat", {
     method: "POST",
@@ -196,16 +193,11 @@ async function _streamChatOnce(
   const decoder = new TextDecoder();
   let buffer = "";
   let receivedDone = false;
-  let pendingThinkingToken = "";
   let pendingAnswerToken = "";
   let pendingEvent = "";
   let pendingDataLines: string[] = [];
 
   const flushTokenBuffers = () => {
-    if (pendingThinkingToken) {
-      callbacks.onThinking(pendingThinkingToken);
-      pendingThinkingToken = "";
-    }
     if (pendingAnswerToken) {
       callbacks.onAnswer(pendingAnswerToken);
       pendingAnswerToken = "";
@@ -236,13 +228,6 @@ async function _streamChatOnce(
             nodes: data.nodes || [],
             edges: data.edges || [],
           });
-          break;
-        case "thinking":
-          pendingThinkingToken += data.content || "";
-          break;
-        case "thinking_done":
-          flushTokenBuffers();
-          callbacks.onThinkingDone?.();
           break;
         case "status":
           flushTokenBuffers();

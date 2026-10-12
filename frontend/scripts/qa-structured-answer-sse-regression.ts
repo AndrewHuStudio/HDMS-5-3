@@ -30,7 +30,6 @@ async function main() {
     onSources: () => undefined,
     onRetrievalStats: () => undefined,
     onGraph: () => undefined,
-    onThinking: () => undefined,
     onAnswer: () => undefined,
     onAnswerDocument: (document) => { received = document; },
     onStatus: () => undefined,

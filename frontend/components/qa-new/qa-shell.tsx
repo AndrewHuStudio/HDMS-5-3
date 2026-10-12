@@ -1,31 +1,20 @@
 /**
  * QA Shell 主容器组件
  * 管理问答界面的消息列表、输入框、快捷问题、反馈、导出、知识图谱等功能，
- * 协调 Markdown 渲染、思考过程展示、引用面板等子组件。
+ * 协调 Markdown 渲染、引用面板等子组件。
  */
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ChevronDown, ChevronUp, ImagePlus, Send, Square, X } from "lucide-react";
-import { ThinkingProcess } from "@/components/qa-thinking";
-import { QAFeedback } from "@/components/qa-feedback";
 import { QAExportButton } from "@/components/qa-export-button";
-import { KnowledgeGraph } from "@/components/knowledge-graph";
 import type { ChatMessage } from "@/features/qa/types";
 import { cn } from "@/lib/utils";
-import {
-  buildAssistantRenderModel,
-  deriveAssistantRenderState,
-  resolveAnswerRenderPhase,
-} from "@/features/qa/render/assistant-render-state-machine";
-import { resolveAssistantAnswerMarkdown } from "@/features/qa/render/resolve-answer-markdown";
-import { splitAnswerSupplements } from "@/features/qa/render/answer-supplements";
 import { jumpToCitationOrigin } from "@/features/qa/citation-engine";
-import { QAMarkdownRenderer } from "./qa-markdown-renderer";
-import { useCitationState, QACitationSourcePanel } from "./qa-citation-source-panel";
+import { AssistantContent } from "./qa-assistant-content";
 
 interface QAShellProps {
   title?: string;
@@ -55,24 +44,6 @@ function useImageLightbox() {
   return { lightboxSrc, open, close };
 }
 
-/** Extract recommended questions from <!--RECOMMENDED_QUESTIONS ... --> block */
-function extractRecommendedQuestions(content: string): {
-  cleanContent: string;
-  questions: string[];
-} {
-  const pattern = /<!--RECOMMENDED_QUESTIONS\s*\n([\s\S]*?)-->/;
-  const match = content.match(pattern);
-  if (!match) return { cleanContent: content, questions: [] };
-
-  const questions = match[1]
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  const cleanContent = content.replace(pattern, "").trimEnd();
-  return { cleanContent, questions };
-}
-
 const INPUT_MIN_LINES = 1;
 const INPUT_MAX_LINES = 3;
 const INPUT_LINE_HEIGHT_PX = 22;
@@ -86,11 +57,6 @@ const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 
 interface CitationBackTarget {
   savedScrollTop: number;
-  originId: string | null;
-}
-
-interface CitationClickPayload {
-  label: string;
   originId: string | null;
 }
 
@@ -391,7 +357,6 @@ export function QAShell({
                         embedded={embedded}
                         precedingQuestion={precedingQuestion}
                         onFeedback={onFeedback}
-                        onSend={onSend}
                         onFillInput={onInputChange}
                         onImageClick={openLightbox}
                         onCitationJump={handleCitationJump}
@@ -553,235 +518,6 @@ export function QAShell({
             onClick={(e) => e.stopPropagation()}
           />
         </div>
-      )}
-    </div>
-  );
-}
-
-/** Renders assistant message: orchestrates markdown renderer, citation/source panel, thinking, graph, feedback. */
-function AssistantContent({
-  message,
-  embedded,
-  precedingQuestion,
-  onFeedback,
-  onSend,
-  onFillInput,
-  onImageClick,
-  onCitationJump,
-  scrollRef,
-}: {
-  message: ChatMessage;
-  embedded?: boolean;
-  precedingQuestion?: string;
-  onFeedback?: (messageId: string, feedback: "useful" | "not_useful") => void;
-  onSend?: (question?: string) => void;
-  onFillInput?: (value: string) => void;
-  onImageClick?: (src: string) => void;
-  onCitationJump?: (payload: CitationBackTarget) => void;
-  scrollRef?: React.RefObject<HTMLElement | null>;
-}) {
-  const sourceScrollRef = useRef<HTMLDivElement>(null);
-  const {
-    content,
-    stableMarkdown,
-    thinking,
-    sources,
-    retrievalStats,
-    feedback,
-    isStreaming,
-    thinkingDone,
-    finalizedByServer,
-  } = message;
-
-  // --- Citation state (isolated module) ---
-  const {
-    sourcesNormalized,
-    activeCitationLabel,
-    handleCitationSelect,
-    citationAnchorComponent,
-  } = useCitationState({
-    sources,
-    messageId: message.id,
-    scrollRef,
-    sourceScrollRef,
-    sourceTargetsEnabled: Boolean(!isStreaming && sources && sources.length > 0),
-    onCitationJump,
-  });
-
-  const handleCitationClickCapture = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const pill = target.closest("[data-citation-label]");
-    if (!(pill instanceof HTMLAnchorElement)) return;
-    if (pill.dataset.citationHandled === "true") return;
-
-    const label = pill.getAttribute("data-citation-label");
-    if (!label) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    handleCitationSelect({
-      label,
-      originId: pill.getAttribute("data-citation-origin-id"),
-    } satisfies CitationClickPayload);
-  }, [handleCitationSelect]);
-
-  // --- Render state derivation ---
-  const renderState = deriveAssistantRenderState(message);
-  const answerRenderPhase = resolveAnswerRenderPhase({
-    state: renderState,
-    isStreaming: Boolean(isStreaming),
-  });
-
-  const { cleanContent, questions: recommendedQuestions } = useMemo(
-    () => (isStreaming ? { cleanContent: content, questions: [] } : extractRecommendedQuestions(content)),
-    [content, isStreaming]
-  );
-
-  const answerMarkdown = useMemo(() => {
-    return resolveAssistantAnswerMarkdown({
-      content: cleanContent,
-      stableMarkdown,
-      sources: sourcesNormalized,
-      isStreaming: Boolean(isStreaming),
-      renderPhase: answerRenderPhase,
-      precedingQuestion,
-      finalizedByServer,
-    });
-  }, [stableMarkdown, cleanContent, sourcesNormalized, isStreaming, answerRenderPhase, precedingQuestion, finalizedByServer]);
-
-  const { markdown: mainAnswerMarkdown, supplements } = useMemo(
-    () => splitAnswerSupplements(answerMarkdown),
-    [answerMarkdown],
-  );
-
-  const hasThinkingTokens = Boolean((thinking || "").trim());
-  const renderModel = buildAssistantRenderModel({
-    state: renderState,
-    isStreaming: Boolean(isStreaming),
-    hasThinking: hasThinkingTokens,
-    hasAnswer: Boolean(content),
-    hasRetrievalStats: Boolean(retrievalStats),
-  });
-
-  // User expectation: show source panel only after full streaming completes.
-  const hasSourcePanel = Boolean(!isStreaming && sourcesNormalized && sourcesNormalized.length > 0);
-  const useSidebarSourceLayout = hasSourcePanel && !embedded;
-
-  return (
-    <div>
-      {renderModel.showThinking && (
-        <ThinkingProcess
-          thinking={thinking || ""}
-          isStreaming={!!isStreaming}
-          thinkingDone={!!thinkingDone}
-        />
-      )}
-
-      {/* Knowledge Graph Visualization */}
-      {message.subgraph && message.subgraph.nodes.length > 0 && (
-        <details className="my-2" open={!isStreaming}>
-          <summary className="cursor-pointer select-none text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-            知识图谱推理路径 ({message.subgraph.nodes.length} 个节点, {message.subgraph.edges.length} 条关系)
-          </summary>
-          <div className="mt-1 rounded-lg border border-border overflow-hidden">
-            <KnowledgeGraph
-              subgraph={message.subgraph}
-              isStreaming={!!isStreaming}
-              height={300}
-            />
-          </div>
-        </details>
-      )}
-
-      {renderModel.showAnswer && content ? (
-        <div
-          className={cn(
-            useSidebarSourceLayout && "mt-1 grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]"
-          )}
-          onClickCapture={handleCitationClickCapture}
-        >
-          {/* Markdown rendering (isolated module) */}
-          <div className="min-w-0">
-            <QAMarkdownRenderer
-              markdown={mainAnswerMarkdown}
-              componentOverrides={{ a: citationAnchorComponent }}
-              showStreamingCursor={renderModel.showStreamingCursor}
-              onImageClick={onImageClick}
-              isStreaming={isStreaming}
-            />
-
-            {supplements.length > 0 && (
-              <div className="mt-4 space-y-2">
-                {supplements.map((supplement) => (
-                  <section
-                    key={supplement.id}
-                    className="rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50 to-white px-4 py-3 shadow-[0_10px_24px_rgba(245,158,11,0.08)]"
-                  >
-                    <div className="mb-2 flex items-center gap-2">
-                      <span className="inline-flex h-6 items-center rounded-full bg-amber-100 px-2.5 text-[11px] font-semibold tracking-[0.02em] text-amber-800">
-                        {supplement.title}
-                      </span>
-                      <span className="text-[11px] text-amber-700/80">
-                        基于当前检索材料的边界提醒
-                      </span>
-                    </div>
-                    <QAMarkdownRenderer
-                      markdown={supplement.markdown}
-                      componentOverrides={{ a: citationAnchorComponent }}
-                      onImageClick={onImageClick}
-                      className="prose-sm prose-p:mb-0 prose-p:text-[13px] prose-p:leading-6"
-                    />
-                  </section>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Citation source panel (isolated module) */}
-          {hasSourcePanel && (
-            <QACitationSourcePanel
-              sources={sourcesNormalized}
-              messageId={message.id}
-              query={precedingQuestion}
-              activeCitationLabel={activeCitationLabel}
-              layout={useSidebarSourceLayout ? "sidebar" : "inline"}
-              sourceScrollRef={sourceScrollRef}
-            />
-          )}
-        </div>
-      ) : renderModel.showStreamingCursor ? (
-        <span className="inline-block h-4 w-0.5 animate-pulse bg-foreground" />
-      ) : null}
-
-      {/* Recommended questions */}
-      {!isStreaming && recommendedQuestions.length > 0 && (
-        <div className="mt-3 pt-2">
-          <p className="mb-1.5 text-xs text-muted-foreground">您可能还想了解：</p>
-          <div className="flex flex-wrap gap-1.5">
-            {recommendedQuestions.map((q) => (
-              <button
-                key={q}
-                type="button"
-                className="rounded-md border border-border/50 bg-card/80 px-3 py-1 text-xs text-muted-foreground shadow-sm transition-all hover:border-primary/40 hover:text-foreground hover:shadow"
-                onClick={() => onFillInput?.(q)}
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {content && !isStreaming && onFeedback && precedingQuestion && (
-        <QAFeedback
-          messageId={message.id}
-          question={precedingQuestion}
-          answer={content}
-          currentFeedback={feedback}
-          onFeedbackChange={(fb) => onFeedback(message.id, fb)}
-        />
       )}
     </div>
   );

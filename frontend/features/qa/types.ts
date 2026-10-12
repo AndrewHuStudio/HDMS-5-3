@@ -69,7 +69,6 @@ export interface RetrievalStats {
 export type AssistantRenderState =
   | "understanding"
   | "retrieving"
-  | "reasoning"
   | "answering"
   | "finalizing"
   | "done"
@@ -102,7 +101,6 @@ export interface ChatMessage {
   createdAt: string;
   stableMarkdown?: string;
   pendingFinalContent?: string;
-  thinking?: string;
   sources?: SourceInfo[];
   pendingFinalSources?: SourceInfo[];
   retrievalStats?: RetrievalStats;
@@ -110,7 +108,6 @@ export interface ChatMessage {
   subgraph?: SubgraphData;
   feedback?: "useful" | "not_useful";
   isStreaming?: boolean;
-  thinkingDone?: boolean;
   statusMessage?: string;
   statusStage?: string;
   finalizedByServer?: boolean;

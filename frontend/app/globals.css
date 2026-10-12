@@ -336,32 +336,8 @@
   animation-delay: 300ms;
 }
 
-.qa-thinking-ellipsis-dot {
-  display: inline-block;
-  width: 0.34rem;
-  height: 0.34rem;
-  border-radius: 999px;
-  background-color: color-mix(in oklab, var(--primary) 64%, var(--foreground) 36%);
-  animation: qa-inline-dot-pulse 1.15s ease-in-out infinite;
-}
-
-.qa-thinking-ellipsis-dot--1 {
-  animation-delay: 0ms;
-}
-
-.qa-thinking-ellipsis-dot--2 {
-  animation-delay: 150ms;
-}
-
-.qa-thinking-ellipsis-dot--3 {
-  animation-delay: 300ms;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .qa-inline-dot {
-    animation: none;
-  }
-  .qa-thinking-ellipsis-dot {
     animation: none;
   }
 }

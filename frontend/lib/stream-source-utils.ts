@@ -1,15 +1,6 @@
 ﻿import type { SourceInfo } from "../features/qa/types";
 import { normalizeCitationSources } from "./normalize-citation-sources";
 
-export const DEFAULT_THINKING_SECTION_HEADING = "## 思考过程";
-
-interface MergeThinkingArgs {
-  answer: string;
-  thinking?: string;
-  isStreaming?: boolean;
-  heading?: string;
-}
-
 const FIGURE_MENTION_RE = /[（(]?\s*(?:见)?图\s*([0-9]{1,2}(?:[.\-][0-9]{1,2}){0,3})\s*[)）]?/gu;
 const FIGURE_CAPTION_LINE_RE = /^\s*(?:FIGCAPTION\s+)?图\s*\d+(?:[.\-]\d+){0,3}\s*[：:.]/u;
 const FIGURE_LEGEND_LINE_RE = /^\s*[（(]?\s*(?:图示|图注|图例)\s*[：:]/u;
@@ -69,26 +60,6 @@ export function mergeStreamingSources(
   });
 
   return merged;
-}
-
-export function mergeThinkingIntoAnswer({ answer, thinking, isStreaming, heading }: MergeThinkingArgs): string {
-  const resolvedAnswer = answer || "";
-  if (isStreaming) {
-    return resolvedAnswer;
-  }
-
-  const thinkingText = (thinking || "").trim();
-  if (!thinkingText) {
-    return resolvedAnswer;
-  }
-
-  const sectionHeading = (heading || DEFAULT_THINKING_SECTION_HEADING).trim() || DEFAULT_THINKING_SECTION_HEADING;
-  if (resolvedAnswer.includes(sectionHeading) || resolvedAnswer.includes(thinkingText)) {
-    return resolvedAnswer;
-  }
-
-  const section = `${sectionHeading}\n\n${thinkingText}`;
-  return resolvedAnswer.trim() ? `${section}\n\n${resolvedAnswer}` : section;
 }
 
 export function collapseFigureMentions(text: string): string {

@@ -4,7 +4,7 @@
  * 管理 QA 助手的全局状态：
  * - 对话列表（conversations）、当前对话 ID
  * - 消息历史、流式状态、输入框内容
- * - 思考过程、来源引用、检索统计、知识图谱
+ * - 来源引用、检索统计、知识图谱
  * - 对话创建、切换、删除、消息追加等操作
  */
 import { create } from "zustand";
@@ -15,11 +15,6 @@ export interface QAPanelMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
-  thinking?: string;
-  /** Signal from SSE that the model's thinking phase has completed. */
-  thinkingDone?: boolean;
-  /** Internal buffer for answer tokens while thinking is still streaming (to avoid early "吐字"). */
-  pendingContent?: string;
   sources?: SourceInfo[];
   retrievalStats?: RetrievalStats;
   subgraph?: SubgraphData;

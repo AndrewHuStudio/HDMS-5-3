@@ -1,6 +1,6 @@
 /**
  * 问答视图主组件
- * 管理消息列表、流式接收 SSE 事件（thinking/answer/sources/done），
+ * 管理消息列表、流式接收 SSE 事件（answer/sources/done），
  * 并将状态通过 QAShell 渲染为聊天界面。
  */
 "use client";
@@ -226,7 +226,6 @@ export function QAView({
 
     // Create placeholder assistant message for streaming
     const assistantMsg = createMessage("assistant", "", {
-      thinking: "",
       sources: [],
       isStreaming: true,
       statusStage: "understanding",
@@ -248,13 +247,7 @@ export function QAView({
       answerTokenBuffer = remaining;
       updateMessage(assistantId, (msg) => ({
         ...msg,
-        // Keep answer hidden only when there is real, unfinished thinking text.
-        // If the model streams answer directly (no thinking_done event), we should
-        // still enter answering state to avoid "nothing shows until done".
-        renderState: transitionAssistantRenderState(msg.renderState, {
-          type: "answer",
-          holdDuringReasoning: Boolean((msg.thinking || "").trim()) && !msg.thinkingDone,
-        }),
+        renderState: transitionAssistantRenderState(msg.renderState, { type: "answer" }),
         content: msg.content + chunk,
       }));
 
@@ -296,21 +289,6 @@ export function QAView({
             statusStage: stage,
             statusMessage: message,
             renderState: transitionAssistantRenderState(msg.renderState, { type: "status", stage }),
-          }));
-        },
-        onThinking: (token) => {
-          updateMessage(assistantId, (msg) => ({
-            ...msg,
-            thinking: (msg.thinking || "") + token,
-            thinkingDone: false,
-            renderState: transitionAssistantRenderState(msg.renderState, { type: "thinking" }),
-          }));
-        },
-        onThinkingDone: () => {
-          updateMessage(assistantId, (msg) => ({
-            ...msg,
-            thinkingDone: true,
-            renderState: transitionAssistantRenderState(msg.renderState, { type: "thinking_done" }),
           }));
         },
         onAnswer: (token) => {
@@ -394,7 +372,6 @@ export function QAView({
                 })
               : undefined),
           isStreaming: false,
-          thinkingDone: true,
           statusStage: undefined,
           statusMessage: undefined,
           renderState: transitionAssistantRenderState(msg.renderState, { type: "done" }),

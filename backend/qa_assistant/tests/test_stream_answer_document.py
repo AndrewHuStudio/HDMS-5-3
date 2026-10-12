@@ -21,7 +21,7 @@ class StructuredStreamingService(RAGService):
     def _build_prompt(self, question, context, history=None, retrieval_hint=None, source_doc_nums=None, source_doc_required_labels=None):
         return [{"role": "user", "content": question}]
 
-    def _stream_chat_completion(self, messages, *, max_tokens):
+    def _stream_chat_completion(self, messages):
         yield "answer", {"content": "原始回答。"}
 
     def _finalize_answer_and_sources(self, answer, sources, *, question, missing_image_log):
