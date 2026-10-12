@@ -104,11 +104,14 @@ def answer_question_stream(
 
         yield ("status", {"stage": "generating", "message": "正在生成回答..."})
         first_answer_received = False
+        model_answer_received = False
         llm_start = time.perf_counter()
         for event_type, payload in service._stream_chat_completion(prompt):
             if event_type == "answer":
                 piece = payload.get("content", "")
                 full_answer_parts.append(piece)
+                if piece.strip():
+                    model_answer_received = True
                 if piece and not first_answer_received:
                     first_answer_received = True
                     logger.info(
@@ -117,6 +120,10 @@ def answer_question_stream(
                         (time.perf_counter() - stream_start) * 1000,
                     )
             yield (event_type, payload)
+        if not model_answer_received:
+            logger.error("LLM stream completed without an answer event.")
+            yield ("error", {"detail": "模型未返回有效答案，请稍后重试。"})
+            return
     except Exception as exc:
         logger.error("LLM streaming failed: %s", exc)
         yield ("error", {"detail": str(exc)})

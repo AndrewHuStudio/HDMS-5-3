@@ -33,6 +33,42 @@ export interface FinalizeStreamingAssistantMessageArgs {
   precedingQuestion?: string;
 }
 
+export interface FinalizeStreamingAssistantErrorArgs {
+  message: ChatMessage;
+  detail: string;
+  precedingQuestion?: string;
+}
+
+export function finalizeStreamingAssistantError(
+  args: FinalizeStreamingAssistantErrorArgs,
+): ChatMessage {
+  const { message, detail, precedingQuestion } = args;
+  const failureText = `请求失败：${detail}`;
+  const content = message.content.trim()
+    ? `${message.content.trimEnd()}\n\n> ${failureText}`
+    : failureText;
+  const sources = message.sources || [];
+
+  return {
+    ...message,
+    content,
+    stableMarkdown: captureVisibleAnswerMarkdown({
+      content,
+      sources,
+      isStreaming: false,
+      renderState: "error",
+      precedingQuestion,
+      finalizedByServer: message.finalizedByServer,
+    }),
+    isStreaming: false,
+    statusStage: undefined,
+    statusMessage: undefined,
+    renderState: transitionAssistantRenderState(message.renderState, { type: "error" }),
+    pendingFinalContent: undefined,
+    pendingFinalSources: undefined,
+  };
+}
+
 export function finalizeStreamingAssistantMessage(
   args: FinalizeStreamingAssistantMessageArgs,
 ): ChatMessage {

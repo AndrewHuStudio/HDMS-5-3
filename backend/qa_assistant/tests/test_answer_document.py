@@ -8,6 +8,7 @@ if str(QA_ROOT) not in sys.path:
     sys.path.insert(0, str(QA_ROOT))
 
 from rag.postprocess.answer_document import build_answer_document
+from rag.postprocess import markdown as pp_markdown
 
 
 class AnswerDocumentTests(unittest.TestCase):
@@ -72,6 +73,38 @@ class AnswerDocumentTests(unittest.TestCase):
         self.assertNotIn("![", document["sections"][0]["markdown"])
         self.assertNotIn("raw.png", document["sections"][0]["markdown"])
         self.assertEqual(["img-a"], [image["id"] for image in document["sections"][0]["images"]])
+
+    def test_multiline_model_image_with_nested_citation_is_removed_completely(self):
+        answer = """规划结论如下。[5-1]
+
+![（图3）：
+深圳湾超级总部基地核心规划范围示意图[5-1]](/rag/documents/doc-5/image?$ref=images/raw.jpg)
+
+后续正文。"""
+
+        document = build_answer_document(answer, [])
+        markdown = "\n\n".join(section["markdown"] for section in document["sections"])
+
+        self.assertNotIn("![", markdown)
+        self.assertNotIn("/rag/documents/", markdown)
+        self.assertNotIn("$ref=", markdown)
+        self.assertNotIn("深圳湾超级总部基地核心规划范围示意图", markdown)
+        self.assertIn("规划结论如下", markdown)
+        self.assertIn("后续正文", markdown)
+
+    def test_unclosed_image_marker_does_not_consume_later_prose_or_link(self):
+        source = (
+            "before ![unclosed alt\n\n"
+            "KEEP THIS PARAGRAPH\n\n"
+            "[normal link](https://example.com) after"
+        )
+
+        self.assertEqual(source, pp_markdown.strip_model_authored_markdown_images(source))
+
+    def test_model_image_url_with_parentheses_is_removed_without_debris(self):
+        source = "before ![alt](https://example.com/a_(b).png) after"
+
+        self.assertEqual("before  after", pp_markdown.strip_model_authored_markdown_images(source))
 
 
 if __name__ == "__main__":

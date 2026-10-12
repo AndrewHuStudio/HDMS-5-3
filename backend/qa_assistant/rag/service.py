@@ -250,34 +250,52 @@ class RAGService:
             api_key=self.llm_api_key,
         )
 
-        stream = client.chat.completions.create(
-            model=self.llm_model,
-            messages=messages,
-            temperature=app_config.QA_LLM_TEMPERATURE,
-            stream=True,
-            extra_body={"thinking": {"type": "disabled"}},
-        )
-
-        answer_content_seen = False
-        finish_reason = None
-
-        for chunk in stream:
-            choice = chunk.choices[0] if chunk.choices else None
-            if not choice:
-                continue
-            finish_reason = choice.finish_reason or finish_reason
-
-            content = choice.delta.content
-            if not content:
-                continue
-            answer_content_seen = True
-            yield ("answer", {"content": content})
-
-        if not answer_content_seen:
-            logger.error(
-                "Non-thinking LLM stream ended without answer content (finish_reason=%s).",
-                finish_reason or "unknown",
+        finish_reasons: List[str] = []
+        for attempt in range(1, 3):
+            stream = client.chat.completions.create(
+                model=self.llm_model,
+                messages=messages,
+                temperature=app_config.QA_LLM_TEMPERATURE,
+                stream=True,
+                extra_body={"thinking": {"type": "disabled"}},
             )
+
+            answer_content_seen = False
+            leading_whitespace: List[str] = []
+            finish_reason = None
+            for chunk in stream:
+                choice = chunk.choices[0] if chunk.choices else None
+                if not choice:
+                    continue
+                finish_reason = choice.finish_reason or finish_reason
+
+                content = choice.delta.content
+                if not content:
+                    continue
+                if not answer_content_seen:
+                    if not content.strip():
+                        leading_whitespace.append(content)
+                        continue
+                    answer_content_seen = True
+                    content = "".join(leading_whitespace) + content
+                yield ("answer", {"content": content})
+
+            finish_reasons.append(finish_reason or "unknown")
+            if answer_content_seen:
+                return
+            if attempt == 1:
+                logger.warning(
+                    "Non-thinking LLM stream returned no answer content; retrying once "
+                    "(finish_reason=%s).",
+                    finish_reasons[-1],
+                )
+
+        logger.error(
+            "Non-thinking LLM stream returned no answer content after retry "
+            "(finish_reasons=%s).",
+            ",".join(finish_reasons),
+        )
+        raise RuntimeError("模型未返回有效答案，请稍后重试。")
 
     def answer_question_stream(
         self,

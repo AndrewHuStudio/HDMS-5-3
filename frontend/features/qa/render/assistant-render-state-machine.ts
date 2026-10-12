@@ -83,6 +83,7 @@ export interface AssistantRenderModelInput {
 export interface AssistantRenderModel {
   showRetrievalStats: boolean;
   showAnswer: boolean;
+  showLoadingIndicator: boolean;
   showStreamingCursor: boolean;
 }
 
@@ -117,6 +118,7 @@ export function buildAssistantRenderModel(
   return {
     showRetrievalStats,
     showAnswer,
+    showLoadingIndicator: Boolean(input.isStreaming && !input.hasAnswer),
     showStreamingCursor: Boolean(input.isStreaming && showAnswer),
   };
 }

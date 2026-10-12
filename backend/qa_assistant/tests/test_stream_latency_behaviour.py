@@ -165,19 +165,18 @@ class StreamLatencyBehaviourTests(unittest.TestCase):
         answer_indexes = [i for i, (name, _) in enumerate(events) if name == "answer"]
         self.assertEqual(self._overview_index(events), min(answer_indexes))
 
-    def test_retrieval_overview_is_still_emitted_when_model_returns_no_answer(self):
+    def test_empty_model_answer_emits_error_without_done(self):
         class _EmptyService(_OverviewLatencyService):
             def _stream_chat_completion(self, messages):
-                if False:
-                    yield
+                yield "answer", {"content": " \n"}
 
         events = self._run_stream(self._attach_stub_retriever(_EmptyService()))
 
-        overview_index = self._overview_index(events)
-        done_index = next(i for i, (name, _) in enumerate(events) if name == "done")
-
-        self.assertLess(overview_index, done_index)
-        self.assertIn("answer_document", [name for name, _payload in events])
+        event_names = [name for name, _payload in events]
+        self.assertIn("answer", event_names)
+        self.assertIn("error", event_names)
+        self.assertNotIn("answer_document", event_names)
+        self.assertNotIn("done", event_names)
 
 
 if __name__ == "__main__":

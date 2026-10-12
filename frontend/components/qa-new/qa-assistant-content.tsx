@@ -75,6 +75,7 @@ export function AssistantContent({
     feedback,
     isStreaming,
     finalizedByServer,
+    statusMessage,
   } = message;
 
   const {
@@ -199,6 +200,20 @@ export function AssistantContent({
               sourceScrollRef={sourceScrollRef}
             />
           )}
+        </div>
+      ) : renderModel.showLoadingIndicator ? (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="flex min-h-7 items-center gap-2.5 text-xs text-muted-foreground"
+        >
+          <span className="flex items-center gap-1" aria-hidden="true">
+            <span className="qa-inline-dot qa-inline-dot--1" />
+            <span className="qa-inline-dot qa-inline-dot--2" />
+            <span className="qa-inline-dot qa-inline-dot--3" />
+          </span>
+          <span>{statusMessage || "正在查询答案..."}</span>
         </div>
       ) : renderModel.showStreamingCursor ? (
         <span className="inline-block h-4 w-0.5 animate-pulse bg-foreground" />

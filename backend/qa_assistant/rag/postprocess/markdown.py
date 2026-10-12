@@ -300,6 +300,7 @@ def extract_first_markdown_table(text: str):
 
 
 _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
+_FENCED_CODE_RE = re.compile(r"(```[\s\S]*?```|~~~[\s\S]*?~~~)")
 _RAG_IMAGE_ROUTE_RE = re.compile(r"^/(?:api/)?rag/documents/[^/?#]+/image$", re.IGNORECASE)
 
 
@@ -316,6 +317,88 @@ def strip_markdown_images(text: str) -> str:
             continue
         out.append(_MD_IMAGE_RE.sub(lambda match: str(match.group(1) or "").strip(), segment))
     return "".join(out)
+
+
+def _is_escaped(text: str, index: int) -> bool:
+    backslashes = 0
+    cursor = index - 1
+    while cursor >= 0 and text[cursor] == "\\":
+        backslashes += 1
+        cursor -= 1
+    return backslashes % 2 == 1
+
+
+def _model_image_token_end(text: str, start: int) -> int | None:
+    """Return the exclusive end of a balanced Markdown image token."""
+    bracket_depth = 1
+    cursor = start + 2
+    while cursor < len(text):
+        char = text[cursor]
+        if not _is_escaped(text, cursor):
+            if char == "[":
+                bracket_depth += 1
+            elif char == "]":
+                bracket_depth -= 1
+                if bracket_depth == 0:
+                    break
+        cursor += 1
+
+    if bracket_depth != 0 or cursor + 1 >= len(text) or text[cursor + 1] != "(":
+        return None
+
+    paren_depth = 1
+    cursor += 2
+    while cursor < len(text):
+        char = text[cursor]
+        if not _is_escaped(text, cursor):
+            if char == "(":
+                paren_depth += 1
+            elif char == ")":
+                paren_depth -= 1
+                if paren_depth == 0:
+                    return cursor + 1
+        cursor += 1
+    return None
+
+
+def _strip_model_images_from_segment(text: str) -> str:
+    output: list[str] = []
+    copy_from = 0
+    search_from = 0
+    while True:
+        start = text.find("![", search_from)
+        if start < 0:
+            output.append(text[copy_from:])
+            return "".join(output)
+        if _is_escaped(text, start):
+            search_from = start + 2
+            continue
+
+        end = _model_image_token_end(text, start)
+        if end is None:
+            search_from = start + 2
+            continue
+        output.append(text[copy_from:start])
+        copy_from = end
+        search_from = end
+
+
+def strip_model_authored_markdown_images(text: str) -> str:
+    """Remove model-authored image tokens, including malformed nested alt text.
+
+    Structured answer images are supplied separately from validated evidence.
+    Model output can include citations inside an image alt (``[5-1]``), which is
+    invalid Markdown and is not matched by the conservative general sanitizer.
+    Preserve fenced examples but remove the complete token everywhere else.
+    """
+    if not text:
+        return text
+
+    parts = _FENCED_CODE_RE.split(text)
+    return "".join(
+        segment if index % 2 == 1 else _strip_model_images_from_segment(segment)
+        for index, segment in enumerate(parts)
+    )
 
 
 def _normalize_rag_image_query_url(raw: str) -> str:

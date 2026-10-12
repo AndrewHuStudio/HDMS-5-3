@@ -68,7 +68,7 @@ def build_answer_document(answer: str, sources: List[Dict[str, Any]]) -> Dict[st
     sections: List[Dict[str, Any]] = []
 
     for index, block in enumerate(_split_markdown_blocks(answer), start=1):
-        clean_block = pp_markdown.strip_markdown_images(block)
+        clean_block = pp_markdown.strip_model_authored_markdown_images(block)
         cited = pp_citations.extract_citation_labels(clean_block)
         labels = [label for label in source_order if label in cited]
         images: List[Dict[str, Any]] = []

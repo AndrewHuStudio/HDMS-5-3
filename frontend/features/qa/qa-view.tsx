@@ -19,6 +19,7 @@ import {
 } from "@/features/qa/render/assistant-render-state-machine";
 import { captureVisibleAnswerMarkdown } from "@/features/qa/render/resolve-answer-markdown";
 import {
+  finalizeStreamingAssistantError,
   finalizeStreamingAssistantMessage,
   stageServerAnswerReplacement,
 } from "@/features/qa/answer-replacement-state";
@@ -329,26 +330,13 @@ export function QAView({
         },
         onError: (detail) => {
           clearAnswerFlush();
-          updateMessage(assistantId, (msg) => ({
-            ...msg,
-            content: msg.content || `Error: ${detail}`,
-            stableMarkdown:
-              msg.stableMarkdown ||
-              (msg.content
-                ? captureVisibleAnswerMarkdown({
-                    content: msg.content,
-                    sources: msg.sources || [],
-                    isStreaming: Boolean(msg.isStreaming),
-                    renderState: msg.renderState,
-                    precedingQuestion: question,
-                    finalizedByServer: msg.finalizedByServer,
-                  })
-                : undefined),
-            isStreaming: false,
-            statusStage: undefined,
-            statusMessage: undefined,
-            renderState: transitionAssistantRenderState(msg.renderState, { type: "error" }),
-          }));
+          updateMessage(assistantId, (msg) =>
+            finalizeStreamingAssistantError({
+              message: msg,
+              detail,
+              precedingQuestion: question,
+            })
+          );
         },
       }, streamAbortController.signal);
     } catch (error) {
@@ -383,12 +371,13 @@ export function QAView({
       clearAnswerFlush();
       const detail =
         error instanceof Error ? error.message : "请求失败";
-      updateMessage(assistantId, (msg) => ({
-        ...msg,
-        content: msg.content || `请求失败：${detail}`,
-        isStreaming: false,
-        renderState: transitionAssistantRenderState(msg.renderState, { type: "error" }),
-      }));
+      updateMessage(assistantId, (msg) =>
+        finalizeStreamingAssistantError({
+          message: msg,
+          detail,
+          precedingQuestion: question,
+        })
+      );
     } finally {
       clearAnswerFlush();
       if (activeAbortControllerRef.current === streamAbortController) {
