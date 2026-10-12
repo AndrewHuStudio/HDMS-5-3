@@ -55,14 +55,36 @@ jobs:
           printf '%s\n' "$PRODUCTION_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
+      - name: Read production base revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_sha="$(
+            ssh \
+              -i "$HOME/.ssh/production_key" \
+              -p "$PRODUCTION_PORT" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              "$PRODUCTION_USER@$PRODUCTION_HOST" \
+              'cd /opt/hdms && git rev-parse HEAD'
+          )"
+          git rev-parse --verify "$base_sha^{commit}"
+          if ! git merge-base --is-ancestor "$base_sha" "$GITHUB_SHA"; then
+            echo "Production revision is not an ancestor of the pushed revision." >&2
+            exit 1
+          fi
+          echo "PRODUCTION_BASE_SHA=$base_sha" >> "$GITHUB_ENV"
+
       - name: Build verified deployment bundle
+        if: env.PRODUCTION_BASE_SHA != github.sha
         shell: bash
         run: |
           set -euo pipefail
           bundle_ref="refs/heads/production-deploy"
           trap 'git update-ref -d "$bundle_ref"' EXIT
           git update-ref "$bundle_ref" "$GITHUB_SHA"
-          git bundle create production.bundle "$bundle_ref"
+          git bundle create production.bundle \
+            "$bundle_ref" "^$PRODUCTION_BASE_SHA"
           git bundle verify production.bundle
 
       - name: Deploy pushed main revision
@@ -70,24 +92,28 @@ jobs:
         run: |
           set -euo pipefail
           bundle_path="/opt/hdms/.deployment-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bundle"
-          scp \
-            -i "$HOME/.ssh/production_key" \
-            -P "$PRODUCTION_PORT" \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            production.bundle \
-            "${PRODUCTION_USER}@${PRODUCTION_HOST}:$bundle_path"
+          if [ "$PRODUCTION_BASE_SHA" != "$GITHUB_SHA" ]; then
+            scp \
+              -i "$HOME/.ssh/production_key" \
+              -P "$PRODUCTION_PORT" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              production.bundle \
+              "${PRODUCTION_USER}@${PRODUCTION_HOST}:$bundle_path"
+          fi
           ssh \
             -i "$HOME/.ssh/production_key" \
             -p "$PRODUCTION_PORT" \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            bash -s -- "$GITHUB_SHA" "$bundle_path" <<'REMOTE'
+            bash -s -- \
+              "$GITHUB_SHA" "$PRODUCTION_BASE_SHA" "$bundle_path" <<'REMOTE'
           set -euo pipefail
 
           expected_sha="$1"
-          bundle_path="$2"
+          base_sha="$2"
+          bundle_path="$3"
           trap 'rm -f -- "$bundle_path"' EXIT
           cd /opt/hdms
 
@@ -103,20 +129,27 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f "$bundle_path" ]; then
-            echo "Deployment bundle is missing; refusing deployment." >&2
-            exit 1
-          fi
+          current_sha="$(git rev-parse HEAD)"
+          if [ "$current_sha" != "$expected_sha" ]; then
+            if [ "$current_sha" != "$base_sha" ]; then
+              echo "Production revision changed while preparing deployment." >&2
+              exit 1
+            fi
+            if [ ! -f "$bundle_path" ]; then
+              echo "Deployment bundle is missing; refusing deployment." >&2
+              exit 1
+            fi
 
-          git fetch "$bundle_path" \
-            refs/heads/production-deploy:refs/remotes/origin/main
-          remote_sha="$(git rev-parse origin/main)"
-          if [ "$remote_sha" != "$expected_sha" ]; then
-            echo "origin/main does not match the pushed revision; refusing deployment." >&2
-            exit 1
-          fi
+            git fetch "$bundle_path" \
+              refs/heads/production-deploy:refs/remotes/origin/main
+            remote_sha="$(git rev-parse origin/main)"
+            if [ "$remote_sha" != "$expected_sha" ]; then
+              echo "origin/main does not match the pushed revision; refusing deployment." >&2
+              exit 1
+            fi
 
-          git merge --ff-only origin/main
+            git merge --ff-only origin/main
+          fi
           deployed_sha="$(git rev-parse HEAD)"
           if [ "$deployed_sha" != "$expected_sha" ]; then
             echo "Production checkout did not reach the pushed revision." >&2
