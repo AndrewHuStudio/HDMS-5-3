@@ -15,6 +15,8 @@ def test_production_workflow_preserves_server_state_and_verifies_health():
     assert "branches: [main]" in workflow
     assert "git status --porcelain --untracked-files=no" in workflow
     assert "git clean" not in workflow
+    assert "fetch_attempts=3" in workflow
+    assert 'sleep "$((attempt * 10))"' in workflow
     assert "git merge --ff-only" in workflow
     assert "origin/main" in workflow
     assert "GITHUB_SHA" in workflow

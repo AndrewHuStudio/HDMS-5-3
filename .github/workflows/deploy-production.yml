@@ -78,7 +78,23 @@ jobs:
             exit 1
           fi
 
-          git fetch origin main
+          fetch_attempts=3
+          fetch_succeeded=0
+          for attempt in $(seq 1 "$fetch_attempts"); do
+            if git fetch origin main; then
+              fetch_succeeded=1
+              break
+            fi
+            if [ "$attempt" -lt "$fetch_attempts" ]; then
+              echo "git fetch attempt $attempt failed; retrying." >&2
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ "$fetch_succeeded" -ne 1 ]; then
+            echo "Unable to fetch origin/main after $fetch_attempts attempts." >&2
+            exit 1
+          fi
+
           remote_sha="$(git rev-parse origin/main)"
           if [ "$remote_sha" != "$expected_sha" ]; then
             echo "origin/main does not match the pushed revision; refusing deployment." >&2
